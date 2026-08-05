@@ -18,7 +18,10 @@ export interface Environment {
   key: THREE.SpotLight;
   /** The soft strip over the empty playing area. No shadows. */
   aisle: THREE.SpotLight[];
-  wash: THREE.SpotLight;
+  /** Cold light on the two long walls, which frame left and frame right look down. */
+  colonnade: THREE.SpotLight[];
+  /** The end wall, and only the end wall. */
+  wash: THREE.SpotLight[];
   envTexture: THREE.Texture | null;
   /** Re-assert scene-level atmosphere. Cheap; called once a frame from render(). */
   apply(scene: THREE.Scene): void;
@@ -93,25 +96,36 @@ export function createEnvironment(world: World): Environment {
   const group = new THREE.Group();
   group.name = 'lighting-environment';
 
-  // A hemisphere light has no falloff: it grazes the far colonnade exactly as hard as it
-  // grazes the near kerb, so every metre of stone in frame comes back legible and
-  // nothing is ever allowed to be unlit. Measured against the reference's picture area
-  // that showed up as deep shadow living almost entirely in the vignette ring (0.284 of
-  // the top third) and nowhere at all in the mid band (0.000 across all six cells, where
-  // the film runs 0.121/0.168/0.001/0.000/0.054/0.237). The blacks were in the lens
-  // instead of in the room. This is now a floor, not a fill — enough to keep material
-  // response alive, far too little to describe anything on its own.
+  // The soft cool ambient, and it is meant to be the room's dominant light — the brief is
+  // explicit that there is "no hard key" and that this is what models every piece.
+  //
+  // It had been cut to 0.15 chasing a deep-shadow target that turns out to be an artefact
+  // of how the two images are measured. `tools/metrics.mjs` reads whole files: our render
+  // is 1920x804 of pure picture, while the reference frame is 1920x1080 with 274 rows of
+  // letterbox. Those bars are 25.4% of the reference's pixels and every one of them is
+  // literal black, so they alone account for 0.254 of its 0.331 "fracDeepShadow" and drag
+  // its "meanSaturation" from 0.323 down to 0.242. Cropped to picture on both sides the
+  // real comparison inverts: the film is at 0.104 deep shadow and we were at 0.190. The
+  // room was already twice as black as the film and being pushed blacker.
   const hemi = new THREE.HemisphereLight(
     new THREE.Color(COLD.sky),
     new THREE.Color(COLD.ground),
-    0.15,
+    0.48,
   );
   hemi.position.set(0, 18, 0);
   group.add(hemi);
 
-  // Effectively off. A flat ambient term is the one light in the rig that cannot cast a
-  // shadow or fall off, so every unit of it is a unit of "nothing in frame reaches black".
-  const ambient = new THREE.AmbientLight(new THREE.Color(COLD.ambient), 0.008);
+  // A real floor under the blacks, which is the one thing a hemisphere light cannot give.
+  // The shot fires down the room from OUTSIDE the west wall, so the two vertical masses
+  // that bound frame left and frame right are the near piers of that wall, seen from the
+  // wrong side: their visible faces point at the lens and away from every source in the
+  // room, and no amount of light hung over the board will ever touch them. They came back
+  // at RGB 6,7,8 — literally the void colour — and took the outer grid columns to 0.45 and
+  // 0.76 deep shadow where the film has 0.19 and 0.20. In the film those same near piers
+  // are dim but modelled: you can read the fluting on them. A flat term is the honest way
+  // to say "this room has been burning for a thousand years and the soot on the walls
+  // still returns something", and at this level it lands them just clear of the floor.
+  const ambient = new THREE.AmbientLight(new THREE.Color(COLD.ambient), 0.045);
   group.add(ambient);
 
   // Not a key in the dramatic sense — an enormous soft pool of cold light hanging over
@@ -127,7 +141,7 @@ export function createEnvironment(world: World): Environment {
   // to cover the armies and the aisles behind them, so the lateral falloff that separates
   // board from room never happened. Tightening the cone and lengthening the penumbra puts
   // the light on the marble and lets the ranks sit on the shoulder of it.
-  const key = new THREE.SpotLight(new THREE.Color(COLD.key), 470, 0, 0.45, 0.6, 1.0);
+  const key = new THREE.SpotLight(new THREE.Color(COLD.key), 350, 0, 0.45, 0.6, 1.0);
   key.position.set(-2.5, 27, 1.5);
   key.target.position.set(0, 0, 0);
   group.add(key);
@@ -148,13 +162,59 @@ export function createEnvironment(world: World): Environment {
   // They cast no shadows; the key remains the only shadow-caster.
   const aisle: THREE.SpotLight[] = [];
   for (const ax of [-7.5, 0, 7.5]) {
-    const s = new THREE.SpotLight(new THREE.Color(COLD.key), 300, 0, 0.28, 0.85, 1.0);
+    const s = new THREE.SpotLight(new THREE.Color(COLD.key), 205, 0, 0.28, 0.85, 1.0);
     s.position.set(ax, 20, 0);
     s.target.position.set(ax, 0, 0);
     s.castShadow = false;
     group.add(s);
     group.add(s.target);
     aisle.push(s);
+  }
+
+  // The colonnade. `wide-establishing` puts the camera outside the west wall at x = -23.5
+  // looking down +x, so frame left and frame right are the two LONG walls (z = -19 and
+  // z = +19) seen in steep perspective — and only their far halves, from about x = 0 to
+  // the east wall at x = 15.5, are inside the 79-degree horizontal field at all.
+  //
+  // In the reference those piers are the content of the top band: cold, modelled, clearly
+  // readable fluting running the full height of frame, with the odd flame at their feet.
+  // Ours were void. Nothing in the rig reached them — every source above was aimed at the
+  // board, and a flame's two-and-a-half-metre pool cannot cross ten metres of floor. So
+  // the whole upper third of the picture had no light in it at all, which is why our top
+  // corners came back 69% and 79% deep black against the film's 19% and 20%, and why we
+  // read 12 points short on the fraction of frame that is cool: the film's cool pixels are
+  // largely THIS, lit stone, and ours were below the threshold where a pixel counts as
+  // any colour at all.
+  //
+  // Two per wall, and they are deliberately different lights.
+  //
+  // The first hangs out in the room at the far end and aims back into the masonry: it is
+  // what puts tone on the wall at all. The second is a long raking throw from the camera's
+  // end, almost parallel to the wall. That one matters because the piers stand a metre and
+  // a half proud of it and the camera, sitting off to one side, sees their -x faces: a
+  // light coming from the room's far end lights the faces we CANNOT see and leaves every
+  // visible one flat black. The rake lights the faces we can, and — because it skims —
+  // leaves the bays between piers unlit. That alternation of lit shaft and black bay is
+  // what the film's frame edges are made of, and it is where the film keeps its shadow:
+  // its outer grid columns hold 0.19/0.16/0.07 and 0.20/0.18/0.15 deep shadow top to
+  // bottom, spread through the whole height, not dumped in a ring at the top.
+  const colonnade: THREE.SpotLight[] = [];
+  for (const sz of [-1, 1] as const) {
+    const fill = new THREE.SpotLight(new THREE.Color(COLD.sky), 780, 21.0, 0.80, 0.92, 2.0);
+    fill.position.set(10.2, 10.6, sz * 11.8);
+    fill.target.position.set(7.4, 5.2, sz * 19.6);
+    fill.castShadow = false;
+    group.add(fill);
+    group.add(fill.target);
+    colonnade.push(fill);
+
+    const rake = new THREE.SpotLight(new THREE.Color(COLD.sky), 1350, 34.0, 0.40, 0.80, 2.0);
+    rake.position.set(-11.5, 10.4, sz * 16.2);
+    rake.target.position.set(9.0, 4.4, sz * 19.0);
+    rake.castShadow = false;
+    group.add(rake);
+    group.add(rake.target);
+    colonnade.push(rake);
   }
 
   if (world.quality === 'high') {
@@ -179,12 +239,24 @@ export function createEnvironment(world: World): Environment {
   // shadow) because the end wall above the rubble heap is genuinely lit. Ours was 0.089.
   // The note that "the ceiling is a total void" is true of the vault, which is above this
   // frame line; what is actually at the top of this frame is lit masonry.
-  const wash = new THREE.SpotLight(new THREE.Color(COLD.sky), 2200, 26, 0.70, 0.65, 2.0);
-  wash.position.set(2.0, 12.5, 0);
-  wash.target.position.set(CHAMBER.halfWidth, 6.5, 0);
-  wash.castShadow = false;
-  group.add(wash);
-  group.add(wash.target);
+  //
+  // One cone could not do it. The end wall is 38 m wide and the camera, sitting out at
+  // x = -23.5, sees the whole of it: it projects across the middle 1160 pixels of frame
+  // and — because the top of frame at that distance is only 9 m off the floor — it fills
+  // the entire top of the picture there. A single 40-degree cone hung 15 m off it lit a
+  // 550-pixel strip of that and left the rest of the end of the room black, which is most
+  // of why our top band measured 0.087/0.092 mean luminance against the film's
+  // 0.155/0.218. Three overlapping cones cover the wall corner to corner.
+  const wash: THREE.SpotLight[] = [];
+  for (const wz of [-11.5, 0, 11.5]) {
+    const s = new THREE.SpotLight(new THREE.Color(COLD.sky), 1780, 24, 0.62, 0.68, 2.0);
+    s.position.set(2.6, 9.4, wz * 0.55);
+    s.target.position.set(CHAMBER.halfWidth, 5.4, wz);
+    s.castShadow = false;
+    group.add(s);
+    group.add(s.target);
+    wash.push(s);
+  }
 
   const background = new THREE.Color(COLD.voidColor);
   const envTexture = buildEnv(world.renderer);
@@ -195,6 +267,7 @@ export function createEnvironment(world: World): Environment {
     ambient,
     key,
     aisle,
+    colonnade,
     wash,
     envTexture,
     apply(scene: THREE.Scene) {
@@ -210,7 +283,7 @@ export function createEnvironment(world: World): Environment {
         // contributing diffuse to the far piers at full strength and helping hold the
         // whole frame off the floor. Kept only for the broad specular the polished marble
         // needs, which is what it is actually here for.
-        scene.environmentIntensity = 0.10;
+        scene.environmentIntensity = 0.16;
       }
     },
     dispose() {
@@ -218,7 +291,8 @@ export function createEnvironment(world: World): Environment {
       ambient.dispose();
       key.dispose();
       for (const s of aisle) s.dispose();
-      wash.dispose();
+      for (const s of colonnade) s.dispose();
+      for (const s of wash) s.dispose();
       envTexture?.dispose();
     },
   };

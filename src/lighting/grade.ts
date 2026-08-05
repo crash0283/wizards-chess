@@ -19,9 +19,21 @@ export const GradeShader = {
   name: 'ChamberGrade',
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
-    uExposure: { value: 0.80 },
+    uExposure: { value: 0.725 },
     uAspect: { value: 2.388 },
-    uCA: { value: 0.0035 },
+    /**
+     * Chromatic aberration. This used to sample the SHARP buffer once per channel at
+     * +off / 0 / -off, which at the frame edge is a five-pixel spread. Aim that at a
+     * sub-pixel repeating pattern — the board's inlaid border strip is exactly one — and
+     * the three channels land on three different phases of the stripe, so the kerb came
+     * back covered in saturated single-pixel red/green/blue confetti. That was the
+     * "iridescent rainbow speckle" along the kerb and the lower-left edge.
+     *
+     * The fringe is now built as a difference of *blurred* taps (see `blur4` below), so
+     * it carries only the low-frequency part of the split — which is all a real lens
+     * fringe is — and cannot resolve the stripe at all.
+     */
+    uCA: { value: 0.0009 },
     /** One texel, so the diffusion tap radius is in pixels rather than in UV. */
     uTexel: { value: new THREE.Vector2(1 / 1920, 1 / 804) },
     /**
@@ -34,19 +46,26 @@ export const GradeShader = {
      */
     uDiffusion: { value: 0.30 },
     /**
-     * Eased off hard. Measured on the reference's picture area the top corners sit at a
-     * deep-shadow fraction of 0.219 and 0.280; ours were at 0.488 and 0.782. Almost all
-     * of our black was manufactured by this vignette rather than by anything in the room,
-     * which is the tell: a dark ring around a frame that is otherwise uniformly legible
-     * reads as a filter, where the reference's black is unlit architecture and lands in
-     * irregular patches wherever no fire reaches.
+     * Eased off again, and this time far enough to matter. On a like-for-like picture-area
+     * comparison (the reference's letterbox bars stripped, so both images are 1920x804 of
+     * actual picture) the frame divides into a 4x3 grid like this, deep-shadow fraction:
+     *
+     *            reference                     ours, before
+     *   top    0.189 0.039 0.014 0.195     0.694 0.174 0.143 0.788
+     *   mid    0.157 0.037 0.013 0.181     0.002 0.000 0.000 0.209
+     *   bottom 0.066 0.020 0.024 0.152     0.001 0.000 0.000 0.074
+     *
+     * Every black pixel we had was in the top band and the outer edges — the shape of this
+     * vignette — while the film spreads a little black through all twelve cells and keeps
+     * its top corners at a fifth, not four fifths. The corners were being manufactured
+     * here and the room was not being allowed to make any of its own.
      */
-    uVigStrength: { value: 0.44 },
-    uVigInner: { value: 0.44 },
+    uVigStrength: { value: 0.22 },
+    uVigInner: { value: 0.52 },
     uVigOuter: { value: 0.95 },
     uVigAspect: { value: 1.25 },
-    uLift: { value: 0.94 },
-    uContrast: { value: 0.99 },
+    uLift: { value: 0.96 },
+    uContrast: { value: 1.00 },
     /**
      * Saturation in the deep shadows. Less neutral than we had it: the reference's own
      * blacks still carry colour. Its per-region saturation never drops below 0.229 and
@@ -57,10 +76,16 @@ export const GradeShader = {
      */
     uSatShadow: { value: 0.40 },
     /** Saturation from the mid-tones up, where the cold marble has to read blue. */
-    uSaturation: { value: 1.08 },
+    uSaturation: { value: 1.03 },
     uSatRamp: { value: new THREE.Vector2(0.03, 0.28) },
-    /** Cold DI balance. Applied to everything the flames are not already warming. */
-    uCoolBalance: { value: new THREE.Vector3(0.968, 1.013, 1.027) },
+    /**
+     * Cold DI balance, pushed further apart. On the picture-area comparison the film has
+     * 43.5% of its pixels reading cool (blue channel clear of red) against our 31.3%,
+     * and 13.9% reading warm against our 18.2% — the single largest colour gap in the
+     * frame, and one the whole-frame numbers hid because a quarter of the reference's
+     * pixels are letterbox and count as neither.
+     */
+    uCoolBalance: { value: new THREE.Vector3(0.940, 1.012, 1.048) },
     uShadowTint: { value: new THREE.Vector3(0.004, 0.006, 0.011) },
     uHighlightTint: { value: new THREE.Vector3(0.006, 0.004, -0.004) },
     /** Print black: the picture's floor, which is never literal zero. */
@@ -104,25 +129,38 @@ float hash21(vec2 p){
   return fract((p3.x + p3.y) * p3.z);
 }
 
+/** Four diagonal taps ~1.35 texels out. Low-passes away anything at pixel pitch. */
+vec3 blur4(vec2 uv){
+  vec2 a = uTexel * 1.35;
+  return 0.25 * (texture2D(tDiffuse, uv + vec2( a.x,  a.y)).rgb
+               + texture2D(tDiffuse, uv + vec2(-a.x,  a.y)).rgb
+               + texture2D(tDiffuse, uv + vec2( a.x, -a.y)).rgb
+               + texture2D(tDiffuse, uv + vec2(-a.x, -a.y)).rgb);
+}
+
 void main(){
   vec2 c = vUv - 0.5;
 
-  // Chromatic aberration: nothing in the middle, a real smear at the edges.
+  // Lens diffusion, in linear light: a soft tap mixed back over the sharp image. Bright
+  // detail bleeds into its neighbours the way it does through real glass, and the grain
+  // added at the end stays crisp on top of it.
+  vec3 sharp = texture2D(tDiffuse, vUv).rgb;
+  vec3 soft = blur4(vUv);
+
+  // Chromatic aberration, split into a displaced LOW-frequency image plus a shared
+  // high-frequency residual. Only the blurred layer moves, so the fringe is the smooth
+  // colour edge a real lens leaves, and the pixel-pitch detail — the inlaid border strip
+  // along the kerb, the joints, the grain of the marble — is carried by a single
+  // achromatic term that no channel displaces. It cannot go iridescent because by the
+  // time the split happens there is nothing left at that spatial frequency to split.
+  // (Displacing the sharp channels was the confetti; adding an un-normalised difference
+  // on top of them, which is what this looked like a moment ago, is worse still — that
+  // doubles the edge instead of moving it.)
   float r2 = dot(c * vec2(uAspect, 1.0), c * vec2(uAspect, 1.0));
   vec2 off = c * r2 * uCA;
-  vec3 col;
-  col.r = texture2D(tDiffuse, vUv + off).r;
-  col.g = texture2D(tDiffuse, vUv).g;
-  col.b = texture2D(tDiffuse, vUv - off).b;
-
-  // Lens diffusion, in linear light: a cross of taps a texel and a half out, mixed back
-  // over the sharp image. Bright detail bleeds into its neighbours the way it does
-  // through real glass, and the grain added at the end stays crisp on top of it.
-  vec3 soft = texture2D(tDiffuse, vUv + vec2(uTexel.x * 1.5, 0.0)).rgb
-            + texture2D(tDiffuse, vUv - vec2(uTexel.x * 1.5, 0.0)).rgb
-            + texture2D(tDiffuse, vUv + vec2(0.0, uTexel.y * 1.5)).rgb
-            + texture2D(tDiffuse, vUv - vec2(0.0, uTexel.y * 1.5)).rgb;
-  col = mix(col, soft * 0.25, uDiffusion);
+  vec3 lo = vec3(blur4(vUv + off).r, soft.g, blur4(vUv - off).b);
+  vec3 col = lo + (sharp - soft) * (1.0 - uDiffusion);
+  col = max(col, vec3(0.0));
 
   col *= uExposure * (1.0 + uFlash);
 
@@ -136,7 +174,7 @@ void main(){
 
   // Lifted, gentle mid-tones — this is not a high-contrast image.
   col = pow(max(col, vec3(0.0)), vec3(uLift));
-  col = max((col - 0.16) * uContrast + 0.16, 0.0);
+  col = max((col - 0.155) * uContrast + 0.155, 0.0);
 
   // Cold balance. The room is graded cold; anything already warm — a flame and the
   // stone it is lighting — keeps its own colour and is left alone. The warmth test has
@@ -154,7 +192,7 @@ void main(){
   // this ramp neutralises, so applying it uniformly greys out the outer two-thirds of
   // every warm pool and the fires stop reading as sources — which is the whole gap.
   float warmSat = mix(uSatShadow, uSaturation, smoothstep(uSatRamp.x, uSatRamp.y, l));
-  float sat = mix(warmSat, uSaturation, warmth * 0.6);
+  float sat = mix(warmSat, uSaturation, warmth * 0.28);
   col = mix(vec3(l), col, sat);
 
   // Print black. A negative never scans to zero and a release print carries base fog, so

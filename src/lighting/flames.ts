@@ -370,7 +370,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const bodyMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 5.0 },
+      uIntensity: { value: 6.3 },
       uCore: { value: new THREE.Color(FIRE.core).convertSRGBToLinear() },
       uMid: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
       uEdge: { value: new THREE.Color(FIRE.edge).convertSRGBToLinear() },
@@ -430,7 +430,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const glowMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 0.15 },
+      uIntensity: { value: 0.085 },
       uColor: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
     },
     vertexShader: GLOW_VERT,
@@ -477,6 +477,14 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   // So they move to where the film's warm light actually is: low against the side walls
   // in the camera's near half, grazing up the near colonnade, with a range short enough
   // that the board and the ranks never see them. They are still a bounce term, not a key.
+  //
+  // Cut hard since. At 5.2 with a 13 m range these four were laying a smooth orange
+  // gradient six metres up both near walls — the one part of the frame that really was
+  // "evenly grazed and legible", and a third of the reason the frame read warm where the
+  // film reads cold (18.2% of our pixels warm against the film's 13.9%). The film's warm
+  // edges are individual FIRES sitting near the frame border, not a wash behind them.
+  // Range now dies before it clears the wall face, so what is left is a faint warm
+  // footing under the near piers and nothing above it.
   const bounce: THREE.PointLight[] = [];
   for (const p of [
     [-6.5, 5.8, -14.2],
@@ -484,7 +492,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
     [2.5, 6.2, -14.2],
     [2.5, 6.2, 14.2],
   ] as const) {
-    const l = new THREE.PointLight(new THREE.Color(FIRE.bounce), 0, 13.0, 2.0);
+    const l = new THREE.PointLight(new THREE.Color(FIRE.bounce), 0, 7.4, 2.0);
     l.position.set(p[0], p[1], p[2]);
     l.castShadow = false;
     group.add(l);
@@ -520,7 +528,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
       }
       // The bounce breathes with the whole fire population, not with any one flame.
       mean = flames.length ? mean / flames.length : 0.5;
-      for (const l of bounce) l.intensity = 5.2 * (0.78 + 0.44 * mean);
+      for (const l of bounce) l.intensity = 1.9 * (0.78 + 0.44 * mean);
     },
 
     assign(camera: THREE.Camera) {
@@ -559,8 +567,8 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
         // intact while gutting the 2-6 m tail. That tail was the problem — thirty-odd
         // overlapping tails is a warm ambient by another name, and it was what put the
         // ranked armies at hue 8-16 when the reference has them cold.
-        l.distance = 2.45 + f.size * 1.9;
-        l.intensity = (1.95 + f.size * 4.3) * (0.60 + 0.72 * f.flicker);
+        l.distance = 1.85 + f.size * 1.25;
+        l.intensity = (1.70 + f.size * 3.5) * (0.60 + 0.72 * f.flicker);
         l.color.copy(f.tint);
       }
     },
