@@ -107,8 +107,8 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
 
     const frags = fracture(soup, {
       rng: rng.fork('cells'),
-      cells: staged ? (high ? 24 : 12) : high ? 58 : 24,
-      chips: staged ? (high ? 6 : 3) : high ? 20 : 8,
+      cells: staged ? (high ? 20 : 10) : high ? 58 : 24,
+      chips: staged ? (high ? 5 : 2) : high ? 20 : 8,
       impact: dir,
       base,
       height: target.height,
@@ -135,11 +135,11 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
       // away and is still in the air a second and a half later, and the reference has
       // the wreckage down and still, in a heap, around the piece that was struck.
       const light = Math.min(1.8, 0.42 / (0.14 + f.radius));
-      const speed = force * vrng.float(1.6, 3.6) * light;
+      const speed = force * vrng.float(1.2, 2.8) * light;
       const vel = new THREE.Vector3(
-        away.x * speed + dir.x * speed * 0.6 + vrng.gauss() * 0.4,
+        away.x * speed + dir.x * speed * 0.45 + vrng.gauss() * 0.32,
         Math.abs(away.y) * speed * 0.40 + vrng.float(0.8, 2.6) * Math.min(1.4, light),
-        away.z * speed + dir.z * speed * 0.6 + vrng.gauss() * 0.4,
+        away.z * speed + dir.z * speed * 0.45 + vrng.gauss() * 0.32,
       );
       const spin = Math.min(17, 5.5 * light + 2.5);
       const body = makeBody({

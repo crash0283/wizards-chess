@@ -127,7 +127,9 @@ async function boot() {
     dispatchEvent(new Event('resize'));
   }
 
-  (window as any).__WC__ = { world, chamber, board, lighting, pieces, destruction, camera, game };
+  // Debug handle. tools/play-test.mjs drives the interactive path through this, so THREE
+  // is included for projecting board squares to screen coordinates.
+  (window as any).__WC__ = { world, chamber, board, lighting, pieces, destruction, camera, game, THREE };
 }
 
 boot().catch(signalError);

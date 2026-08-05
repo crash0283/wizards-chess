@@ -143,6 +143,7 @@ attribute vec2 aCorner;    // x in [-0.5,0.5], y in [0,1]
 attribute vec3 aCentre;
 attribute vec4 aParams;    // phase, size, layer 0..2, lateral offset
 attribute vec4 aVary;      // temp 0..1, profile exponent, aspect, flicker rate
+attribute vec4 aVary2;     // skew, stretch, layer opacity, spare
 uniform float uTime;
 varying vec2 vUv;
 varying float vLayer;
@@ -151,9 +152,13 @@ varying float vFlick;
 varying float vTemp;
 varying float vProf;
 varying float vTip;
+varying float vSkew;
+varying float vShow;
 ${NOISE_GLSL}
 void main(){
   vUv = vec2(aCorner.x + 0.5, aCorner.y);
+  vSkew = aVary2.x;
+  vShow = aVary2.z;
   float ph = aParams.x;
   float size = aParams.y;
   vLayer = aParams.z;
@@ -170,7 +175,7 @@ void main(){
   vFlick = fl;
 
   float layerScale = 1.0 - vLayer * 0.27;
-  float h = size * (1.58 + 0.85 * (fl - 0.5)) * layerScale;
+  float h = size * (1.58 + 0.85 * (fl - 0.5)) * layerScale * aVary2.y;
   float w = size * (1.26 + 0.28 * (fl - 0.5)) * layerScale * aVary.z;
 
   // Lean and lick — grows with height, so the base stays planted.
@@ -198,13 +203,16 @@ varying float vFlick;
 varying float vTemp;
 varying float vProf;
 varying float vTip;
+varying float vSkew;
+varying float vShow;
 ${NOISE_GLSL}
 void main(){
   float y = clamp(vUv.y, 0.0, 1.0);
 
   // Turbulent centre line: the flame body wanders as it rises.
   float turb = (vnoise2(vec2(vPhase * 11.0, y * 3.4 - uTime * 2.6)) - 0.5) * 0.34 * y
-             + (vnoise2(vec2(vPhase * 23.0 + 5.0, y * 7.9 - uTime * 5.1)) - 0.5) * 0.16 * y;
+             + (vnoise2(vec2(vPhase * 23.0 + 5.0, y * 7.9 - uTime * 5.1)) - 0.5) * 0.16 * y
+             + vSkew * y * y * 0.5;
 
   // Teardrop: broad and round at the base, tapering to a wandering tip. Both the taper
   // exponent and the tip height are per-flame, so the population spans genuinely
@@ -230,7 +238,7 @@ void main(){
   col *= mix(vec3(1.14, 0.78, 0.46), vec3(0.97, 1.00, 1.06), vTemp);
 
   float energy = uIntensity * (0.62 + 0.90 * (1.0 - y)) * (0.72 + 0.56 * vFlick);
-  energy *= 1.0 - vLayer * 0.22;
+  energy *= (1.0 - vLayer * 0.22) * vShow;
   gl_FragColor = vec4(col * a * a * energy, 1.0);
 }
 `;
@@ -239,6 +247,7 @@ const GLOW_VERT = /* glsl */ `
 attribute vec2 aCorner;    // -0.5..0.5 both axes
 attribute vec3 aCentre;
 attribute vec4 aParams;    // phase, size, temp 0..1, flicker rate
+attribute float aRad;      // per-flame halo radius multiplier
 uniform float uTime;
 varying vec2 vUv;
 varying float vFlick;
@@ -255,7 +264,7 @@ void main(){
   // and the reference keeps its warm pixels small: 14.0% of its lit pixels fall in the
   // 0-30 degree hue bin against our 30.6%, which is what dragged the circular-mean lit
   // hue round to 256 instead of 224.
-  float r = size * (1.34 + 0.40 * (fl - 0.5));
+  float r = size * (1.34 + 0.40 * (fl - 0.5)) * aRad;
   vec3 right = normalize(vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]));
   vec3 up = normalize(vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]));
   vec3 wp = aCentre + vec3(0.0, size * 0.55, 0.0) + right * (aCorner.x * r) + up * (aCorner.y * r);
@@ -289,11 +298,14 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
 
   const phaseRng = world.rng.fork('lighting-flame-phase');
   const flames: Flame[] = specs.map((s, i) => {
-    // Skew the temperature distribution toward the cool end: a few fires burn hot and
-    // pale and the rest are ordinary orange, which is what stops the population reading
-    // as one flame stamped out thirty-eight times.
+    // Colour temperature is drawn from two populations, not one ramp. Most of these fires
+    // are ordinary orange; roughly one in four is burning something hotter and comes back
+    // pale. A single skewed distribution gives a continuum, and a continuum of near
+    // neighbours still reads as one asset shaded slightly differently — two clearly
+    // separated modes read as two kinds of fire.
     const u = phaseRng.float(0, 1);
-    const temp = u * u * 0.85 + 0.06;
+    const hot = phaseRng.float(0, 1) < 0.28;
+    const temp = hot ? 0.62 + u * 0.36 : u * u * 0.34 + 0.03;
     return {
       index: i,
       pos: new THREE.Vector3(s.x, s.y, s.z),
@@ -314,6 +326,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const bCentre = new Float32Array(bodyQuads * 4 * 3);
   const bParams = new Float32Array(bodyQuads * 4 * 4);
   const bVary = new Float32Array(bodyQuads * 4 * 4);
+  const bVary2 = new Float32Array(bodyQuads * 4 * 4);
   const bIndex = new Uint16Array(bodyQuads * 6);
 
   const CORNERS: Array<[number, number]> = [
@@ -327,15 +340,32 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const shapeRng = world.rng.fork('lighting-flame-shape');
   // Silhouette parameters are per flame, not per layer, so a flame's three tongues stay
   // recognisably the same fire while no two fires look alike.
+  //
+  // Size, temperature, flicker phase and taper already varied and the population still
+  // read as one billboard, because all of them are variations *within a single upright
+  // symmetrical teardrop*. What actually separates one fire from another at a glance is
+  // its axis and its bulk: a fire on a windward corner leans and stays leaning, a fire in
+  // a sheltered recess stands up; a fire eating something wet is a low guttering lump
+  // with one tongue, a fire on dry pitch is a tall three-tongued lick. So:
+  //   lean    a persistent tilt of the whole flame, not a per-frame sway
+  //   skew    the centre line drifting steadily to one side as it rises
+  //   stretch overall height against width, independent of size
+  //   layerMul how much the outer tongues show at all — low values are single-tongue fires
+  //   glowRad the halo's radius relative to the flame, so bulk and glow decouple
   const shape = flames.map(() => ({
     prof: shapeRng.float(0.40, 0.98),
     aspect: shapeRng.float(0.74, 1.38),
+    lean: shapeRng.float(-0.26, 0.26),
+    skew: shapeRng.float(-0.42, 0.42),
+    stretch: shapeRng.float(0.70, 1.44),
+    layerMul: shapeRng.float(0.30, 1.0),
+    glowRad: shapeRng.float(0.62, 1.52),
   }));
   let q = 0;
   for (const f of flames) {
     const sh = shape[f.index];
     for (let l = 0; l < LAYERS; l++) {
-      const lateral = l === 0 ? 0 : offRng.float(-0.32, 0.32);
+      const lateral = sh.lean + (l === 0 ? 0 : offRng.float(-0.32, 0.32));
       const phase = f.phase + l * 0.19;
       for (let c = 0; c < 4; c++) {
         const v = q * 4 + c;
@@ -352,6 +382,10 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
         bVary[v * 4 + 1] = sh.prof;
         bVary[v * 4 + 2] = sh.aspect;
         bVary[v * 4 + 3] = f.rate;
+        bVary2[v * 4 + 0] = sh.skew;
+        bVary2[v * 4 + 1] = sh.stretch;
+        bVary2[v * 4 + 2] = l === 0 ? 1.0 : sh.layerMul;
+        bVary2[v * 4 + 3] = 0;
       }
       const o = q * 4;
       bIndex.set([o, o + 1, o + 2, o, o + 2, o + 3], q * 6);
@@ -365,12 +399,13 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   bodyGeo.setAttribute('aCentre', new THREE.BufferAttribute(bCentre, 3));
   bodyGeo.setAttribute('aParams', new THREE.BufferAttribute(bParams, 4));
   bodyGeo.setAttribute('aVary', new THREE.BufferAttribute(bVary, 4));
+  bodyGeo.setAttribute('aVary2', new THREE.BufferAttribute(bVary2, 4));
   bodyGeo.setIndex(new THREE.BufferAttribute(bIndex, 1));
 
   const bodyMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 6.3 },
+      uIntensity: { value: 9.2 },
       uCore: { value: new THREE.Color(FIRE.core).convertSRGBToLinear() },
       uMid: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
       uEdge: { value: new THREE.Color(FIRE.edge).convertSRGBToLinear() },
@@ -396,6 +431,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const gCorner = new Float32Array(flames.length * 4 * 2);
   const gCentre = new Float32Array(flames.length * 4 * 3);
   const gParams = new Float32Array(flames.length * 4 * 4);
+  const gRad = new Float32Array(flames.length * 4);
   const gIndex = new Uint16Array(flames.length * 6);
   const GCORNERS: Array<[number, number]> = [
     [-0.5, -0.5],
@@ -415,6 +451,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
       gParams[v * 4 + 1] = f.size;
       gParams[v * 4 + 2] = f.temp;
       gParams[v * 4 + 3] = f.rate;
+      gRad[v] = shape[i].glowRad;
     }
     const o = i * 4;
     gIndex.set([o, o + 1, o + 2, o, o + 2, o + 3], i * 6);
@@ -425,6 +462,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   glowGeo.setAttribute('aCorner', new THREE.BufferAttribute(gCorner, 2));
   glowGeo.setAttribute('aCentre', new THREE.BufferAttribute(gCentre, 3));
   glowGeo.setAttribute('aParams', new THREE.BufferAttribute(gParams, 4));
+  glowGeo.setAttribute('aRad', new THREE.BufferAttribute(gRad, 1));
   glowGeo.setIndex(new THREE.BufferAttribute(gIndex, 1));
 
   const glowMat = new THREE.ShaderMaterial({
@@ -528,7 +566,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
       }
       // The bounce breathes with the whole fire population, not with any one flame.
       mean = flames.length ? mean / flames.length : 0.5;
-      for (const l of bounce) l.intensity = 1.9 * (0.78 + 0.44 * mean);
+      for (const l of bounce) l.intensity = 1.15 * (0.78 + 0.44 * mean);
     },
 
     assign(camera: THREE.Camera) {
@@ -567,8 +605,8 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
         // intact while gutting the 2-6 m tail. That tail was the problem — thirty-odd
         // overlapping tails is a warm ambient by another name, and it was what put the
         // ranked armies at hue 8-16 when the reference has them cold.
-        l.distance = 1.85 + f.size * 1.25;
-        l.intensity = (1.70 + f.size * 3.5) * (0.60 + 0.72 * f.flicker);
+        l.distance = 1.40 + f.size * 0.90;
+        l.intensity = (1.95 + f.size * 4.1) * (0.60 + 0.72 * f.flicker);
         l.color.copy(f.tint);
       }
     },

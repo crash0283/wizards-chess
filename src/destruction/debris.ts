@@ -40,6 +40,8 @@ export interface Body {
   phase: number;
   sleeping: boolean;
   contact: number;
+  /** Total time spent touching anything — a body cannot roll for ever. */
+  touching: number;
   age: number;
 }
 
@@ -47,7 +49,7 @@ const G = 9.81;
 /** Stone density, kg/m³ — a limestone chessman fragment really is this heavy. */
 const DENSITY = 2400;
 /** Nothing is allowed to keep moving past this, so `settled()` always resolves. */
-const MAX_AGE = 3.4;
+const MAX_AGE = 3.0;
 
 export interface Ground {
   /** Height of the rest surface (board or existing rubble) under a point. */
@@ -57,6 +59,9 @@ export interface Ground {
   /** Record a body that has come to rest. */
   stamp(x: number, z: number, radius: number, top: number): void;
 }
+
+/** Tallest a heap of rubble is allowed to get, metres above the marble. */
+const PILE_CAP = 0.75;
 
 /** A coarse height field over the whole board, in world XZ. */
 export function createGround(topY: number): Ground {
@@ -85,6 +90,12 @@ export function createGround(topY: number): Ground {
       return out.set(-dx * 0.5, 2 * e, -dz * 0.5).normalize().lerp(UP, 0.35).normalize();
     },
     stamp(x, z, radius, top) {
+      // Only real blocks hold anything up, and a heap does not ratchet: each body records
+      // rather less than its own height, and the field is capped. Stamping the full top
+      // of everything lets one pile lift the next body, and the next, until debris is
+      // hovering half a metre off the marble.
+      if (radius < 0.07) return;
+      top = Math.min(top, topY + PILE_CAP);
       const r = Math.max(CELL, radius * 0.78);
       const i0 = cellOf(x - r), i1 = cellOf(x + r);
       const j0 = cellOf(z - r), j1 = cellOf(z + r);
@@ -97,7 +108,7 @@ export function createGround(topY: number): Ground {
           if (d > r) continue;
           // Domed, so a pile grows a shape rather than a plateau.
           const k = Math.sqrt(Math.max(0, 1 - (d / r) * (d / r)));
-          const want = (top - topY) * (0.35 + 0.65 * k);
+          const want = (top - topY) * 0.72 * (0.30 + 0.70 * k);
           if (want > h[idx(ix, iz)]) h[idx(ix, iz)] = want;
         }
       }
@@ -142,7 +153,7 @@ export function makeBody(opts: {
     mass,
     invI: 1 / Math.max(1e-4, 0.42 * mass * opts.radius * opts.radius),
     restitution: stone ? 0.13 : 0.02,
-    friction: stone ? 0.66 : 0.92,
+    friction: stone ? 0.85 : 0.95,
     // Stone this size does not care about air. Cloth cares about nothing else.
     drag: stone ? 0.06 : 2.35,
     angDrag: stone ? 0.30 : 2.10,
@@ -150,6 +161,7 @@ export function makeBody(opts: {
     phase: opts.phase,
     sleeping: false,
     contact: 0,
+    touching: 0,
     age: 0,
   };
 }
@@ -186,6 +198,7 @@ export function stepBody(b: Body, dt: number, ground: Ground): void {
   let leverX = 0, leverZ = 0;
   for (let pass = 0; pass < 4; pass++) {
     let worst = 0;
+    let gap = Infinity;
     let wx = 0, wy = 0, wz = 0;
     for (let i = 0; i < b.support.length; i += 3) {
       _p.set(b.support[i], b.support[i + 1], b.support[i + 2]).applyQuaternion(b.quat);
@@ -195,13 +208,23 @@ export function stepBody(b: Body, dt: number, ground: Ground): void {
       if (pen > worst) {
         worst = pen; wx = _p.x; wy = _p.y; wz = _p.z;
       }
+      if (-pen < gap) gap = -pen;
     }
-    if (worst <= 1e-4) break;
+    if (worst <= 1e-4) {
+      // Resting exactly on the surface is contact too. Without this a body that the
+      // solver has pushed flush reports "not touching" for ever and never sleeps, and
+      // `settled()` never comes true.
+      if (gap < 0.006) touched = true;
+      break;
+    }
     touched = true;
     if (pass === 0) { leverX = -wx; leverZ = -wz; }
 
     ground.normalAt(b.pos.x + wx, b.pos.z + wz, _n);
-    b.pos.y += worst * (pass === 0 ? 1 : 0.6);
+    // Push out of the surface, but only partly and never far. A full positional
+    // correction every pass is free energy: a spinning fragment gets lifted by its own
+    // contact and climbs the pile instead of settling into it.
+    b.pos.y += Math.min(worst * (pass === 0 ? 0.8 : 0.5), 0.03);
 
     _rn.set(wx, wy, wz);
     _vc.copy(b.vel).add(_tan.copy(b.omega).cross(_rn));
@@ -237,9 +260,18 @@ export function stepBody(b: Body, dt: number, ground: Ground): void {
   // as debris settles. Without this term the solver happily parks shards on their points
   // and the heap reads as scattered confetti.
   if (touched) {
+    // Resting friction. Stone dropped on marble does not skate: once it is down it
+    // grinds to a halt in a few centimetres, and it stops spinning at the same time.
+    const kv = Math.max(0, 1 - 3.5 * dt);
+    b.vel.x *= kv;
+    b.vel.z *= kv;
+    b.omega.multiplyScalar(Math.max(0, 1 - 5.0 * dt));
     const h = Math.hypot(leverX, leverZ);
-    if (h > 0.015) {
-      const k = G * b.mass * b.invI * 0.35 * dt;
+    // Only while it is still nearly still: a fragment that is already tumbling does not
+    // need help, and driving it further is how a contact solver invents energy.
+    const calm = Math.max(0, 1 - b.omega.length() * 0.6);
+    if (h > 0.015 && calm > 0) {
+      const k = G * b.mass * b.invI * 0.35 * calm * dt;
       b.omega.x += leverZ * k;
       b.omega.z -= leverX * k;
       const w2 = b.omega.lengthSq();
@@ -248,10 +280,13 @@ export function stepBody(b: Body, dt: number, ground: Ground): void {
   }
 
   const slow = b.vel.lengthSq() < 0.020 && b.omega.lengthSq() < 0.95;
+  if (touched) b.touching += dt;
   if (touched && slow) b.contact += dt;
   else if (!touched) b.contact = 0;
 
-  if ((touched && b.contact > 0.22) || b.age > MAX_AGE) {
+  // Down and still, or down and out of momentum: either way it is finished. The second
+  // test is what stops a fragment creeping across the marble for the rest of the game.
+  if ((touched && b.contact > 0.22) || b.touching > 0.85 || b.age > MAX_AGE) {
     sleep(b, ground);
   }
 }

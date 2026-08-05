@@ -67,8 +67,8 @@ export interface FractureOptions {
  * chalk: push this past about 1.6 and the wreckage blows out white and stops belonging
  * to the statue it came from.
  */
-const FRESH_GAIN = 1.52;
-const FRESH_FLOOR = 0.030;
+const FRESH_GAIN = 1.35;
+const FRESH_FLOOR = 0.022;
 
 export function freshColourFor(soup: Soup): [number, number, number] {
   const [r, g, b] = meanColour(soup);
@@ -260,6 +260,12 @@ function finish(cell: Soup, fresh: [number, number, number]): Fragment | null {
   }
   if (!Number.isFinite(volume) || volume <= 0 || volume > bbv * 1.05) volume = bbv * 0.34;
   if (volume < 6e-6) return null;
+  // A cell that came out as a wide sheet a couple of centimetres thick is a shaving,
+  // not a piece of a statue: it flutters, it catches the light like paper and it reads
+  // as debris from something else entirely.
+  const thin = Math.min(bs.x, bs.y, bs.z);
+  const wide = Math.max(bs.x, bs.y, bs.z);
+  if (thin < 0.025 && wide > 0.28) return null;
   recentre(cell, cx, cy, cz);
 
   let radius = 0;

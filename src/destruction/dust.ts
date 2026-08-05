@@ -76,7 +76,7 @@ export interface Plume {
 /** Deep shadow inside the cloud — cold, because the room is cold. */
 const SHADOW = new THREE.Vector3(0.038, 0.048, 0.076);
 /** Full-lit dust. Above 1.0: this has to be the brightest thing in the frame. */
-const LIT = new THREE.Vector3(1.16, 1.155, 1.15);
+const LIT = new THREE.Vector3(1.30, 1.295, 1.29);
 /** Firelight bounced into the underside of the cloud from the kerb flames. */
 const EMBER = new THREE.Vector3(0.26, 0.13, 0.045);
 /** The room's soft overhead fill, as a direction. */
@@ -89,7 +89,9 @@ attribute float iRot;
 attribute vec3 iColor;
 attribute float iAlpha;
 attribute float iTex;
+uniform vec3 uLight;
 varying vec2 vUv;
+varying vec2 vLight;
 varying vec3 vCol;
 varying float vAlpha;
 void main(){
@@ -99,6 +101,10 @@ void main(){
   mv.xy += q;
   gl_Position = projectionMatrix * mv;
   vUv = (uv + vec2(mod(iTex, 2.0), floor(iTex * 0.5))) * 0.5;
+  // The key direction, brought into the puff's own texture frame: view space first,
+  // then back out of the quad's rotation.
+  vec2 lv = normalize((viewMatrix * vec4(uLight, 0.0)).xy + 1e-6);
+  vLight = vec2(lv.x * c + lv.y * s, -lv.x * s + lv.y * c);
   vCol = iColor;
   vAlpha = iAlpha;
 }
@@ -108,15 +114,22 @@ const FRAG = /* glsl */ `
 precision highp float;
 uniform sampler2D uMap;
 varying vec2 vUv;
+varying vec2 vLight;
 varying vec3 vCol;
 varying float vAlpha;
 void main(){
   vec2 t = texture2D(uMap, vUv).rg;
   float a = t.r * vAlpha;
   if (a < 0.004) discard;
-  // The green channel is finer-grained density: it gives every puff its own internal
-  // shading so a cloud of them has structure at two scales instead of one.
-  vec3 col = vCol * (0.74 + 0.52 * t.g);
+  // Self-shading, the cheap and correct way: compare the density here with the density
+  // a short step TOWARD the light. Less dust that way means we are near the lit edge of
+  // this lobe; more means we are looking into it. One texture fetch buys every puff a
+  // lit side and a shadowed side, which is what makes a heap of billboards read as a
+  // solid rolling mass rather than as a flat grey stain.
+  float ahead = texture2D(uMap, vUv + vLight * 0.030).r;
+  float lit = clamp(0.5 + (t.r - ahead) * 2.6, 0.0, 1.0);
+  // The green channel is finer-grained density: structure at a second scale.
+  vec3 col = vCol * (0.42 + 0.95 * lit) * (0.80 + 0.34 * t.g);
   gl_FragColor = vec4(col * a, a);
 }
 `;
@@ -230,7 +243,7 @@ export function createPlume(world: World): Plume {
     geo.instanceCount = 0;
 
     material = new THREE.ShaderMaterial({
-      uniforms: { uMap: { value: atlas } },
+      uniforms: { uMap: { value: atlas }, uLight: { value: KEY.clone() } },
       vertexShader: VERT,
       fragmentShader: FRAG,
       transparent: true,
@@ -290,7 +303,7 @@ export function createPlume(world: World): Plume {
 
       if (layer === 0) {
         // Skirt: hurled outward at floor level, then it just spreads and sits.
-        const sp = rng.float(1.6, 3.4) * force * lean;
+        const sp = rng.float(6.0, 11.0) * force * lean;
         p.delay = rng.float(0, 0.05);
         p.ox += Math.cos(th) * 0.16 * scale;
         p.oz += Math.sin(th) * 0.16 * scale;
@@ -298,7 +311,7 @@ export function createPlume(world: World): Plume {
         p.vx = Math.cos(th) * sp;
         p.vz = Math.sin(th) * sp;
         p.vy = rng.float(0.25, 1.0);
-        p.drag = rng.float(3.0, 4.2);
+        p.drag = rng.float(6.5, 9.5);
         p.buoy = rng.float(0.10, 0.36);
         p.roll = rng.float(0.05, 0.40);
         p.s0 = rng.float(0.30, 0.62) * scale;
@@ -308,7 +321,7 @@ export function createPlume(world: World): Plume {
         p.bright = rng.float(0.76, 1.02);
       } else if (layer === 1) {
         // Column: the trunk, close to the axis, carried up on buoyancy.
-        const sp = rng.float(0.5, 1.6) * force;
+        const sp = rng.float(2.0, 5.0) * force;
         p.delay = rng.float(0, 0.14);
         p.ox += Math.cos(th) * rng.float(0.05, 0.44) * scale;
         p.oz += Math.sin(th) * rng.float(0.05, 0.44) * scale;
@@ -316,7 +329,7 @@ export function createPlume(world: World): Plume {
         p.vx = Math.cos(th) * sp;
         p.vz = Math.sin(th) * sp;
         p.vy = rng.float(1.0, 2.4);
-        p.drag = rng.float(1.7, 2.6);
+        p.drag = rng.float(4.0, 6.0);
         p.buoy = rng.float(0.35, 0.85);
         p.roll = rng.float(0.25, 0.95);
         p.s0 = rng.float(0.26, 0.52) * scale;
@@ -346,14 +359,14 @@ export function createPlume(world: World): Plume {
         p.bright = rng.float(0.95, 1.20);
       } else {
         // Wisps: fast, small, short-lived. They break the outline up.
-        const sp = rng.float(2.6, 5.5) * force * lean;
+        const sp = rng.float(9.0, 18.0) * force * lean;
         const up = rng.float(-0.25, 1.15);
         p.delay = rng.float(0, 0.09);
         p.oy = origin.y + rng.float(0.1, 1.0) * opts.height * 0.5;
         p.vx = Math.cos(th) * sp;
         p.vz = Math.sin(th) * sp;
         p.vy = sp * up * 0.5;
-        p.drag = rng.float(4.0, 6.0);
+        p.drag = rng.float(7.0, 11.0);
         p.buoy = rng.float(0.25, 0.9);
         p.roll = rng.float(0.1, 0.7);
         p.s0 = rng.float(0.10, 0.26) * scale;

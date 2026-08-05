@@ -27,7 +27,7 @@ export const AtmosphereShader = {
      * erased the marble's veining and most of the checker over the far half of the board,
      * which the reference carries in full contrast right up to the far kerb.
      */
-    uDensity: { value: 0.0125 },
+    uDensity: { value: 0.017 },
     uStrength: { value: 0.80 },
     /** Height (metres) over which the haze thins out toward the vault. */
     uHazeScale: { value: 4.5 },

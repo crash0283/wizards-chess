@@ -19,7 +19,7 @@ export const GradeShader = {
   name: 'ChamberGrade',
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
-    uExposure: { value: 0.725 },
+    uExposure: { value: 0.668 },
     uAspect: { value: 2.388 },
     /**
      * Chromatic aberration. This used to sample the SHARP buffer once per channel at
@@ -64,8 +64,8 @@ export const GradeShader = {
     uVigInner: { value: 0.52 },
     uVigOuter: { value: 0.95 },
     uVigAspect: { value: 1.25 },
-    uLift: { value: 0.96 },
-    uContrast: { value: 1.00 },
+    uLift: { value: 0.94 },
+    uContrast: { value: 0.99 },
     /**
      * Saturation in the deep shadows. Less neutral than we had it: the reference's own
      * blacks still carry colour. Its per-region saturation never drops below 0.229 and
@@ -85,11 +85,22 @@ export const GradeShader = {
      * frame, and one the whole-frame numbers hid because a quarter of the reference's
      * pixels are letterbox and count as neither.
      */
-    uCoolBalance: { value: new THREE.Vector3(0.940, 1.012, 1.048) },
+    uCoolBalance: { value: new THREE.Vector3(0.905, 1.010, 1.066) },
     uShadowTint: { value: new THREE.Vector3(0.004, 0.006, 0.011) },
     uHighlightTint: { value: new THREE.Vector3(0.006, 0.004, -0.004) },
+    /**
+     * Highlight expansion, above the mid-tones only. The reference's histogram is not a
+     * brighter version of ours, it is a WIDER one: its 5th, 10th, 25th and 75th
+     * percentiles now sit on ours almost exactly (8/10/18/65 against 8/10/17/66) while
+     * its 95th and 99th are at 160 and 218 to our 128 and 193. Its shadows and its
+     * mid-tones are where we already are; its top end is a stop further out. Pulling the
+     * whole exposure up to chase that would drag the median and the shadow fraction with
+     * it, so the lift has to be confined to the top of the curve.
+     */
+    uHiGain: { value: 0.32 },
+    uHiPivot: { value: 0.25 },
     /** Print black: the picture's floor, which is never literal zero. */
-    uToe: { value: 0.013 },
+    uToe: { value: 0.019 },
     uGrain: { value: 0.013 },
     uSeed: { value: 0.0 },
     uFlash: { value: 0.0 },
@@ -111,6 +122,7 @@ uniform float uLift, uContrast, uSaturation, uSatShadow;
 uniform vec2 uSatRamp;
 uniform vec3 uCoolBalance, uShadowTint, uHighlightTint;
 uniform float uGrain, uSeed, uFlash, uToe;
+uniform float uHiGain, uHiPivot;
 varying vec2 vUv;
 
 vec3 aces(vec3 x){
@@ -174,7 +186,7 @@ void main(){
 
   // Lifted, gentle mid-tones — this is not a high-contrast image.
   col = pow(max(col, vec3(0.0)), vec3(uLift));
-  col = max((col - 0.155) * uContrast + 0.155, 0.0);
+  col = max((col - 0.16) * uContrast + 0.16, 0.0);
 
   // Cold balance. The room is graded cold; anything already warm — a flame and the
   // stone it is lighting — keeps its own colour and is left alone. The warmth test has
@@ -182,7 +194,16 @@ void main(){
   // pool is only barely warm: at the old sensitivity a pixel a hundredth above neutral
   // read as "not warm", took the full cold push, and came out of the grade measurably
   // *blue*. That single line was inverting most of the bounce light in the frame.
-  float warmth = clamp((col.r - col.b) * 3.2, 0.0, 1.0);
+  // Warmth exempts a pixel from the cold DI balance. Gated on luminance as well as on
+  // hue: right at a fire the stone is bright AND warm and must keep its colour, but the
+  // long dim tail of every pool was also testing "warm", claiming the same exemption,
+  // and between thirty-odd fires that tail is most of the floor. That is what put 17.8%
+  // of the frame in the warm bin against the film's 13.9% while our cool bin ran 5 points
+  // short — not the fires themselves, the ground they were faintly staining.
+  // Luminance BEFORE the cool balance shifts the colour — the warm-pool test has to see
+  // the light as it arrived, not as this pass has already re-tinted it.
+  float l0 = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  float warmth = clamp((col.r - col.b) * 2.2, 0.0, 1.0) * smoothstep(0.08, 0.40, l0);
   col *= mix(uCoolBalance, vec3(1.0), warmth);
 
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
@@ -202,10 +223,20 @@ void main(){
   // the shadow histogram. This lifts only the bottom of the curve and leaves the rest.
   col += uToe * (1.0 - smoothstep(0.0, 0.11, l));
 
+  // Highlight expansion. Nothing below the pivot moves at all, and the gain tapers off
+  // again at the very top: a plain rising ramp lifted the 99th percentile to 245 and
+  // trebled the blown fraction while the 95th — the lit marble, which is what actually
+  // needs the help — barely shifted. The reference's brightest few thousand pixels are
+  // its flames and they are already where they belong; what is missing is the shoulder
+  // just under them.
+  float hi = smoothstep(uHiPivot, 0.62, l) * (1.0 - 0.75 * smoothstep(0.62, 0.95, l));
+  col *= 1.0 + uHiGain * hi;
+  col = min(col, vec3(1.0));
+
   float sh = 1.0 - smoothstep(0.0, 0.5, l);
-  float hi = smoothstep(0.55, 1.0, l);
+  float hiTint = smoothstep(0.55, 1.0, l);
   col += uShadowTint * sh;
-  col += uHighlightTint * hi;
+  col += uHighlightTint * hiTint;
 
   // Grain: present everywhere, strongest through the dark mid-tones. Sampled at ~1.8 px
   // and interpolated rather than one independent value per pixel — real grain is clumped

@@ -34,7 +34,7 @@ export const COLD = {
   envHorizon: 0x161e2c,
   envFloor: 0x0a0e15,
   /** A whisper of fire bounced into the low env so undersides are not dead blue. */
-  envFireBounce: 0x3a2314,
+  envFireBounce: 0x1c1009,
 } as const;
 
 /** Fire. Small, local, and the only warm thing in the room. */
@@ -46,7 +46,7 @@ export const FIRE = {
   /** Cooling outer tongues. */
   edge: 0xff7a24,
   /** The point light a flame casts. Warmer than the core, it has to tint stone. */
-  light: 0xffd0ab,
+  light: 0xffdcbf,
   /** Once-bounced firelight: a broad dim warm cast off the marble and the kerb. */
   bounce: 0xff9c55,
   /** Impact flare — a dust burst is lit white-grey, not orange. */
