@@ -1,213 +1,170 @@
 # Shot Briefs — the bar
 
-## Status of the reference frames
+**Three real reference frames are now installed** in `refs/frames/`. They are the bar. Where this
+document and a frame disagree, **the frame wins** — go look at it.
 
-The frame sources named in the task brief are **blocked by this session's egress policy**.
-Every one of these returned `403` at the gateway on both `curl` and the sanctioned fetch tool:
+| Shot id | Reference | What it shows |
+|---|---|---|
+| `wide-establishing` | `refs/frames/wide-establishing.webp` | Low wide across the board, black army ranked, fires on the floor |
+| `aftermath-rubble` | `refs/frames/aftermath-rubble.webp` | High angle, a piece just destroyed, huge dust plume, debris |
+| `king-surrender` | `refs/frames/king-surrender.webp` | Wide aftermath, the pale king towering over a small figure |
+| `low-across-board` | *(none yet)* | Derive from `wide-establishing` |
+| `knight-looking-up` | *(none yet)* | Derive from `wide-establishing` |
+| `piece-mid-strike` | *(none yet)* | Derive from `aftermath-rubble` |
 
-| Host | Result |
+The frames are film stills and are **gitignored on purpose** — they are local reference only and
+must never be committed or redistributed.
+
+---
+
+## ⚠️ Corrections to the earlier version of this brief
+
+An earlier draft of this file was written without the frames and got the scene's most important
+properties **wrong**. If you read that version, discard these beliefs:
+
+| Earlier claim | Reality in the frames |
 |---|---|
-| `movie-screencaps.com` | 403 CONNECT denied |
-| `imgs.screencaps.us` | 403 CONNECT denied |
-| `i0.wp.com` (the 4K direct-image CDN) | 403 CONNECT denied |
-| `external-preview.redd.it` | 403 CONNECT denied |
-
-Policy is explicit that gateway denials are not to be retried or routed around, so `refs/frames/`
-is empty. It is wired as a **drop-in directory**: put real frames there using the filenames in the
-table below and the critic harness switches from brief-only judging to true side-by-side blind
-comparison with no code changes (`tools/critic-pair.mjs` detects them automatically).
-
-Until then, the bar is these written briefs. They describe the target shots — framing, scale,
-light, materials, motion — in enough detail to be judged against, and each one lists **hard
-numeric acceptance criteria** so a critic can be objective rather than impressionistic.
-
-## Shot table
-
-| # | Shot id | Reference filename to drop in | Purpose |
-|---|---|---|---|
-| 1 | `wide-establishing` | `refs/frames/wide-establishing.jpg` | The reveal — whole chamber, whole board |
-| 2 | `low-across-board` | `refs/frames/low-across-board.jpg` | Floor-level look across the board, pieces towering |
-| 3 | `knight-looking-up` | `refs/frames/knight-looking-up.jpg` | Extreme low angle up a mounted knight |
-| 4 | `piece-mid-strike` | `refs/frames/piece-mid-strike.jpg` | A piece mid-swing, the instant before contact |
-| 5 | `aftermath-rubble` | `refs/frames/aftermath-rubble.jpg` | Destroyed piece, debris settling, dust in the light |
-| 6 | `king-surrender` | `refs/frames/king-surrender.jpg` | Checkmate — the king's blade falls, game ends |
+| "Warm amber firelight on every lit surface" | **The room is COOL.** Dominant blue-slate. Fires are small, local, and do not warm the room. |
+| "Uplight is the single most identifiable property" | The key is a **soft cool light from above/behind**. Floor fires are accents, not the key. |
+| "Nothing polished, no sharp specular" | The board is **polished marble and visibly reflective** — pieces and figures mirror in it. |
+| "Weathered rough block masonry, eroded mortar" | The walls are a **fine Gothic blind arcade** — carved, ordered, architectural. |
+| "Abstract carved chess forms" | The pieces are **figurative armoured combatants** — horses, helmed soldiers, robed royalty. |
+| "Fine suspended haze" | Ambient haze yes, but destruction produces a **huge opaque white plume**, not a wisp. |
 
 ---
 
-## Global look — applies to every shot
+## Global look — from the frames
 
-**The room.** A vast subterranean stone hall. Not a decorated room — a raw, cold, engineered
-cavern. Squared-off block masonry, courses visible, mortar lines dark and eroded. The walls climb
-past the top of frame in most shots; the ceiling is only implied, lost in black. Scale reads as
-roughly 25–30 m across and at least 15 m to anything resembling a ceiling. Emptiness is the point:
-no furniture, no banners, no decoration. Stone, board, pieces, dark.
+**Colour.** The image is **cold**. Deep desaturated blue-slate dominates; `king-surrender` is very
+nearly monochrome blue. Warm colour exists only as small isolated flames and the pale sandstone of
+the white army. There is no amber wash. If your render is globally warm, it is wrong.
 
-**Palette.** Extremely narrow. Warm amber-orange from firelight on every lit surface
-(roughly `#c8863f` at the brightest falling to `#5a3418`), and a cold desaturated blue-grey in
-shadow (`#2a3340`-ish) that is 3–5% of the key's intensity. There is no green anywhere, no
-saturated colour, nothing pure white. Mid-grey stone reads warm on one face and cold on the other.
-Overall image saturation is low; the warmth comes from light, not from pigment.
+**Light.** A soft, cool, largely top-down ambient fills the room — enough to read every piece's form
+across a very deep space, with no hard key and no dramatic single-source modelling. The flames sit
+low (on the floor and on plinths) and are **small, contained, and local**: each throws a modest warm
+pool a metre or two wide and does not travel. Crucially the fires read as *set dressing inside a
+cold room*, not as the room's light source. Shadows are soft and shallow; nothing is crushed to
+pure black except the ceiling void.
 
-**Light.** Firelight only. Sources are low and to the sides — braziers or wall torches near floor
-level — so every vertical surface is lit from *below the middle*, and shadows are thrown *upward*
-across the pieces and walls. This is the single most identifiable property of the scene: uplight.
-The light is unstable, flickering at roughly 6–11 Hz with ±8% intensity and a small positional
-jitter, never a clean sine. Falloff is fast — a piece 8 m from a brazier is 4–6 stops darker than
-one at 2 m — which is what makes the room feel enormous.
+**Contrast.** Black point is genuinely deep — the ceiling and upper walls go to near-zero — but the
+mid-tones are *lifted* and gentle. This is not a high-contrast image. Highlights (flames, the
+brightest marble, the dust plume) are the only things near white, and they are small in area.
 
-**Air.** The room is never clear. There is permanent haze — fine suspended dust — thick enough
-that distant walls lose 30–50% contrast and every light source has a visible volumetric cone.
-Shafts of light are structural to the image, not an effect layered on top.
+**Air.** Real atmospheric depth. The back wall in `king-surrender` is heavily veiled in blue haze
+and loses most of its contrast. Distance reads as *desaturation and lift*, not as darkness.
 
-**Material.** Everything is the same stone. Weathered, porous, pitted, blotchy with age.
-Nothing is clean, nothing is polished, nothing has a specular highlight sharper than a broad soft
-sheen. Surfaces carry three scales of detail simultaneously: large-scale blotching and staining
-(metres), medium chips and erosion (10 cm), and fine grain/pitting (mm). A surface with only one
-of these reads as CG immediately.
+**Grain.** Visible film grain across all three frames, strongest in the dark mid-tones. A clean
+render is an instant tell.
 
-**Camera.** Anamorphic-flavoured: long-ish lenses, shallow depth of field for the scale, a slight
-barrel character, subtle chromatic fringing at the extreme edges. Handheld weight on every shot —
-never locked off, never perfectly smooth. Contrast is filmic: rich blacks that are *not* crushed
-to zero (floor around 3–6/255), highlights that roll rather than clip.
-
-**Weight.** Pieces are stone and read as tons. Nothing accelerates fast. Nothing bounces.
-Everything that moves has a low, grinding inevitability, and the ground registers it.
+**Frame.** 2.39:1 anamorphic, hard black bars. Shallow-ish depth of field but not extreme; the deep
+field stays readable.
 
 ---
 
-## Shot 1 — `wide-establishing`
+## The architecture
 
-**Framing.** High and back, roughly 12 m up and 22 m out from the board's near edge, looking down
-the long axis at about 18–22° declination. The full 8×8 board occupies the middle third of frame.
-Chamber walls run out of frame left and right; the far wall is visible but hazed. Pieces read as
-silhouettes in the far rank, only the near ranks catch enough light to show form.
+- **Blind arcade.** The dominant wall treatment is a continuous run of **narrow arches in shallow
+  relief** — a carved arcade band running horizontally around the chamber at roughly mid-height,
+  many small repeating bays. It is fine, ordered, Gothic stonework. Not rubble masonry.
+- **A large arched portal** on one side, deeply recessed and dark.
+- Walls above the arcade fall away into unresolved dark. No ceiling is ever resolved.
+- The stone is smooth, pale-to-mid grey, and **carved**, not weathered-rough. Erosion is not the
+  story here; *architecture* is.
 
-**What has to be true.**
-- The board is *floor* — its squares are the same stone as the room, inset flush, not a table.
-- Squares are large: a piece stands within one square with room around it, ~2.2–2.5 m per square,
-  so the whole board is ~18–20 m across.
-- Pieces are 2.5 m (pawn) to 4.5 m (king). A human standing among them reaches a pawn's chest.
-- Light pools. There are 3–5 clearly separated bright zones with genuinely dark space between them.
-  A uniformly lit room fails this shot outright.
-- The top 15% of frame is essentially black — the ceiling is not resolved.
+## The board
 
-**Acceptance criteria.** Median luminance below 0.18. At least 22% of pixels below 0.04.
-No more than 0.6% of pixels above 0.92. Warm/cool hue split present with a mean hue near 28–35°
-in lit regions. Visible haze gradient front-to-back of at least 25% contrast loss.
+- **Polished marble, and it reflects.** Light squares are cream/white marble with grey veining;
+  dark squares are deep blue-black marble, also veined. In `wide-establishing` you can see figures
+  and piece bases mirrored in the surface.
+- Reflections are **soft and broad**, not mirror-sharp — a wide blurred gloss, roughness low but
+  not zero.
+- Squares are large, flat, and clean-edged, with a fine inlaid border strip at the board's edge.
+- It is a *floor* — flush, continuous, walkable. Debris and rubble sit directly on it.
+- Wear is subtle: veining and scuffing, not chipping. Damage comes from the fight, not from age.
 
----
+## The pieces
 
-## Shot 2 — `low-across-board`
+They are **figurative armoured combatants carved in stone**, standing on cylindrical moulded
+plinths. This is the biggest single departure from generic chess geometry.
 
-**Framing.** Camera on the board surface itself, ~0.8 m up — below a pawn's knee — one square back
-from the front rank, looking across. Near piece bases fill the left and right thirds and are
-substantially out of focus. The centre channel runs between them to a lit piece 4–6 squares away.
+- **Pawns** — squat, hunched/kneeling armoured figures in wide rounded helmets, seen from behind as
+  a ranked row of domed shells. Compact and heavy.
+- **Knights** — a rider on a **rearing horse**, forelegs off the ground, the whole mass dynamic and
+  raised. The most visually dominant piece.
+- **Bishops** — tall, narrow, mitred figures holding a crozier/staff.
+- **Rooks** — heavy armoured figures with squared shoulders.
+- **Queen / King** — tall robed figures with crowned helms, the king carrying a staff or mace, the
+  tallest thing on the board.
+- **Two materials, two identities:** the black army is **dark blue-grey/near-black stone**; the
+  white army is **warm pale sandstone/limestone** with rust-and-ochre staining. They differ in hue,
+  value, *and* grain.
+- Surfaces are carved and detailed — armour plates, helm ridges, horse musculature — with soft
+  broad sheen, not tight highlights. Fabric elements (capes, tabards) exist and are a **dull dark
+  red**; when a piece breaks, torn red fabric scatters with the stone.
+- Plinths are turned, moulded cylinders — real architectural bases, stepped and profiled.
 
-**What has to be true.**
-- Perspective is aggressive. Verticals converge hard; the near pieces are cut by the frame edges.
-- The floor plane occupies the bottom third and is the most detailed surface in shot — mortar
-  lines, grit, chips, dust drifts collected in the joints.
-- Depth of field is real: the near bases are soft (a 4–8 px circle of confusion), the mid piece
-  is sharp, the background is soft again.
-- The horizon of the board is *above* frame centre — the camera is looking slightly up.
+## Destruction
 
-**Acceptance criteria.** Focus falloff measurable: near-field high-frequency energy under 35% of
-mid-field. At least three distinct depth layers separable by blur. Bottom third contains the
-image's peak local detail variance.
+From `aftermath-rubble`, the most instructive frame in the set:
 
----
+- **The dust plume is the event.** A dense, opaque, white-grey billow rises well above the piece's
+  original height in a cauliflower/mushroom mass, brightly lit and easily the brightest thing in
+  frame. It has real internal structure — lobes and rolls — and reads as a *volume*, not a sprite.
+- Debris is **large and angular**: recognisable fragments of the figure (limb sections, helm pieces,
+  plinth blocks) scattered across several squares, not uniform gravel. Fresh break faces are
+  pale and raw against the stained outer surface.
+- **Torn dark-red fabric** is thrown with the stone — a distinct non-stone element in the debris.
+- The attacker holds its follow-through, arm extended, blade out, absolutely still.
+- Fragments come to rest on the marble and stay there; the board accumulates a debris field over
+  the course of the game (`king-surrender` shows a board strewn with the wreckage of many pieces).
 
-## Shot 3 — `knight-looking-up`
+## Scale
 
-**Framing.** Camera at the foot of a mounted knight, ~0.5 m off the floor, tilted up 40–55°.
-The knight fills the frame diagonally, its head and raised foreleg crossing the top corner.
-Chamber void behind it, one distant firelight source flaring past the silhouette's edge.
-
-**What has to be true.**
-- The piece reads as *carved*, not modelled: chisel facets, the horse's mane cut in blocky planes,
-  eroded edges. No smooth generic curvature.
-- Strong rim light along one edge from the flare source; the mass of the piece is in shadow but
-  never black — bounce from the floor lifts the underside slightly warm.
-- Dust motes cross the frame, catching light, drifting not falling.
-- The piece is chipped. At least one significant corner or edge is broken away, older than the
-  current fight.
-
-**Acceptance criteria.** Silhouette occupies 35–55% of frame. Rim highlight present as a
-contiguous bright edge at least 200 px long. Underside shadow luminance between 0.02 and 0.08 —
-not crushed. Visible surface detail at three distinct spatial frequencies.
-
----
-
-## Shot 4 — `piece-mid-strike`
-
-**Framing.** Medium, slightly low, ~1.6 m up, 6–8 m out, ~35° off the strike axis so the swing
-crosses the frame rather than coming at camera. Attacker's weapon at the top of its arc or just
-past it. Target piece in frame, still whole, occupying the opposite third.
-
-**What has to be true.**
-- The attacker has *committed weight*. The body is rotated into the swing, the base is loaded,
-  and it is not a piece politely gesturing.
-- Motion blur on the weapon only — the body is comparatively sharp. Directional, arc-shaped,
-  not a uniform smear.
-- The strike disturbs the room *before* it lands: dust already lifting from the floor along the
-  swing path, light already changing.
-- Camera has reacted — a small lag/whip, so the framing is slightly imperfect. A perfectly
-  composed strike frame reads as animation, not photography.
-
-**Acceptance criteria.** Directional blur detectable on the weapon with anisotropy ratio ≥ 3:1.
-Attacker's centre of mass displaced ≥ 15% of its height from rest. Airborne particulate present
-above the floor plane along the swing arc.
+`king-surrender` fixes it precisely: a child's silhouette stands against the king, and the king is
+roughly **three to four times the child's height**. Pawns read at roughly adult-to-1.5× adult
+height; the rearing knights are the tallest pieces of all. The existing constants in
+`src/core/constants.ts` are in the right range — keep them.
 
 ---
 
-## Shot 5 — `aftermath-rubble`
+## Per-shot acceptance criteria
 
-**Framing.** Slightly high, ~3 m up, 5 m out, looking down at the square where the destroyed piece
-stood. The victor stands over the rubble, partly in frame. Debris field spread across two to three
-squares.
+Numbers are measured with `node tools/metrics.mjs <render> <reference>`. The reference's own values
+are the target; the delta block in that tool's output is what you are minimising.
 
-**What has to be true.**
-- The break is **stone breaking**, not a piece disassembling. Chunks are angular, of wildly
-  different sizes — a few large torso-sized blocks, many fist-sized, and a great deal of grit —
-  and the interior faces of the breaks are *lighter and rougher* than the weathered outer surface.
-  This freshly-exposed-interior contrast is the tell that separates real destruction from a
-  shatter effect.
-- Debris has *settled*. Pieces have come to rest against each other, some leaning, some rocked
-  into stillness. Nothing is resting on a mathematically flat contact.
-- The dust plume is still in the air and still moving — a slow billow at head height, thickest
-  where the piece stood, drifting laterally. It is lit through, so the light shafts in the room
-  are momentarily much stronger.
-- Scoring on the floor where debris skidded. Fine dust deposited in a halo around the impact.
-- The victor is *still*. It has already finished. Its stillness is what sells the violence.
+### `wide-establishing`
+- Overall **cool**: `warmFraction` must NOT dominate `coolFraction`. Match the reference's split.
+- Small isolated warm flame sources visible at floor level, each with a local pool only.
+- The blind arcade must be legible along the back wall.
+- Board reflections visible under the pieces.
+- Ranked rows of *figurative* pieces, silhouettes clearly non-abstract.
+- `medianLuminance` and `fracDeepShadow` within ±0.05 of the reference.
 
-**Acceptance criteria.** ≥ 40 distinct debris bodies with a size distribution spanning at least
-a 12:1 ratio. Fresh-break faces measurably brighter than weathered faces (≥ 25% luminance delta).
-Volumetric dust density above the impact at least 3× ambient haze. Floor shows a deposition
-gradient radiating from impact point.
+### `aftermath-rubble`
+- A dense opaque dust plume, the brightest element in frame, with internal lobed structure.
+- ≥ 30 distinct debris bodies spanning at least a 10:1 size range, including recognisable
+  fragments of the destroyed figure, plus dark-red fabric pieces.
+- Fresh break faces measurably brighter than outer surfaces.
+- Attacker present, still, in follow-through.
+- Board marble reads polished under the debris.
 
----
+### `king-surrender`
+- Near-monochrome cold blue; `meanSaturation` within ±0.03 of the reference.
+- Strong blue atmospheric veiling on the far wall — visible front-to-back contrast falloff.
+- The king is the tallest, palest element; a small figure gives the scale.
+- A wide debris field across many squares from earlier captures.
+- Position on the board validates as a legal checkmate.
 
-## Shot 6 — `king-surrender`
-
-**Framing.** Wide, chest height, the full board visible past the checkmated king. The king is the
-tallest thing in frame and the brightest-lit. Everything else has stopped.
-
-**What has to be true.**
-- The king's sword/blade releases and falls — a slow topple, tipping from the hilt, striking stone
-  with a heavy dead sound, not a clatter.
-- The game is genuinely over: the position on the board is a real checkmate, and it is legible —
-  the checking piece and the king's blocked escape squares are both visible in frame.
-- Every surviving piece has come to rest. Total stillness after the fall, held long enough to feel.
-- The room's light drops slightly and settles as the fires calm.
-
-**Acceptance criteria.** Board position must validate as legal checkmate. Blade contacts floor with
-no bounce > 2 cm. Post-fall frame-to-frame pixel delta below 0.5% for a sustained hold.
+### `low-across-board`, `knight-looking-up`, `piece-mid-strike`
+No frame yet. Judge against the global look above plus the nearest reference, and say in your
+critique that you judged without a direct frame.
 
 ---
 
 ## How the critic uses this
 
-For each round, the critic gets: the render, and either the reference frame (if dropped in) or
-this brief. It must answer the same question either way — **is this a film frame or a render?** —
-and if it can tell, name the single biggest reason. Not a list. One gap, the biggest one, so the
-builder has an unambiguous next move.
+`node tools/critic-pair.mjs --shot=<id> --round=<n>` now returns **mode `blind-pair`** for the three
+shots that have frames: it composites the render and the film frame as panels A and B in a seeded
+order and hides the answer in `.critic-keys/` — which you must not open. Decide which panel is the
+film, commit to it, then name the single biggest tell. One gap, the biggest one, so the builder has
+an unambiguous next move.

@@ -25,7 +25,12 @@ async function toDataUrl(p) {
   return `data:${mime(p)};base64,${b.toString('base64')}`;
 }
 
-const ANALYSE = `(url) => new Promise((resolve, reject) => {
+/**
+ * Runs INSIDE the browser. Must be passed to page.evaluate as a real function —
+ * passing it as a string makes Playwright treat it as an expression, which silently
+ * yields undefined instead of results.
+ */
+const ANALYSE = (url) => new Promise((resolve, reject) => {
   const img = new Image();
   img.onerror = () => reject(new Error('decode failed'));
   img.onload = () => {
@@ -124,7 +129,7 @@ const ANALYSE = `(url) => new Promise((resolve, reject) => {
     });
   };
   img.src = url;
-})`;
+});
 
 const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader'] });
 const page = await browser.newPage();

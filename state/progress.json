@@ -1,6 +1,6 @@
 {
-  "updated": "stage 1 in flight — chess engine, chessmen, chamber, board",
-  "note": "4 builders dispatched, each with an independent fresh-context critic behind it",
+  "updated": "reference frames received — bar corrected, blind A/B now live",
+  "note": "3 real frames installed; SHOT_BRIEFS.md rewritten against them (earlier brief was wrong on palette, board finish, piece form and wall treatment)",
   "seed": 20250811,
   "totalRounds": 0,
   "pieces": [
@@ -12,7 +12,7 @@
       "round": 0,
       "status": "building",
       "render": "refs/renders/r0-wide.png",
-      "reference": null,
+      "reference": "refs/frames/wide-establishing.webp",
       "verdict": null,
       "biggestGap": null,
       "history": []
@@ -25,7 +25,7 @@
       "round": 0,
       "status": "pending",
       "render": "refs/renders/r0-wide.png",
-      "reference": null,
+      "reference": "refs/frames/wide-establishing.webp",
       "verdict": null,
       "biggestGap": null,
       "history": []
@@ -64,7 +64,7 @@
       "round": 0,
       "status": "pending",
       "render": null,
-      "reference": null,
+      "reference": "refs/frames/aftermath-rubble.webp",
       "verdict": null,
       "biggestGap": null,
       "history": []
@@ -90,7 +90,7 @@
       "round": 0,
       "status": "building",
       "render": null,
-      "reference": null,
+      "reference": "refs/frames/king-surrender.webp",
       "verdict": null,
       "biggestGap": null,
       "history": []

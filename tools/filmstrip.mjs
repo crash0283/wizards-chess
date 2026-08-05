@@ -126,7 +126,8 @@ for (const [i, t] of times.entries()) {
   console.log(`  frame ${i + 1}/${N}  t=${t.toFixed(3)}s`);
 }
 
-const SHEET = `async ([panels, cols, w, h]) => {
+/** Runs INSIDE the browser — must be passed to evaluate as a real function, not a string. */
+const SHEET = async ([panels, cols, w, h]) => {
   const imgs = await Promise.all(panels.map((p) => new Promise((res, rej) => {
     const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = p.dataUrl;
   })));
@@ -146,7 +147,7 @@ const SHEET = `async ([panels, cols, w, h]) => {
     g.drawImage(img, x, y + LBL, w, h);
   });
   return c.toDataURL('image/png');
-}`;
+};
 
 const sheet = await page.evaluate(SHEET, [panels, COLS, W, H]);
 await writeFile(out, Buffer.from(sheet.split(',')[1], 'base64'));

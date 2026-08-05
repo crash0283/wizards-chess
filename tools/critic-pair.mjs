@@ -59,7 +59,8 @@ let h = 2166136261 >>> 0;
 for (const ch of `${shot}:${round}:pairing`) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
 const renderIsA = ((h >>> 0) % 2) === 0;
 
-const COMPOSITE = `async ([aUrl, bUrl]) => {
+/** Runs INSIDE the browser — must be passed to evaluate as a real function, not a string. */
+const COMPOSITE = async ([aUrl, bUrl]) => {
   const load = (u) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = u; });
   const [a, b] = await Promise.all([load(aUrl), load(bUrl)]);
   const PW = 1280, PH = Math.round(PW / (a.naturalWidth / a.naturalHeight));
@@ -77,7 +78,7 @@ const COMPOSITE = `async ([aUrl, bUrl]) => {
   g.fillText('A', 14, 32); fit(a, LABEL);
   g.fillText('B', 14, LABEL + PH + GAP + 32); fit(b, LABEL * 2 + PH + GAP);
   return c.toDataURL('image/png');
-}`;
+};
 
 const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader'] });
 const page = await browser.newPage();

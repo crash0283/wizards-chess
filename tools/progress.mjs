@@ -48,14 +48,15 @@ const STATUS_RANK = { failing: 0, improving: 1, critiqued: 2, building: 3, pendi
 
 const mime = (p) => ({ '.png': 'image/png', '.webp': 'image/webp' })[extname(p).toLowerCase()] ?? 'image/jpeg';
 
-const SHRINK = `async ([url, maxW]) => {
+/** Runs INSIDE the browser — must be passed to evaluate as a real function, not a string. */
+const SHRINK = async ([url, maxW]) => {
   const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
   const s = Math.min(1, maxW / img.naturalWidth);
   const c = document.createElement('canvas');
   c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', 0.74);
-}`;
+};
 
 const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader'] });
 const page = await browser.newPage();
