@@ -1,6 +1,6 @@
 {
-  "updated": "lighting rebuilt against the frames — room is cold, flames are local",
-  "note": "exposure now matches the film exactly; saturation and flame character are the open gaps",
+  "updated": "game flow built and verified — real checkmate on the board with an accumulated debris field",
+  "note": "builder/critic loop halted: the account monthly spend limit was reached. Destruction and camera remain round-0 placeholders.",
   "seed": 20250811,
   "totalRounds": 0,
   "pieces": [
@@ -9,53 +9,90 @@
       "label": "Chamber — the stone hall",
       "blurb": "Architecture, masonry, scale, the darkness overhead. Judged on whether the room reads as a real 25 m subterranean hall.",
       "shot": "wide-establishing",
-      "round": 0,
-      "status": "building",
-      "render": "refs/renders/r0-wide.png",
+      "round": 2,
+      "status": "improving",
+      "render": "refs/renders/r2-wide.png",
       "reference": "refs/frames/wide-establishing.webp",
-      "verdict": null,
-      "biggestGap": null,
-      "history": []
+      "verdict": "obviously a render",
+      "biggestGap": "Round-2 rebuild brought architecture in against the board; not yet re-critiqued (spend limit).",
+      "history": [
+        {
+          "round": 1,
+          "verdict": "obviously a render",
+          "gap": "room does not enclose the board"
+        }
+      ],
+      "confidence": "high",
+      "critiqueDetail": "Round 1: the room did not enclose the board, reading as a lit diorama in an empty warehouse. Round 2 rebuilt to 2,562 lines with piers hard against the board edges."
     },
     {
       "id": "lighting",
       "label": "Lighting — firelight and air",
       "blurb": "Uplight from low sources, unstable flicker, fast falloff, volumetric haze, filmic tone response.",
       "shot": "wide-establishing",
-      "round": 1,
-      "status": "building",
-      "render": "refs/renders/wip-light.png",
+      "round": 2,
+      "status": "failing",
+      "render": "refs/renders/r2-wide.png",
       "reference": "refs/frames/wide-establishing.webp",
-      "verdict": null,
-      "biggestGap": null,
-      "history": [],
-      "metrics": "medianLum 0.086 vs 0.086 (exact) | cool 0.302 vs 0.324 | sat 0.605 vs 0.242 | litHue 22deg vs 224deg"
+      "verdict": "obviously a render",
+      "biggestGap": "Nothing reaches black — fracDeepShadow 0.19 vs the film 0.33; the global ambient still grazes every surface evenly.",
+      "history": [
+        {
+          "round": 1,
+          "verdict": "obviously a render",
+          "gap": "flames emit no light at all"
+        },
+        {
+          "round": 2,
+          "verdict": "obviously a render",
+          "gap": "nothing in the frame goes to black"
+        }
+      ],
+      "metrics": "medianLum +0.008 | litHue -5.1deg | coolFrac -0.011 | fracBlown -0.001 | fracDeepShadow -0.142 | sat +0.090",
+      "confidence": "high",
+      "critiqueDetail": "Two blind rounds run, critic correctly identified the film both times. Round 1 fixed the palette, round 2 made flames emit real light (warmFraction 0.076 to 0.149). Blacks remain the open gap; rounds 3-4 were dispatched but did not run."
     },
     {
       "id": "board",
       "label": "Board — the playing floor",
       "blurb": "8×8 of worn stone set flush with the floor. Mortar, grit, dust drifts, and impact scarring.",
       "shot": "low-across-board",
-      "round": 0,
-      "status": "building",
-      "render": null,
+      "round": 1,
+      "status": "failing",
+      "render": "refs/renders/r2-wide.png",
       "reference": "refs/frames/low-across-board.webp",
-      "verdict": null,
-      "biggestGap": null,
-      "history": []
+      "verdict": "obviously a render",
+      "biggestGap": "Light squares need bold dark branching ink-veins and a broad dust-scuffed polish; the reflection is mirror-sharp and the inlaid border strip is missing.",
+      "history": [
+        {
+          "round": 1,
+          "verdict": "obviously a render",
+          "gap": "no marble veining; floor is the lowest-detail region when in the film it is the highest"
+        }
+      ],
+      "confidence": "high",
+      "critiqueDetail": "gradientAnisotropy 1.95 vs the film 2.68 — gradients are blobby because there is no veining, joint inlay or directional grain. Round-2 builder did not run (spend limit)."
     },
     {
       "id": "pieces",
       "label": "Pieces — carved stone chessmen",
       "blurb": "Six piece types per side as chiselled, weathered, chipped stone. Judged at extreme low angle.",
       "shot": "knight-looking-up",
-      "round": 1,
-      "status": "building",
-      "render": "refs/renders/wip-knight.png",
+      "round": 2,
+      "status": "improving",
+      "render": "refs/renders/r2-wide.png",
       "reference": "refs/frames/knight-looking-up.webp",
-      "verdict": null,
-      "biggestGap": null,
-      "history": []
+      "verdict": "obviously a render",
+      "biggestGap": "Round-2 rebuild landed figurative geometry; not yet re-critiqued (spend limit).",
+      "history": [
+        {
+          "round": 1,
+          "verdict": "obviously a render",
+          "gap": "no figurative geometry — cones, not carved combatants"
+        }
+      ],
+      "confidence": "high",
+      "critiqueDetail": "Round 1 was judged obviously a render: no figurative geometry, and detailTotal HIGHER than the film (0.0233 vs 0.0135) proving the energy was faceting noise rather than carving. Round 2 rebuilt with explicit limbs, mouldings and colonnettes plus crease-angle shading."
     },
     {
       "id": "destruction",
@@ -109,14 +146,23 @@
       "id": "game",
       "label": "Game — the fight itself",
       "blurb": "Turn loop, pieces walking, captures triggering destruction, the engine answering, checkmate ending it.",
-      "shot": "piece-mid-strike",
-      "round": 0,
-      "status": "pending",
-      "render": null,
-      "reference": "refs/frames/piece-mid-strike.webp",
-      "verdict": null,
-      "biggestGap": null,
-      "history": []
+      "shot": "king-surrender",
+      "round": 1,
+      "status": "passed",
+      "render": "refs/renders/r2-king.png",
+      "reference": "refs/frames/king-surrender.webp",
+      "verdict": "functionally complete",
+      "biggestGap": "none on function — all three demo lines independently verified as real checkmates",
+      "history": [
+        {
+          "round": 1,
+          "verdict": "functionally complete",
+          "gap": "none — 3/3 demo lines verified as real checkmate with zero legal replies"
+        }
+      ],
+      "confidence": "high",
+      "critiqueDetail": "Turn loop drives the verified engine. Captures trigger strike, shatter, light flare, camera shake and marble scarring; wreckage stays on the board for the rest of the game. Checkmate ends it with the king releasing its blade. Interactive click-to-move works against the engine. Replay is a pure function of world.time so captures stay deterministic.",
+      "metrics": "wreckage line: 21 plies, 9 captures, replayLegal=true, fenMatch=true, inCheck=true, legalReplies=0, CHECKMATE=true"
     }
   ]
 }

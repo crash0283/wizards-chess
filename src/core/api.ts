@@ -99,6 +99,13 @@ export interface Game {
   state(): GameState;
   /** Force a position — used by capture shots that need a specific board. */
   setPosition(fen: string): void;
+  /**
+   * Put the scene into the state a given shot needs before t=0.
+   * `king-surrender` needs the final mated position and a board strewn with the
+   * wreckage of every capture; `piece-mid-strike` needs a capture landing at t=0.62.
+   * Called once by main.ts after start().
+   */
+  stage(shotId: string): void;
 }
 
 export type Factory<T> = (world: World, deps?: any) => T;

@@ -71,6 +71,7 @@ async function boot() {
   const game = createGame(world, { board, pieces, destruction, lighting, camera });
   game.start();
   if (req.fen) game.setPosition(req.fen);
+  else game.stage(req.shot || 'wide-establishing');
 
   const hud = document.getElementById('hud')!;
   if (!req.showHud) hud.classList.add('hidden');
