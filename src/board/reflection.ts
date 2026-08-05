@@ -166,8 +166,10 @@ export function createPlanarReflection(world: World, planeY: number): PlanarRefl
     texture: rt.texture,
     textureMatrix,
     // Cap the blur: the reference reflections are broad but still legible as pieces,
-    // and the top of a mip chain is a flat colour, not a reflection.
-    maxLod: high ? 2.8 : 2.0,
+    // and the top of a mip chain is a flat colour, not a reflection. Raised from 2.8
+    // because the shader now takes its cleanest sample at 0.44 of this — the film's
+    // floor never returns a sharp image of the room, only a broad smear of it.
+    maxLod: high ? 3.6 : 2.4,
     driver,
     exclude,
     dispose() {

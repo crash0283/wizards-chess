@@ -70,6 +70,55 @@ float bFade(float featureSize, float px){
 }
 
 /**
+ * The marble figure.
+ *
+ * Measured off \`low-across-board\`: a light square carries one or two BOLD dark sweeps
+ * running right across it — ten to thirty centimetres wide, branching, with soft smoky
+ * bleed either side — plus a finer tributary network hanging off them. The mistake that
+ * makes a floor read as CG is drawing this at hairline width: a two-centimetre vein is
+ * sub-pixel from anywhere but the front row, so the field flattens to featureless gloss
+ * exactly where the reference is at its busiest. So the leading generation here is an
+ * order of magnitude coarser than a "vein" normally is, and only the third generation is
+ * fine enough to need band-limiting.
+ *
+ *   p      marble-space position, metres, already rotated per slab
+ *   w      vein half-width in field units (sets the fraction of the slab under figure)
+ *   px     world size of a pixel, for band-limiting the finest generation
+ *
+ * Returns  x = ink core, y = smoky bleed, z = broad cloud, w = the fine tributary net.
+ */
+vec4 bMarbleFigure(vec2 p, float w, float px){
+  // Ragged the vein edges. Thresholding a smooth field gives contour lines — even,
+  // wire-like, unmistakably drawn; a real ink vein has a torn edge. Perturbing the field
+  // just before the threshold, at a scale finer than the vein is wide, buys that.
+  float rag = (bFbm(p * 2.6 + 5.0, 3) - 0.5) * 0.055;
+  // Generation 1 — the bold sweeps. 0.13 cycles/m: roughly one crossing per square.
+  float t1 = bTurb(p * 0.130, 4) + rag;
+  float core = bVein(t1, w);
+  float bleed = bVein(t1, w * 5.5);
+  // Generation 2 — tributaries feeding the same warped field three times finer.
+  float t2 = bTurb(p * 0.430 + 21.7, 4) + rag * 0.7;
+  float trib = bVein(t2, w * 0.72);
+  float tribBleed = bVein(t2, w * 3.0);
+  // Generation 3 — hairlines. Faded out once they fall under a pixel.
+  float t3 = bTurb(p * 1.55 + 63.1, 3);
+  float hair = bVein(t3, w * 0.42) * bFade(0.055, px);
+  // Where the figure gathers. Marble is not uniformly veined: it runs in swathes with
+  // clear stone between them, and that is most of what makes it read as stone at all.
+  float swathe = 0.34 + 1.00 * smoothstep(0.30, 0.78, bFbm(p * 0.088 + 7.0, 3));
+  float cloud = bFbm(p * 0.26 + 11.0, 4);
+  // The figure is not only lines. One side of each field is heavier stone, so the veins
+  // sit inside broad soft masses rather than floating on clean white — which is what the
+  // reference's light squares actually look like.
+  float mass = (smoothstep(0.545, 0.415, t1) + 0.55 * smoothstep(0.535, 0.455, t2));
+  core = clamp((core + trib * 0.80 + hair * 0.44) * swathe, 0.0, 1.0);
+  return vec4(core,
+              clamp((bleed * 0.65 + tribBleed * 0.35 + mass * 0.95) * swathe, 0.0, 1.0),
+              clamp(0.5 + 2.4 * (cloud - 0.5), 0.0, 1.0),
+              clamp(trib + hair * 0.7, 0.0, 1.0));
+}
+
+/**
  * Two rows of small alternating tesserae — the inlaid geometric band that runs down both
  * sides of every joint and right round the field. This is the finest detail in the
  * reference frame and the reason its floor plane reads as the highest-detail region of
@@ -137,27 +186,37 @@ uniform float uReflLod;
 uniform vec3 uReflTint;
 
 /**
- * The film's floor is reflective but it is not a mirror: the reflected ranks are broad,
- * soft-edged smears, dulled and broken up by the dust and scuffing lying on the polish.
- * So the sample is pushed a long way up the mip chain even where the stone is at its
- * cleanest (the 0.34 floor below), ripples with the surface normal, and dies wherever
- * the marble is dusty, veined or worn.
+ * The film's floor is reflective but it is not a mirror. Sampling the mirror pass at one
+ * tap and a low mip gives an oil-slick, wet-plastic surface: a second, upside-down copy
+ * of the room drawn as sharply as the room itself. The reference's is nothing like that —
+ * it is a BROAD smear, stretched along the view direction, soft-edged, and torn up by the
+ * dry dust lying on the polish.
+ *
+ * Three things do that here. The sample is pushed well up the mip chain even where the
+ * stone is cleanest; it is then smeared with two further taps offset *along* the
+ * reflected vertical, because a floor reflection is anisotropic — it blurs down the image
+ * far more than across it; and the whole result is scaled by the caller's dust/wear mask
+ * so the smear breaks up instead of lying over the floor like varnish.
+ *
+ * It is still never blurred flat: past the top of a mip chain a reflection stops being an
+ * image and becomes a uniform pale wash, which erases the light/dark chequer far more
+ * thoroughly than a sharp mirror ever would.
  */
 vec3 boardReflection(vec4 projected, vec3 nWorld, float rough, float mask, float jitter){
   if (uReflStrength <= 0.0 || projected.w <= 0.0) return vec3(0.0);
   vec2 uv = projected.xy / projected.w;
   // Ripple the sample by the surface normal so the reflection breaks up over the
   // slab's undulation instead of sliding across it like a mirror.
-  uv += nWorld.xz * 0.055 + vec2(jitter, jitter * 0.6) * 0.02;
+  uv += nWorld.xz * 0.090 + vec2(jitter * 0.034, jitter * 0.018);
   // Soft fade off the edge of the mirror rather than a hard cut.
   vec2 e = min(uv, 1.0 - uv);
-  float inside = smoothstep(-0.03, 0.045, min(e.x, e.y));
+  float inside = smoothstep(-0.03, 0.060, min(e.x, e.y));
   if (inside <= 0.0) return vec3(0.0);
-  // Blurred, but never blurred flat: past the top of a mip chain a reflection stops
-  // being an image and becomes a uniform pale wash laid over the whole floor, which
-  // erases the light/dark chequer far more thoroughly than a sharp mirror ever would.
-  float lod = uReflLod * clamp(0.22 + (rough - 0.05) * 1.8, 0.0, 1.0);
-  vec3 c = textureLod(uRefl, clamp(uv, vec2(0.0), vec2(1.0)), lod).rgb;
+  float lod = uReflLod * clamp(0.44 + (rough - 0.05) * 1.55, 0.0, 1.0);
+  float sp = 0.011 + 0.042 * rough;
+  vec3 c = textureLod(uRefl, clamp(uv, vec2(0.0), vec2(1.0)), lod).rgb * 0.46;
+  c += textureLod(uRefl, clamp(uv + vec2(0.0, sp), vec2(0.0), vec2(1.0)), lod + 0.75).rgb * 0.29;
+  c += textureLod(uRefl, clamp(uv - vec2(0.0, sp), vec2(0.0), vec2(1.0)), lod + 0.75).rgb * 0.25;
   return c * uReflTint * mask * inside;
 }
 `;

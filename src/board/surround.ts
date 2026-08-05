@@ -110,11 +110,14 @@ function baseMaterial(
     uDust: { value: new THREE.Color(0x9a9689).convertSRGBToLinear() },
     uWear: { value: shared.wear },
     uWearExtent: { value: shared.wearExtent },
-    uRefl: { value: shared.refl },
+    // The kerb is the one board mesh that renders INTO the mirror pass (it stands above
+    // the plane), so leaving the mirror bound on a material that never reads it costs a
+    // GL_INVALID_OPERATION feedback loop every frame. Bind nothing where reflect is 0.
+    uRefl: { value: reflect > 0 ? shared.refl : null },
     uReflMatrix: { value: shared.reflMatrix },
     uReflLod: { value: shared.reflLod },
-    uReflStrength: { value: shared.refl ? reflect : 0 },
-    uReflTint: { value: new THREE.Color(0.92, 0.96, 1.0) },
+    uReflStrength: { value: shared.refl && reflect > 0 ? reflect : 0 },
+    uReflTint: { value: new THREE.Color(0.98, 0.99, 1.0) },
   };
   m.onBeforeCompile = patch(frag);
   m.customProgramCacheKey = () => name;
@@ -178,14 +181,23 @@ uniform float uBandHalf;
 `;
 
 /**
- * The perimeter strip. Same inlay language as the joint bands, three rows deep and laid
- * on a wider bed: a dark rule, a pale fillet, a dark rule, then a dense chequer of small
- * alternating tesserae, then the same three rules mirrored on the kerb side.
+ * The perimeter strip, between the marble field and the kerb.
  *
- * In the reference this strip is the single finest detail in the frame — a dense run of
- * small repeating elements, not a dark band with speckle on it — so every element here
- * is drawn at real size and antialiased against the pixel footprint, and the whole band
- * settles to its own mean tone rather than to noise once the elements go sub-pixel.
+ * In `low-across-board` this is the single finest detail in frame: a dense run of small
+ * repeating alternating elements, PALE against dark, bright enough to read all the way
+ * to the far corner of the board. The previous build drew it dark-on-dark — a near-black
+ * bed with 60 % coverage of small tesserae — and in a room lit by nothing but small
+ * flames the whole band crushed to a plain dark strip with some speckle in it, which is
+ * precisely what the critique caught.
+ *
+ * So the design here is contrast-first:
+ *   - the bed is a mid slate, not near-black, so the band never falls to a silhouette;
+ *   - the elements are chunky (two rows of ~17 cm blocks, not three rows of 10 cm), so
+ *     they survive the perspective all the way round the field;
+ *   - the pale stone is a bright limestone and holds a large fraction of the band;
+ *   - three cut rules bound it either side, and every element stands proud of its bed,
+ *     so a flame at kerb height rakes the whole grid and each block gets a lit face and
+ *     a shaded one. That relief is what makes it read as inlay rather than as paint.
  */
 const BORDER_FRAG = /* glsl */ `
   vec2 w = vWPos.xz;
@@ -203,38 +215,51 @@ const BORDER_FRAG = /* glsl */ `
   float aaS = clamp(px / uCell, 0.0008, 0.5);
   float tf = bFade(uCell * 0.42, px);
 
-  // Three rows of tesserae down the middle sixty per cent of the band.
-  vec4 tess = bTess(clamp((t - 0.20) / 0.60, 0.0, 1.0), s, uCell, 3.0, aaT / 0.60, aaS);
+  // Two rows of chunky tesserae down the middle 62 % of the band.
+  vec4 tess = bTess(clamp((t - 0.19) / 0.62, 0.0, 1.0), s, uCell, 2.0, aaT / 0.62, aaS);
+  // A second, half-pitch run along the very centre: the dense bead the reference's strip
+  // carries down its middle, and the element that keeps the strip alive at distance.
+  vec4 bead = bTess(clamp((t - 0.44) / 0.12, 0.0, 1.0), s + uCell * 0.25, uCell * 0.5, 1.0,
+                    aaT / 0.12, aaS * 2.0);
+  float beadIn = 1.0 - smoothstep(0.115, 0.125, abs(t - 0.5));
 
-  vec3 albedo = mix(uField, uTessPale, tess.x * 0.94);
-  albedo = mix(albedo, uTessDark, tess.y * 0.90);
+  vec3 albedo = uField;
+  albedo = mix(albedo, uTessPale, tess.x * 0.97);
+  albedo = mix(albedo, uTessDark, tess.y * 0.92);
+  albedo = mix(albedo, uTessPale * 1.05, bead.x * beadIn * 0.95);
+  albedo = mix(albedo, uLine, bead.y * beadIn * 0.85);
   albedo = mix(uTessMean, albedo, tf);
 
   // The rules bounding the chequer: dark / pale / dark, mirrored either side.
-  float dark = bRule(t, 0.035, 0.035, aaT) + bRule(t, 0.185, 0.028, aaT)
-             + bRule(t, 0.815, 0.028, aaT) + bRule(t, 0.965, 0.035, aaT);
-  float pale = bRule(t, 0.110, 0.036, aaT) + bRule(t, 0.890, 0.036, aaT);
-  albedo = mix(albedo, uLine, clamp(dark, 0.0, 1.0));
-  albedo = mix(albedo, uTessPale * 1.04, clamp(pale, 0.0, 1.0) * 0.85);
+  float dark = bRule(t, 0.028, 0.028, aaT) + bRule(t, 0.170, 0.024, aaT)
+             + bRule(t, 0.830, 0.024, aaT) + bRule(t, 0.972, 0.028, aaT);
+  float pale = bRule(t, 0.098, 0.040, aaT) + bRule(t, 0.902, 0.040, aaT);
+  albedo = mix(albedo, uLine, clamp(dark, 0.0, 1.0) * 0.92);
+  albedo = mix(albedo, uTessPale * 1.10, clamp(pale, 0.0, 1.0) * 0.90);
   float rules = clamp(dark + pale, 0.0, 1.0);
   float inlay = clamp(tess.z + rules, 0.0, 1.0);
 
   // Tesserae go missing. Where one has, the bed shows and the surface drops.
-  float lost = step(0.90, bHash21(floor(vec2(s / uCell, t * 3.0)) + 5.7)) * tess.z * tf;
+  float lost = step(0.92, bHash21(floor(vec2(s / uCell, t * 2.0)) + 5.7)) * tess.z * tf;
   albedo = mix(albedo, uGrime, lost * 0.9);
 
   float grain = bFbm(w * 9.0, 3);
   float fine = mix(0.5, bNoise(w * 33.0), bFade(0.03, px));
-  albedo *= 0.84 + 0.26 * grain + 0.10 * fine;
-  albedo = mix(albedo, uGrime, clamp(wear.z, 0.0, 1.0) * 0.40);
+  albedo *= 0.90 + 0.17 * grain + 0.07 * fine;
+  // Weathering stains the strip; it must not swallow it. Kept off the pale elements,
+  // which are the only reason the band reads at all.
+  albedo = mix(albedo, uGrime, clamp(wear.z, 0.0, 1.0) * 0.22 * (1.0 - tess.x * 0.8));
 
   float dust = clamp(wear.x * (0.6 + 0.8 * wear.w), 0.0, 1.0);
   albedo = mix(albedo, uDust, dust * 0.85);
 
   diffuseColor.rgb *= albedo;
-  gRough = clamp(0.44 + tess.w * 0.22 + lost * 0.40
-                 + wear.z * 0.30 + dust * 0.55 + (grain - 0.5) * 0.14, 0.06, 1.0);
-  gReflMask = clamp((1.0 - dust * 1.4) * (1.0 - lost) * (0.30 + 0.35 * (1.0 - inlay)), 0.0, 1.0);
+  // The strip is polished stone set into polished stone, so it takes nearly as much of
+  // the room as the marble does. Starving it of reflection is what left it reading as a
+  // plain dark band beside a bright field.
+  gRough = clamp(0.34 + tess.w * 0.26 + lost * 0.40
+                 + wear.z * 0.24 + dust * 0.55 + (grain - 0.5) * 0.14, 0.06, 1.0);
+  gReflMask = clamp((1.0 - dust * 1.4) * (1.0 - lost) * (0.48 + 0.34 * (1.0 - inlay)), 0.0, 1.0);
   gReflJitter = grain - 0.5;
 
   float ee = max(0.005, px * 0.7);
@@ -248,8 +273,9 @@ const BORDER_FRAG = /* glsl */ `
   vec2 acrossDir = (aw.x > aw.y) ? vec2(sign(w.x), 0.0) : vec2(0.0, sign(w.y));
   vec2 alongDir = vec2(-acrossDir.y, acrossDir.x);
   float ridge = (tess.z - 0.5) * 2.0 * tf;
-  gNormalPert += vec3(acrossDir.x, 0.0, acrossDir.y) * (ridge * 0.26 - rules * 0.30 - lost * 0.55);
-  gNormalPert += vec3(alongDir.x, 0.0, alongDir.y) * tf * (fract(s / uCell) - 0.5) * 0.40;
+  gNormalPert += vec3(acrossDir.x, 0.0, acrossDir.y) * (ridge * 0.34 - rules * 0.38 - lost * 0.60);
+  gNormalPert += vec3(alongDir.x, 0.0, alongDir.y) * tf
+               * ((fract(s / uCell) - 0.5) * 0.48 + (fract(s / (uCell * 0.5)) - 0.5) * beadIn * 0.40);
 `;
 
 // ---------------------------------------------------------------------------------------
@@ -294,10 +320,35 @@ const KERB_FRAG = /* glsl */ `
   // Pitting: this stone has been spalled by five centuries of fires burning on it.
   float pit = smoothstep(0.60, 0.78, bNoise(w * 17.0)) * bFade(0.06, px);
 
+  // --- worked surface -------------------------------------------------------------------
+  // The kerb's top face is the largest single plane the low camera sees, and left as
+  // smooth mottled grey it is the flattest thing in frame. It is dressed stone: it
+  // carries the mason's tooling, the spalls that tooling started, and the dust that has
+  // drifted against the board's edge and never been swept out.
+  //
+  // The face is drag-tooled: long shallow ridges running the LENGTH of the kerb, four
+  // centimetres apart, with a finer chatter over them and a weak cross-hatch left by the
+  // point. Ridges along the band are the ones a flame sitting on the kerb rakes end to
+  // end, and they are the strongest horizontal signal the near half of the frame has.
+  float acrossM = dot(w, outw);
+  float alongM = dot(w, alongDir);
+  float chat = bNoise(vec2(acrossM * 26.0, alongM * 2.2 + blockId * 7.3));
+  float chat2 = bNoise(vec2(acrossM * 71.0, alongM * 5.0 + blockId * 2.1)) * bFade(0.030, px);
+  float chatX = bNoise(vec2(alongM * 31.0, acrossM * 3.4 + blockId * 4.9)) * bFade(0.034, px);
+  float tooling = ((chat - 0.5) * 0.58 + (chat2 - 0.5) * 0.30 + (chatX - 0.5) * 0.24)
+                * bFade(0.085, px);
+  // Bigger, sparser spalls where a corner has flaked away: hard-edged, pale inside.
+  float spall = smoothstep(0.70, 0.80, bFbm(w * 5.5 + 31.0, 3)) * bFade(0.12, px);
+  // Fine sand and stone powder standing on the face.
+  float sand = smoothstep(0.72, 0.90, bNoise(w * 44.0)) * bFade(0.024, px);
+
   vec3 albedo = mix(uStone, uStoneB, mottle);
   albedo *= 0.88 + 0.24 * blockTone;
   albedo *= 0.84 + 0.26 * grain + 0.07 * fine;
+  albedo *= 1.0 + tooling * 0.20;
   albedo = mix(albedo, uGrime, pit * 0.45);
+  albedo = mix(albedo, uStone * 1.20, spall * 0.45);
+  albedo = mix(albedo, uDust * 0.92, sand * 0.28);
 
   // Centuries of fires burning on the top face. Soot, not a warm glow.
   float top = smoothstep(uTopU - 0.06, uTopU + 0.02, u)
@@ -311,11 +362,17 @@ const KERB_FRAG = /* glsl */ `
   // Broken arrises show pale, raw stone.
   albedo = mix(albedo, uStone * 1.28, arris * smoothstep(0.45, 0.75, bNoise(w * 9.0)) * 0.7);
 
+  // Dust and sweepings drift into the angle against the board and lie along the tread
+  // noses. On the top face it is what the flames are actually standing in.
+  float drift = (1.0 - smoothstep(0.0, 0.34, u)) * (0.35 + 0.65 * bFbm(w * 2.2 + 5.0, 3));
+  albedo = mix(albedo, uDust, clamp(drift, 0.0, 1.0) * 0.30 * top);
+
   float dust = clamp(wear.x * (0.5 + 0.8 * wear.w), 0.0, 1.0);
   albedo = mix(albedo, uDust, dust * 0.8);
 
   diffuseColor.rgb *= albedo;
-  gRough = clamp(0.78 + 0.12 * grain + joint * 0.12 + dust * 0.15 + pit * 0.10 - scorch * 0.06, 0.3, 1.0);
+  gRough = clamp(0.78 + 0.12 * grain + joint * 0.12 + dust * 0.15 + pit * 0.10 - scorch * 0.06
+                 + sand * 0.14 + spall * 0.10 + tooling * 0.08, 0.3, 1.0);
   gReflMask = 0.0;
   gReflJitter = 0.0;
 
@@ -325,6 +382,14 @@ const KERB_FRAG = /* glsl */ `
   float hx = bFbm((w + vec2(ee, 0.0)) * 3.2, 3) * 0.0060 + bNoise((w + vec2(ee, 0.0)) * 15.0) * 0.0018 * bFade(0.066, px);
   float hz = bFbm((w + vec2(0.0, ee)) * 3.2, 3) * 0.0060 + bNoise((w + vec2(0.0, ee)) * 15.0) * 0.0018 * bFade(0.066, px);
   gNormalPert = vec3(-(hx - h0) / ee, 0.0, -(hz - h0) / ee);
+  // The tooling is real relief, and it runs across the band: a run of shallow parallel
+  // ridges a flame at kerb height rakes the length of. Without this the top face is a
+  // painted plane, which is the one note the low camera cannot forgive.
+  gNormalPert += vec3(outw.x, 0.0, outw.y) * tooling * 0.42;
+  gNormalPert += vec3(alongDir.x, 0.0, alongDir.y) * tooling * 0.12;
+  // Spalls are shallow craters; sand is grit standing on the face.
+  gNormalPert += vec3(bNoise(w * 6.2) - 0.5, 0.0, bNoise(w * 6.2 + 9.0) - 0.5) * spall * 0.55;
+  gNormalPert += vec3(bNoise(w * 52.0) - 0.5, 0.0, bNoise(w * 52.0 + 3.0) - 0.5) * sand * 0.34;
   // The joint is a groove: the surface turns down into it from both sides.
   float side = sign(fract(blk) - 0.5);
   gNormalPert += vec3(alongDir.x, 0.0, alongDir.y) * side * joint * 0.55;
@@ -397,19 +462,23 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
     BORDER_HEAD,
     BORDER_FRAG,
     {
-      uField: { value: c(0x33363c) },
-      uTessDark: { value: c(0x3b3e46) },
-      uTessPale: { value: c(0xcdc9bf) },
-      uTessMean: { value: c(0x6f6f6c) },
-      uLine: { value: c(0x22262c) },
-      uGrime: { value: c(0x3a3831) },
-      // Square tesserae: three rows across the middle 60 % of the band, and a whole
+      // A mid slate bed, not near-black. Probed off the render: between the flames the
+      // strip was landing at 20/255 while the marble beside it sat at 110 — the marble
+      // is reflection-dominated at this grazing angle and the strip was not, so a dark
+      // bed put the frame's finest detail below the point where anything is legible.
+      uField: { value: c(0x6a6c70) },
+      uTessDark: { value: c(0x44464d) },
+      uTessPale: { value: c(0xe4dfd0) },
+      uTessMean: { value: c(0x8d8b81) },
+      uLine: { value: c(0x2b2e34) },
+      uGrime: { value: c(0x4d4a41) },
+      // Square tesserae: two rows across the middle 62 % of the band, and a whole
       // number of columns to the side so the pattern closes cleanly at every mitre.
-      uCell: { value: (2 * R.filletIn) / Math.round((2 * R.filletIn) / ((bandHalf * 2 * 0.6) / 3)) },
+      uCell: { value: (2 * R.filletIn) / Math.round((2 * R.filletIn) / ((bandHalf * 2 * 0.62) / 2)) },
       uBandHalf: { value: bandHalf },
     },
     shared,
-    0.55,
+    0.92,
     true,
   );
   const borderGeo = sweepRing(
@@ -469,7 +538,10 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
   const kerb = new THREE.Mesh(kerbGeo, kerbMat);
   kerb.name = 'board-kerb';
   kerb.receiveShadow = true;
-  kerb.castShadow = world.quality === 'high';
+  // Deliberately not a shadow caster. It stands 30 cm proud of a floor and shadows
+  // nothing worth having, but it sits directly outboard of the inlaid border strip —
+  // the finest detail in the reference frame — and its shadow map was helping to bury it.
+  kerb.castShadow = false;
   group.add(kerb);
   meshes.push(kerb);
   geos.push(kerbGeo);

@@ -1,0 +1,20 @@
+{
+  "id": "camera",
+  "round": 3,
+  "status": "failing",
+  "shot": "piece-mid-strike",
+  "render": "refs/renders/piece-mid-strike--camera-r3.png",
+  "reference": "refs/frames/piece-mid-strike.webp",
+  "verdict": "obviously a render",
+  "confidence": "high",
+  "biggestGap": "The camera is in the wrong place with the wrong lens: the film is a long-lens MEDIUM on the strike itself (lunging attacker and detonating target filling the frame, one shallow plane of critical focus), while our camera sits back at a wide establishing distance so the strike is a small cluster of debris in the middle distance and the defocus reads as landscape haze rather than subject isolation.",
+  "critiqueDetail": "I picked B as the film with high confidence and was correct - it was not close. B is framed tight on the action: an armoured pawn with its sword arm fully extended, cape trailing, and an opaque dust burst with dark angular fragments punching through it, all held on one shallow focal plane. Our panel A is a wide, distant, chest-height view where nothing is the subject, nothing is critically sharp, and the depth of field is a smooth front-to-back gradient with no bokeh character on the flames or specular hits. The filmstrip confirms the operator problems too: no readable impact kick or settle at contact, a full-frame exposure blowout at t=0.2s that no camera would do, and from t=1.0s a fuzzy white plume blob floating in the void at upper-left, unattached to the board - so at the chosen t=0.62 there is no strike to photograph at all.",
+  "metrics": "delta medianLuminance -0.0941, meanSaturation -0.0256, fracDeepShadow +0.2909, fracShadow +0.2916, coolFraction -0.4045, histogramEntropy -0.809, gradientAnisotropy -0.724, fracBlown +0.0145, meanLitHueDeg -3.9",
+  "history": [
+    {
+      "round": 3,
+      "verdict": "obviously a render",
+      "gap": "Camera sits at wide establishing distance instead of a long-lens medium on the strike, so nothing is a sharp subject and the defocus reads as landscape haze rather than shallow-DOF isolation."
+    }
+  ]
+}

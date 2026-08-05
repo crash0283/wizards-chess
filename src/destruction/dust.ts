@@ -15,11 +15,13 @@
  *   wisps   small, fast, short-lived, breaking up the silhouette so the edge is never
  *           a smooth arc (a smooth arc is the loudest "this is a sprite" tell there is)
  *
- * Each puff is shaded on the CPU from its position inside the cloud: which way it faces
- * relative to the room's soft overhead light, how deep inside the mass it is, how high
- * it has risen. That per-puff shading is what produces lobes and rolls in the image
- * instead of a flat grey blob, and it is why the puffs are sorted and composited with
- * premultiplied alpha rather than added together.
+ * Shading happens at two scales, and both are needed. Per puff, on the CPU: where it
+ * sits in the mass, which way that faces relative to the room's soft overhead light,
+ * how deep inside it is, how high it has risen. Per pixel, in the shader: the density
+ * here against the density one short step toward the light, which gives every single
+ * puff a lit edge and a shadowed core for one extra texture fetch. Together they are
+ * what produce lobes and rolls instead of a flat grey blob — and they are why the puffs
+ * are sorted and composited with premultiplied alpha rather than added together.
  *
  * Positions are closed-form functions of the puff's age, so the plume is a pure function
  * of world.time — scrub anywhere and get the same frame.

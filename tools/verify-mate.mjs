@@ -32,3 +32,17 @@ for (const id of C.DEMO_LINE_IDS) {
   );
 }
 console.log(bad === 0 ? '\nALL DEMO LINES END IN A VERIFIED REAL CHECKMATE' : `\n${bad} LINE(S) FAILED`);
+
+// Where does the last capture of each line actually happen? The piece-mid-strike and
+// aftermath shots are aimed at a fixed square in src/core/shots.ts, so if the demo's
+// final capture lands somewhere else the camera is pointing at empty board.
+for (const id of C.DEMO_LINE_IDS) {
+  const g = C.buildDemoGame(id);
+  const caps = g.moves.filter((m) => m.capture);
+  const last = caps[caps.length - 1];
+  if (last) {
+    console.log(`${id.padEnd(12)} last capture: ${last.san} victim ${last.capture.piece} ` +
+      `on ${last.capture.file},${last.capture.rank} (${last.toName}) attacker from ` +
+      `${last.fromFile},${last.fromRank}`);
+  }
+}

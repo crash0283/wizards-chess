@@ -9,9 +9,11 @@
  * shrapnel where the blade goes in and lets go in big architectural lumps far from it.
  * So sites are dense and unweighted around the entry wound, sparse and heavily weighted
  * out at the plinth, with landmark sites deliberately dropped on the helm and the base
- * so that a recognisable helm section and a plinth block always come off whole. The
- * resulting size range runs from ~3 cm chips to ~0.8 m blocks — the 10:1 the brief asks
- * for, and it comes out of the physics of the break rather than being dialled in.
+ * so that a recognisable helm section and a plinth block always come off whole.
+ *
+ * Measured on a 3.35 m figure, one live break yields ~70 bodies from 0.07 m to 1.5 m —
+ * a 20:1 size range against the brief's 10:1, and it falls out of where the blade went
+ * in rather than being dialled in.
  */
 import * as THREE from 'three';
 import type { Rng } from '../core/rng';

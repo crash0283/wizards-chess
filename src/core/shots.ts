@@ -76,24 +76,36 @@ export const SHOTS: ShotDef[] = [
     proves: 'Figurative armoured combatants on moulded plinths, rust-stained pale stone, soft background.',
   },
   {
-    // Reference: the thrust lands and the target bursts. Camera square to the strike axis.
+    /**
+     * Reference: a long-lens MEDIUM. The lunging attacker and the detonating target fill
+     * the frame on one shallow plane of critical focus.
+     *
+     * These coordinates are not arbitrary: the demo game's final capture is Qxc8#, so the
+     * victim stands on c8 = (2,7) and the attacker comes along the rank from b8 = (1,7).
+     * An earlier version of this shot was aimed at d5, which is empty — the camera was
+     * pointing at bare board while the destruction happened off-frame, which is why the
+     * strike read as "a small cluster of debris in the middle distance". If the demo line
+     * ever changes, these must follow the new capture square.
+     */
     id: 'piece-mid-strike',
     label: 'Piece mid-strike',
-    eye: [c(3, 4).x + 1.2, 2.55, c(3, 4).z + 7.6],
-    target: [c(3, 4).x - 0.6, 2.45, c(3, 4).z],
-    fov: 40,
-    focus: 7.6,
+    eye: [c(2, 7).x - 0.9, 2.45, c(2, 7).z + 4.1],
+    target: [c(2, 7).x - 1.0, 2.20, c(2, 7).z],
+    fov: 26,
+    focus: 4.2,
     fstop: 2.0,
     t: 0.62,
     judges: ['destruction', 'pieces', 'camera', 'game'],
     proves: 'Committed thrust, opaque white burst, dark angular fragments flying through it.',
   },
   {
+    // Same capture as piece-mid-strike (Qxc8#, victim on c8), a beat later and higher, so
+    // the plume still stands above the debris field it left. See the note on that shot.
     id: 'aftermath-rubble',
     label: 'Aftermath, rubble',
-    eye: [c(3, 4).x + 4.2, 3.05, c(3, 4).z + 3.6],
-    target: [c(3, 4).x, 0.75, c(3, 4).z],
-    fov: 42,
+    eye: [c(2, 7).x + 1.6, 3.70, c(2, 7).z + 5.0],
+    target: [c(2, 7).x - 0.4, 1.35, c(2, 7).z],
+    fov: 34,
     focus: 5.6,
     fstop: 3.2,
     t: 2.35,

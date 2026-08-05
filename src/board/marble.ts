@@ -246,6 +246,8 @@ uniform vec3 uInlayBed;
 uniform vec3 uInlayPale;
 uniform vec3 uInlayDark;
 uniform vec3 uInlayMean;
+uniform vec3 uFigure;
+uniform float uFigureWeight;
 uniform float uVeinScale;
 uniform float uVeinWidth;
 uniform float uVeinWeight;
@@ -256,6 +258,7 @@ uniform float uBump;
 uniform float uSquareTint;
 uniform float uCrack;
 uniform float uDusting;
+uniform float uSpecular;
 
 ${NOISE_GLSL}
 ${WEAR_GLSL}
@@ -297,6 +300,11 @@ float gRough;
 float gReflMask;
 float gReflJitter;
 vec3 gNormalPert;
+// Multiplied into the FINAL fragment colour, after the reflection has been added.
+// See the note in FRAG_OUT: the figure has to survive the mirror, not sit under it.
+vec3 gFigure;
+// Scales the microfacet lobe. See FRAG_LIGHTS_END.
+float gSpecular;
 `;
 
 const FRAG_COLOR = /* glsl */ `
@@ -311,22 +319,15 @@ const FRAG_COLOR = /* glsl */ `
   float ca = cos(ang), sa = sin(ang);
   vec2 mp = mat2(ca, -sa, sa, ca) * loc * uVeinScale + vec2(key.z, key.w) * 137.0;
 
-  // --- veining ----------------------------------------------------------------------
+  // --- the figure ---------------------------------------------------------------------
   // The reference's light squares carry bold dark branching ink-veins running right
-  // across a square: not mottling, a drawn graphic. So the network is built as a wide
-  // core with a soft halo bleeding off it, a second generation of tributaries feeding
-  // into the same warped field, and a swathe mask that makes the whole figure gather in
-  // sweeps and leave clear stone between them — which is what stops it reading as noise.
-  float t1 = bTurb(mp * 0.58, 5);
-  float core = bVein(t1, uVeinWidth);
-  float halo = bVein(t1, uVeinWidth * 4.2);
-  float t2 = bTurb(mp * 1.75 + 53.0, 4);
-  float sub = bVein(t2, uVeinWidth * 0.62);
-  float hair = bVein(t2, uVeinWidth * 0.22) * bFade(0.045, px);
-  float swathe = 0.34 + 0.92 * smoothstep(0.33, 0.76, bFbm(mp * 0.26 + 7.0, 3));
-  core = clamp((core + sub * 0.78) * swathe, 0.0, 1.0);
-  halo = clamp(halo * swathe, 0.0, 1.0);
-  float cloud = 0.5 + 2.2 * (bFbm(mp * 0.85 + 11.0, 3) - 0.5);
+  // across a square: not mottling, a drawn graphic, tens of centimetres wide. See
+  // bMarbleFigure in glsl.ts for why the leading generation is so coarse.
+  vec4 fig = bMarbleFigure(mp, uVeinWidth, px);
+  float core = fig.x;
+  float halo = fig.y;
+  float cloud = fig.z;
+  float hair = fig.w;
 
   vec4 wear = boardWear(w);
   float dust = wear.x;
@@ -343,8 +344,9 @@ const FRAG_COLOR = /* glsl */ `
   albedo = mix(albedo, uVein * 0.88, hair * uVeinWeight * 0.55);
   // Per-slab value shift. Some squares are simply darker stone than their neighbours.
   albedo *= 0.90 + 0.20 * key.w;
-  // Polish worn off: the stone goes lighter, chalkier, less saturated.
-  albedo = mix(albedo, mix(albedo, uFresh, 0.55), worn * 0.75);
+  // Polish worn off: the stone goes lighter, chalkier, less saturated. Kept off the
+  // figure — a worn patch dulls the shine, it does not bleach the vein out of the stone.
+  albedo = mix(albedo, mix(albedo, uFresh, 0.55), worn * 0.55 * (1.0 - core * 0.85));
   // Grime worked down into a crack.
   albedo = mix(albedo, uSoil, crack * 0.8);
   // Knocked-off corners show raw, unweathered stone.
@@ -355,8 +357,8 @@ const FRAG_COLOR = /* glsl */ `
   // broken up and dulled across the whole field by a dry film of stone dust and by
   // traffic scuffing drawn out along the direction of play; without this layer the
   // marble renders as wet plastic, which is the single loudest tell.
-  float grime = smoothstep(0.38, 0.90, bFbm(w * 0.60 + 3.0, 4));
-  float scuff = smoothstep(0.60, 0.97, bNoise(vec2(w.x * 0.55 + w.y * 0.20, w.y * 6.5 - w.x * 1.1)))
+  float grime = smoothstep(0.20, 0.78, bFbm(w * 0.60 + 3.0, 4));
+  float scuff = smoothstep(0.48, 0.92, bNoise(vec2(w.x * 0.55 + w.y * 0.20, w.y * 6.5 - w.x * 1.1)))
               * bFade(0.16, px);
   float film = clamp(grime * 0.78 + scuff * 0.60, 0.0, 1.0) * uDusting;
   albedo = mix(albedo, uDust, film * 0.26);
@@ -399,7 +401,7 @@ const FRAG_COLOR = /* glsl */ `
   bandCol = mix(uInlayMean, bandCol, tf);
   // Fine dark rules bounding the band, and a pale arris catching the light on the very
   // outer edge where the polished face turns down into the chamfer.
-  bandCol = mix(bandCol, uInlayBed * 0.45, bRule(bt, 0.885, 0.038, aaT));
+  bandCol = mix(bandCol, uInlayBed * 0.40, bRule(bt, 0.885, 0.055, aaT));
   bandCol = mix(bandCol, uInlayPale * 1.06, bRule(bt, 0.055, 0.055, aaT) * 0.75);
   // Tesserae go missing; where one has, the bed shows through and the surface drops.
   float lost = step(0.90, bHash21(floor(vec2(bs / B_TESS, bt * 2.0)) + key.zw * 61.0)) * tess.z * tf;
@@ -409,6 +411,30 @@ const FRAG_COLOR = /* glsl */ `
   albedo = mix(albedo, uSoil, toJoint * 0.20 * (1.0 - band));
 
   diffuseColor.rgb *= albedo;
+
+  // --- the figure, again, on top of everything ------------------------------------------
+  // Albedo alone cannot carry the veining in this shot. At the grazing angle the judging
+  // camera sits at, the Fresnel term takes the mirror to full strength, and a reflection
+  // ADDED to a surface swamps whatever that surface's colour was: the marble goes to
+  // featureless glossy white and the figure disappears under it — which is exactly the
+  // wet-plastic floor the reference is not.
+  //
+  // So the figure is also applied multiplicatively at the very end of the fragment, past
+  // the reflection add. That is physically the right place for it as well: vein stone is
+  // softer, takes less polish and scatters more, so it is darker in BOTH the diffuse and
+  // the specular, and a dark vein under a bright reflection stays a dark vein.
+  //
+  // uFigure is < 1 for the light marble (ink veins) and > 1 for the dark (pale veins),
+  // so one expression serves both armies' stone.
+  float figure = clamp(core + hair * 0.45, 0.0, 1.0);
+  gFigure = mix(vec3(1.0), uFigure, figure * uFigureWeight);
+  // Broad value structure across the slab, well below vein scale. This is the layer that
+  // keeps the far half of the board from flattening into a single tone.
+  gFigure *= 0.82 + 0.34 * cloud + 0.10 * halo;
+  // Dust and scuffing stand ON the polish, so they lift the surface rather than tint it.
+  gFigure *= 1.0 + film * 0.10 + clamp(grits, 0.0, 1.0) * 0.12;
+  // The inlay is its own stone: leave it out of the marble's figure entirely.
+  gFigure = mix(gFigure, vec3(1.0), band);
 
   // --- roughness ------------------------------------------------------------------------
   // Polished marble is not uniformly polished. The veins are softer stone and take less
@@ -423,7 +449,7 @@ const FRAG_COLOR = /* glsl */ `
   rough += chip * 0.62;
   rough += dustMask * 0.62;
   rough += score * 0.35;
-  rough += film * 0.44;
+  rough += film * 0.58;
   rough += band * (0.34 + 0.22 * tess.w) + lost * 0.30;
   rough += (bNoise(w * 3.1) - 0.5) * 0.09;
   rough += clamp(grits, 0.0, 1.0) * 0.40;
@@ -436,6 +462,20 @@ const FRAG_COLOR = /* glsl */ `
   gReflMask = clamp((1.0 - dustMask * 1.25) * (1.0 - worn * 0.7) * (1.0 - score) * (1.0 - chip)
                     * (1.0 - film * 0.86) * (1.0 - core * 0.78) * (1.0 - band * 0.92), 0.0, 1.0);
   gReflJitter = (grime - 0.5) * 0.9 + (scuff - 0.5) * 0.5;
+
+  // --- how much specular this stone is allowed --------------------------------------
+  // Roughness alone cannot fix a floor that reads as wet plastic. At the grazing angle
+  // this shot is judged from, Fresnel takes the microfacet lobe to full strength on
+  // every square, and because that lobe is white and ADDITIVE it lands identically on
+  // cream marble and on navy — which is what collapsed a five-to-one chequer to one
+  // point four and left the field a featureless sheet.
+  //
+  // Widening the lobe only smears the same energy about. What actually kills it on a
+  // real floor is the dry film of stone dust standing on the polish: it does not
+  // scatter forward, it hides the polish underneath. So the lobe is scaled here, before
+  // it is summed, by how much dust, wear and soft vein stone is in the way.
+  gSpecular = uSpecular * clamp(1.0 - film * 0.85 - dustMask * 0.95 - worn * 0.55
+                               - core * 0.45 - clamp(grits, 0.0, 1.0) * 0.6, 0.10, 1.0);
 
   // --- micro normal ----------------------------------------------------------------------
   float amp = uBump * (1.0 + worn * 2.2 + dustMask * 3.0 + chip * 4.0);
@@ -464,6 +504,12 @@ const FRAG_ROUGH = /* glsl */ `
   float roughnessFactor = gRough;
 `;
 
+const FRAG_LIGHTS_END = /* glsl */ `
+  #include <lights_fragment_end>
+  reflectedLight.directSpecular *= gSpecular;
+  reflectedLight.indirectSpecular *= gSpecular;
+`;
+
 const FRAG_NORMAL = /* glsl */ `
   normal = normalize(normal + (viewMatrix * vec4(gNormalPert, 0.0)).xyz);
 `;
@@ -472,10 +518,11 @@ const FRAG_OUT = /* glsl */ `
   #include <opaque_fragment>
   {
     float ndv = clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0);
-    float fres = 0.06 + 0.94 * pow(1.0 - ndv, 2.6);
+    float fres = 0.05 + 0.72 * pow(1.0 - ndv, 3.1);
     vec3 nWorld = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
     vec3 refl = boardReflection(vReflUV, nWorld, gRough, gReflMask, gReflJitter);
     gl_FragColor.rgb += refl * fres * uReflStrength;
+    gl_FragColor.rgb *= gFigure;
   }
 `;
 
@@ -492,6 +539,7 @@ function marbleOnBeforeCompile(this: THREE.Material, shader: THREE.WebGLProgramP
     .replace('#include <common>', '#include <common>\n' + FRAG_HEAD)
     .replace('#include <color_fragment>', FRAG_COLOR)
     .replace('#include <roughnessmap_fragment>', FRAG_ROUGH)
+    .replace('#include <lights_fragment_end>', FRAG_LIGHTS_END)
     .replace('#include <normal_fragment_maps>', FRAG_NORMAL)
     .replace('#include <opaque_fragment>', FRAG_OUT);
 }
@@ -514,6 +562,15 @@ export interface MarbleSpec {
   reflect: number;
   /** How much dry dust and scuffing lies on the polish and breaks the reflection. */
   dusting: number;
+  /** Ceiling on the microfacet lobe. See FRAG_LIGHTS_END — this is the wet-plastic dial. */
+  specular: number;
+  /**
+   * Per-channel gain applied to the FINAL colour on the figure, after the reflection has
+   * been added: below 1 for the light marble's ink veins, above 1 for the dark marble's
+   * paler ones. This is what makes the figure survive the mirror — see FRAG_OUT.
+   */
+  figure: [number, number, number];
+  figureWeight: number;
 }
 
 /**
@@ -529,40 +586,73 @@ export interface MarbleSpec {
  */
 export const MARBLE: Record<'light' | 'dark', MarbleSpec> = {
   light: {
-    baseA: 0xacb0b6,
-    baseB: 0x969ba3,
-    vein: 0x424a55,
-    halo: 0x7b818b,
-    fresh: 0xb6b8bb,
+    // Probed off the render, a light square was landing at (140,165,215): far too bright
+    // and blue over red by seventy counts where the reference frame's light squares
+    // measure (126,137,157) — cool, but nowhere near that cool, and nowhere near that
+    // bright. The room's key supplies all the blue this stone needs; a blue albedo on
+    // top of it doubles the bias, and a pale one blows out under the grazing reflection.
+    baseA: 0xb9bcc3,
+    baseB: 0x9ba0ab,
+    vein: 0x363c48,
+    halo: 0x737985,
+    fresh: 0xb5b8bf,
     soil: 0x2b2d31,
-    veinScale: 1.05,
-    veinWidth: 0.0245,
-    veinWeight: 0.92,
-    haloWeight: 0.42,
-    polish: 0.22,
+    // Together with bMarbleFigure's 0.13 cycles/m leading generation this puts one or
+    // two bold sweeps across a slab, ten to thirty centimetres wide, over about an
+    // eighth of its area: measured off the reference, where a light square's figure is a
+    // drawn graphic that reads from the back of the room, not a hairline.
+    veinScale: 1.00,
+    veinWidth: 0.046,
+    veinWeight: 0.96,
+    haloWeight: 0.56,
+    // Polished, not lacquered. Under 0.3 the specular lobe is tight enough that the
+    // environment returns a hard sheen on every square and the stone stops reading.
+    polish: 0.44,
     wornRough: 0.34,
     squareTint: 0.16,
     crack: 0.85,
-    reflect: 0.62,
+    reflect: 0.34,
     dusting: 1.0,
+    specular: 0.42,
+    figure: [0.40, 0.42, 0.47],
+    figureWeight: 0.92,
   },
   dark: {
-    baseA: 0x27314a,
-    baseB: 0x1a2131,
-    vein: 0x5d6a84,
-    halo: 0x374357,
-    fresh: 0x40495a,
-    soil: 0x14171d,
-    veinScale: 0.80,
-    veinWidth: 0.0150,
-    veinWeight: 0.72,
-    haloWeight: 0.38,
-    polish: 0.14,
+    // Scanned across the reference frame's board, a dark square reads about (25,35,55)
+    // and its light neighbour about (150,163,182) — a five to one step, and the single
+    // largest source of gradient energy anywhere in that frame: eight of those edges
+    // stack up the floor plane, all of them near-horizontal, all of them hard.
+    //
+    // This build was rendering (105,122,162) against (155,168,209): a ratio of 1.4. The
+    // chequer had essentially stopped existing, which is why the floor came out as the
+    // flattest region of the image however much figure was drawn on it. Nothing else in
+    // the board is worth as much as getting this one number right, so the navy is taken
+    // right down and its share of the mirror cut with it.
+    baseA: 0x0e1528,
+    baseB: 0x080c1a,
+    vein: 0x59668a,
+    halo: 0x2a3348,
+    fresh: 0x2b3346,
+    soil: 0x0a0c11,
+    veinScale: 0.72,
+    veinWidth: 0.038,
+    veinWeight: 0.80,
+    haloWeight: 0.46,
+    // Was 0.17 — SHINIER than the light marble, so the navy squares took the biggest
+    // share of the environment wash and lost the most contrast. They are the same
+    // polish as their neighbours.
+    polish: 0.42,
     wornRough: 0.28,
     squareTint: 0.14,
     crack: 0.55,
-    reflect: 1.30,
-    dusting: 0.68,
+    // Was 1.30, then 0.60. The reference's navy squares do carry the reflected ranks —
+    // as isolated bright smears inside a near-black field, not as a wash over it — so
+    // the strength goes low while the mask stays free to spike where the room is bright.
+    reflect: 0.20,
+    dusting: 0.85,
+    specular: 0.11,
+    figure: [2.30, 2.20, 2.00],
+    figureWeight: 0.78,
   },
 };
 
@@ -573,10 +663,16 @@ export const MARBLE: Record<'light' | 'dark', MarbleSpec> = {
  * board reads as a continuous fine grey rule rather than dissolving to black.
  */
 const INLAY = {
-  bed: 0x33363c,
-  pale: 0xcdc9bf,
-  dark: 0x3b3e46,
-  mean: 0x6f6f6c,
+  // A dark mortar between the beads. The joint has to read as light-dark-light across
+  // its width, not as a bright stitch laid on pale stone: that triple is repeated eight
+  // times down the field, nearly horizontally, and it is most of the floor's structure.
+  bed: 0x1f2228,
+  // In the reference the bead run sits at about the marble's own value, not above it:
+  // pushed brighter it stops being inlaid stone and becomes a string of blown dots
+  // stitched along the joint.
+  pale: 0xb9b4a7,
+  dark: 0x33363e,
+  mean: 0x67675f,
 } as const;
 
 export interface Marble {
@@ -610,7 +706,10 @@ export function createMarble(
     uInlayPale: { value: c(INLAY.pale) },
     uInlayDark: { value: c(INLAY.dark) },
     uInlayMean: { value: c(INLAY.mean) },
+    uFigure: { value: new THREE.Vector3(s.figure[0], s.figure[1], s.figure[2]) },
+    uFigureWeight: { value: s.figureWeight },
     uDusting: { value: s.dusting },
+    uSpecular: { value: s.specular },
     uVeinScale: { value: s.veinScale },
     uVeinWidth: { value: s.veinWidth },
     uVeinWeight: { value: s.veinWeight },
@@ -626,7 +725,7 @@ export function createMarble(
     uReflMatrix: { value: shared.reflMatrix },
     uReflLod: { value: shared.reflLod },
     uReflStrength: { value: shared.refl ? s.reflect : 0 },
-    uReflTint: { value: new THREE.Color(0.92, 0.96, 1.0) },
+    uReflTint: { value: new THREE.Color(0.98, 0.99, 1.0) },
   };
 
   const material = new THREE.MeshStandardMaterial({
@@ -636,7 +735,17 @@ export function createMarble(
     dithering: true,
   });
   material.name = `board-marble-${kind}`;
-  material.envMapIntensity = 0.9;
+  // The environment's specular lobe is added on top of the albedo, so at the grazing
+  // angle this shot is judged from it lands on light and dark squares ALIKE. Proved by
+  // rendering the dark marble with a pure red albedo: the squares still came back with
+  // G=127 and B=161, i.e. two thirds of what the floor was showing had nothing to do
+  // with the stone's colour at all. That wash is what erased the chequer, flattened the
+  // veining and gave the surface its wet-plastic tell — one number, doing more damage
+  // than every texture decision in this file put together.
+  //
+  // The board carries its OWN mirror (see reflection.ts), so the environment specular is
+  // duplicating work here as well as destroying contrast. Kept low.
+  material.envMapIntensity = 0.28;
   (material as any).userData.marbleUniforms = uniforms;
   material.onBeforeCompile = marbleOnBeforeCompile;
   material.customProgramCacheKey = () => `board-marble-${world.quality}`;

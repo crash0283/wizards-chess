@@ -1,15 +1,15 @@
 {
   "id": "lighting",
-  "round": 2,
+  "round": 3,
   "status": "failing",
   "shot": "wide-establishing",
-  "render": "refs/renders/wide-establishing--lighting-r2.png",
+  "render": "refs/renders/wide-establishing--lighting-r3.png",
   "reference": "refs/frames/wide-establishing.webp",
   "verdict": "obviously a render",
   "confidence": "high",
-  "biggestGap": "Nothing in the frame goes to black — cut the global ambient hard and clamp every flame light's range so its contribution dies inside ~2m, so the colonnade and ceiling fall off into true black a few metres back instead of being evenly grazed and legible right across the frame (fracDeepShadow 0.104 vs 0.331).",
-  "critiqueDetail": "I correctly identified the film as panel B, high confidence, essentially instantly. Round 1's fix landed — the flames now emit light and warmFraction has gone 0.076 to 0.149 against a reference of 0.104, so they overshot rather than undershot — but that light has no range limit, so in our panel the entire back colonnade is uniformly washed and readable from floor to top of frame, while in the film the piers dissolve into pure black a couple of metres behind the ranks and the ceiling is a total void. The blacks are actually worse than round 1: fracDeepShadow fell from 0.135 to 0.104 against a reference of 0.331, and medianLuminance is 0.122 vs 0.086 — a flat lifted floor with no vignette. The knock-on is that all that spilled fill is also too blue and too vivid (meanLitHueDeg 255.9 vs 223.6, meanSaturation 0.294 vs 0.242), and the flames themselves read as ~25 identical teardrop billboards with no per-flame variation in size, colour temperature or flicker.",
-  "metrics": "fracDeepShadow 0.104 vs 0.331 (-0.228); coolFraction 0.445 vs 0.324 (+0.121); medianLuminance 0.122 vs 0.086 (+0.035); meanLitHueDeg 255.9 vs 223.6 (+32.3); meanSaturation 0.294 vs 0.242 (+0.052); warmFraction 0.149 vs 0.104 (+0.045); fracShadow 0.497 vs 0.633 (-0.136); histogramEntropy 6.82 vs 5.95 (+0.87)",
+  "biggestGap": "The light is on the wrong surfaces — put the exposure on the board (cream light squares lifted to near-white with grazing specular bloom and soft blurred piece/flame reflections in the marble) and let the rear arcade, portal and piers fall to near-black, instead of the current inversion where the background architecture is the brightest large area and every marble square sits at the same dark navy value with almost no checker contrast.",
+  "critiqueDetail": "I correctly identified the film as panel A, high confidence, at a glance. The global numbers finally landed — medianLuminance, meanSaturation, meanLitHueDeg, warmFraction and fracShadow are all within a hair of the reference — but they are being satisfied by a globally dim image rather than by the right distribution of light. In the film the board is the luminous object in a black room: light squares read cream/near-white, a specular sheen sweeps across the marble, and pieces and flames reflect softly in it, while the colonnade behind dissolves into void. Our render does the opposite — the rear arcade and portal mouldings are lit to a legible mid-grey and are the brightest broad area in frame, while the board reads as one flat cool slab where light and dark squares are barely separable and nothing reflects in it. The flames are still decals: bright cores with a faint warm smear beneath but no contact pool on the kerb, no reflection in the marble, and no per-flame variation in size or colour temperature. detailByBand confirms the structural side — 0.0084 coarse-band vs 0.0201 in the reference, i.e. under half the large-scale luminance modelling.",
+  "metrics": "medianLuminance 0.1137 vs 0.1176 (-0.0039); meanSaturation 0.307 vs 0.322 (-0.015); fracDeepShadow 0.1169 vs 0.1061 (+0.0108); fracShadow 0.5172 vs 0.5098 (+0.0074); meanLitHueDeg 225.2 vs 223.6 (+1.6); warmFraction 0.1513 vs 0.139 (+0.0123); coolFraction 0.388 vs 0.4335 (-0.0455); histogramEntropy 6.512 vs 6.894 (-0.382); detailByBand coarse 0.0084 vs 0.0201; fracBlown 0.0082 vs 0.0065",
   "history": [
     {
       "round": 1,
@@ -20,6 +20,11 @@
       "round": 2,
       "verdict": "obviously a render",
       "gap": "Flames now emit light but with unbounded range, and the global ambient is still too high, so nothing reaches black — the whole colonnade is evenly lit to the top of frame and fracDeepShadow fell further to 0.104 vs 0.331."
+    },
+    {
+      "round": 3,
+      "verdict": "obviously a render",
+      "gap": "Light distribution is inverted — the rear architecture is the brightest large area while the board sits flat and dark with no cream light squares, no specular bloom and no reflections; the film lights the board and lets the room go black."
     }
   ]
 }

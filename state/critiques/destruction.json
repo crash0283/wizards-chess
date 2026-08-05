@@ -1,0 +1,20 @@
+{
+  "id": "destruction",
+  "round": 3,
+  "status": "failing",
+  "shot": "aftermath-rubble",
+  "render": "refs/renders/aftermath-rubble--destruction-r3.png",
+  "reference": "refs/frames/aftermath-rubble.webp",
+  "verdict": "obviously a render",
+  "confidence": "high",
+  "biggestGap": "There is no dust — the film's frame is dominated by a tall opaque volumetric cauliflower plume of settling dust standing well above the piece's original height, and our render has literally zero participating media in its place, only a static heap of flat blown-out white polygon shards.",
+  "critiqueDetail": "I identified the film as panel A correctly, at a glance, with high confidence — this was not a close call. The single defining element of the reference frame is a column of dense opaque grey-white dust with real internal lobes, soft self-shadowed rolls and a fine trailing veil, occupying the centre third of frame; our render substitutes a rigid pile of hard-edged white facets and clips them to pure white, which is why fracBlown reads 0.0551 against the film's 0.0003 and detailTotal reads 0.0239 against 0.0086 — we have nearly three times the reference's edge energy where the film has almost none, because dust has no edges. The filmstrip from t=0.5 to t=2.6 confirms this is not a timing problem but an absence: across 2.1 seconds the debris field is effectively frozen, with no plume rising, mushrooming, stalling or thinning, no fragments landing, bouncing or rolling to rest, and only one black slab drifting at the left edge on a constant unweighted glide with no gravitational acceleration and no impact — nothing settles because nothing was ever moving. Secondary failures follow from the same root: fresh break faces are not brighter than outer surfaces because every shard is uniformly blown, the fragments are generic wedges rather than recognisable helm sections, limbs and plinth blocks, and the t=0.8s frame pops noticeably brighter and warmer than its neighbours, which is an exposure instability the film does not have.",
+  "metrics": "fracBlown 0.05509 vs 0.00031 (+0.0548); detailTotal 0.02388 vs 0.00857 (+0.0153); meanSaturation 0.4073 vs 0.3208 (+0.0865); coolFraction 0.8171 vs 0.6558 (+0.1613); medianLuminance 0.2078 vs 0.1451 (+0.0627); fracShadow 0.2856 vs 0.4015 (-0.1159); fracDeepShadow 0.0389 vs 0.0573 (-0.0184); meanLitHueDeg 211.8 vs 220.1 (-8.3); gradientAnisotropy 1.564 vs 2.019 (-0.455); histogramEntropy 7.435 vs 6.705 (+0.73)",
+  "history": [
+    {
+      "round": 3,
+      "verdict": "obviously a render",
+      "gap": "No dust plume exists at all — the reference's tall opaque lobed dust column is replaced by a static heap of flat clipped-white polygon shards (fracBlown 0.055 vs 0.0003, detailTotal 0.0239 vs 0.0086), and the filmstrip shows nothing rising, drifting or settling across 2.1 seconds."
+    }
+  ]
+}
