@@ -34,13 +34,41 @@ const ANALYSE = (url) => new Promise((resolve, reject) => {
   const img = new Image();
   img.onerror = () => reject(new Error('decode failed'));
   img.onload = () => {
-    const W = img.naturalWidth, H = img.naturalHeight;
+    const W0 = img.naturalWidth, H0 = img.naturalHeight;
     const c = document.createElement('canvas');
-    c.width = W; c.height = H;
+    c.width = W0; c.height = H0;
     const g = c.getContext('2d', { willReadFrequently: true });
     g.drawImage(img, 0, 0);
-    const d = g.getImageData(0, 0, W, H).data;
+
+    /**
+     * Strip anamorphic letterbox bars before measuring.
+     *
+     * The film frames are 1920x1080 with hard black bars top and bottom — roughly a
+     * QUARTER of their pixels, all at zero luminance and zero saturation. Our renders are
+     * 1920x804 of pure picture. Comparing the two whole-frame makes the reference look far
+     * darker, far less saturated and far more deeply shadowed than its picture actually is,
+     * which silently corrupts every delta a critic quotes. Measure picture against picture.
+     */
+    const probe = g.getImageData(0, 0, W0, H0).data;
+    const rowIsBar = (y) => {
+      // Sample across the row; a bar is uniformly black, not merely dark.
+      for (let x = 0; x < W0; x += 7) {
+        const p = (y * W0 + x) * 4;
+        if (Math.max(probe[p], probe[p + 1], probe[p + 2]) > 5) return false;
+      }
+      return true;
+    };
+    let y0 = 0, y1 = H0 - 1;
+    while (y0 < H0 - 1 && rowIsBar(y0)) y0++;
+    while (y1 > y0 && rowIsBar(y1)) y1--;
+    // Only trust a symmetric-ish crop that leaves most of the frame; otherwise measure all.
+    const cropped = y1 - y0 + 1;
+    if (cropped < H0 * 0.4) { y0 = 0; y1 = H0 - 1; }
+
+    const W = W0, H = y1 - y0 + 1;
+    const d = g.getImageData(0, y0, W, H).data;
     const N = W * H;
+    const letterboxStripped = H !== H0;
 
     const lum = new Float32Array(N);
     const hist = new Uint32Array(256);
@@ -114,6 +142,8 @@ const ANALYSE = (url) => new Promise((resolve, reject) => {
 
     resolve({
       width: W, height: H,
+      sourceHeight: H0,
+      letterboxStripped,
       medianLuminance: +median.toFixed(4),
       meanSaturation: +(sumS / N).toFixed(4),
       fracDeepShadow: +(deep / N).toFixed(4),

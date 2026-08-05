@@ -126,10 +126,10 @@ void main(){
   // this lobe; more means we are looking into it. One texture fetch buys every puff a
   // lit side and a shadowed side, which is what makes a heap of billboards read as a
   // solid rolling mass rather than as a flat grey stain.
-  float ahead = texture2D(uMap, vUv + vLight * 0.030).r;
-  float lit = clamp(0.5 + (t.r - ahead) * 2.6, 0.0, 1.0);
+  float ahead = texture2D(uMap, vUv + vLight * 0.026).r;
+  float lit = clamp(0.5 + (t.r - ahead) * 2.2, 0.0, 1.0);
   // The green channel is finer-grained density: structure at a second scale.
-  vec3 col = vCol * (0.42 + 0.95 * lit) * (0.80 + 0.34 * t.g);
+  vec3 col = vCol * (0.48 + 0.88 * lit) * (0.84 + 0.28 * t.g);
   gl_FragColor = vec4(col * a, a);
 }
 `;

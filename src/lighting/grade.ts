@@ -76,7 +76,7 @@ export const GradeShader = {
      */
     uSatShadow: { value: 0.40 },
     /** Saturation from the mid-tones up, where the cold marble has to read blue. */
-    uSaturation: { value: 1.03 },
+    uSaturation: { value: 1.06 },
     uSatRamp: { value: new THREE.Vector2(0.03, 0.28) },
     /**
      * Cold DI balance, pushed further apart. On the picture-area comparison the film has

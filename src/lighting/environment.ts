@@ -110,7 +110,7 @@ export function createEnvironment(world: World): Environment {
   const hemi = new THREE.HemisphereLight(
     new THREE.Color(COLD.sky),
     new THREE.Color(COLD.ground),
-    0.48,
+    0.54,
   );
   hemi.position.set(0, 18, 0);
   group.add(hemi);
@@ -141,7 +141,7 @@ export function createEnvironment(world: World): Environment {
   // to cover the armies and the aisles behind them, so the lateral falloff that separates
   // board from room never happened. Tightening the cone and lengthening the penumbra puts
   // the light on the marble and lets the ranks sit on the shoulder of it.
-  const key = new THREE.SpotLight(new THREE.Color(COLD.key), 320, 0, 0.45, 0.6, 1.0);
+  const key = new THREE.SpotLight(new THREE.Color(COLD.key), 350, 0, 0.45, 0.6, 1.0);
   key.position.set(-2.5, 27, 1.5);
   key.target.position.set(0, 0, 0);
   group.add(key);
@@ -162,7 +162,7 @@ export function createEnvironment(world: World): Environment {
   // They cast no shadows; the key remains the only shadow-caster.
   const aisle: THREE.SpotLight[] = [];
   for (const ax of [-7.5, 0, 7.5]) {
-    const s = new THREE.SpotLight(new THREE.Color(COLD.key), 185, 0, 0.28, 0.85, 1.0);
+    const s = new THREE.SpotLight(new THREE.Color(COLD.key), 200, 0, 0.28, 0.85, 1.0);
     s.position.set(ax, 20, 0);
     s.target.position.set(ax, 0, 0);
     s.castShadow = false;

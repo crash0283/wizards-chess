@@ -107,8 +107,8 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
 
     const frags = fracture(soup, {
       rng: rng.fork('cells'),
-      cells: staged ? (high ? 20 : 10) : high ? 58 : 24,
-      chips: staged ? (high ? 5 : 2) : high ? 20 : 8,
+      cells: staged ? (high ? 16 : 9) : high ? 58 : 24,
+      chips: staged ? (high ? 4 : 2) : high ? 20 : 8,
       impact: dir,
       base,
       height: target.height,
@@ -122,6 +122,11 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
       base.z - dir.z * radius * 0.25,
     );
 
+    // Wreckage from earlier in the fight is a HEAP, not a field: it has been ground
+    // over and kicked together by everything that walked past since, and five old
+    // captures' worth of debris flung a full two squares each turns the board into
+    // gravel. The live burst throws at full strength.
+    const spread = staged ? 0.55 : 1;
     const fresh: Body[] = [];
     const vrng = rng.fork('launch');
     for (const f of frags) {
@@ -135,10 +140,10 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
       // away and is still in the air a second and a half later, and the reference has
       // the wreckage down and still, in a heap, around the piece that was struck.
       const light = Math.min(1.8, 0.42 / (0.14 + f.radius));
-      const speed = force * vrng.float(1.2, 2.8) * light;
+      const speed = force * vrng.float(1.2, 2.8) * light * spread;
       const vel = new THREE.Vector3(
         away.x * speed + dir.x * speed * 0.45 + vrng.gauss() * 0.32,
-        Math.abs(away.y) * speed * 0.40 + vrng.float(0.8, 2.6) * Math.min(1.4, light),
+        Math.abs(away.y) * speed * 0.40 + vrng.float(0.8, 2.6) * Math.min(1.4, light) * spread,
         away.z * speed + dir.z * speed * 0.45 + vrng.gauss() * 0.32,
       );
       const spin = Math.min(17, 5.5 * light + 2.5);

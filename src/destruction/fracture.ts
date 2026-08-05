@@ -67,8 +67,8 @@ export interface FractureOptions {
  * chalk: push this past about 1.6 and the wreckage blows out white and stops belonging
  * to the statue it came from.
  */
-const FRESH_GAIN = 1.35;
-const FRESH_FLOOR = 0.022;
+const FRESH_GAIN = 1.22;
+const FRESH_FLOOR = 0.030;
 
 export function freshColourFor(soup: Soup): [number, number, number] {
   const [r, g, b] = meanColour(soup);
