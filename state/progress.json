@@ -1,6 +1,6 @@
 {
-  "updated": "reference frames received — bar corrected, blind A/B now live",
-  "note": "3 real frames installed; SHOT_BRIEFS.md rewritten against them (earlier brief was wrong on palette, board finish, piece form and wall treatment)",
+  "updated": "all six reference frames received — bar rewritten, blind A/B live on every shot",
+  "note": "earlier brief was wrong on palette, board finish, piece form, wall treatment and destruction; corrected against frames",
   "seed": 20250811,
   "totalRounds": 0,
   "pieces": [
@@ -38,7 +38,7 @@
       "round": 0,
       "status": "building",
       "render": null,
-      "reference": null,
+      "reference": "refs/frames/low-across-board.webp",
       "verdict": null,
       "biggestGap": null,
       "history": []
@@ -51,7 +51,7 @@
       "round": 0,
       "status": "building",
       "render": null,
-      "reference": null,
+      "reference": "refs/frames/knight-looking-up.webp",
       "verdict": null,
       "biggestGap": null,
       "history": []
@@ -77,7 +77,7 @@
       "round": 0,
       "status": "pending",
       "render": null,
-      "reference": null,
+      "reference": "refs/frames/piece-mid-strike.webp",
       "verdict": null,
       "biggestGap": null,
       "history": []
@@ -103,7 +103,7 @@
       "round": 0,
       "status": "pending",
       "render": null,
-      "reference": null,
+      "reference": "refs/frames/piece-mid-strike.webp",
       "verdict": null,
       "biggestGap": null,
       "history": []
