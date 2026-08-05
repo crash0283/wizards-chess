@@ -107,8 +107,8 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
 
     const frags = fracture(soup, {
       rng: rng.fork('cells'),
-      cells: staged ? (high ? 34 : 14) : high ? 58 : 24,
-      chips: staged ? (high ? 8 : 3) : high ? 20 : 8,
+      cells: staged ? (high ? 24 : 12) : high ? 58 : 24,
+      chips: staged ? (high ? 6 : 3) : high ? 20 : 8,
       impact: dir,
       base,
       height: target.height,
@@ -163,7 +163,7 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
 
     // --- torn fabric ----------------------------------------------------------------
     const frng = rng.fork('fabric');
-    const shreds = staged ? (high ? 3 : 2) : high ? 7 : 3;
+    const shreds = staged ? (high ? 2 : 1) : high ? 5 : 3;
     const scale = Math.min(1.5, target.height / 3.0);
     for (let i = 0; i < shreds; i++) {
       const shred = buildShred(frng, scale);

@@ -183,6 +183,7 @@ export function stepBody(b: Body, dt: number, ground: Ground): void {
 
   // --- contact: the deepest few hull points against the rest surface ------------------
   let touched = false;
+  let leverX = 0, leverZ = 0;
   for (let pass = 0; pass < 4; pass++) {
     let worst = 0;
     let wx = 0, wy = 0, wz = 0;
@@ -197,6 +198,7 @@ export function stepBody(b: Body, dt: number, ground: Ground): void {
     }
     if (worst <= 1e-4) break;
     touched = true;
+    if (pass === 0) { leverX = -wx; leverZ = -wz; }
 
     ground.normalAt(b.pos.x + wx, b.pos.z + wz, _n);
     b.pos.y += worst * (pass === 0 ? 1 : 0.6);
@@ -230,11 +232,26 @@ export function stepBody(b: Body, dt: number, ground: Ground): void {
     }
   }
 
-  const slow = b.vel.lengthSq() < 0.020 && b.omega.lengthSq() < 0.55;
+  // Toppling. A block that lands on a corner is standing on a lever with its own weight
+  // on the end of it, and it falls onto a face — that is most of what "heavy" looks like
+  // as debris settles. Without this term the solver happily parks shards on their points
+  // and the heap reads as scattered confetti.
+  if (touched) {
+    const h = Math.hypot(leverX, leverZ);
+    if (h > 0.015) {
+      const k = G * b.mass * b.invI * 0.35 * dt;
+      b.omega.x += leverZ * k;
+      b.omega.z -= leverX * k;
+      const w2 = b.omega.lengthSq();
+      if (w2 > 400) b.omega.multiplyScalar(20 / Math.sqrt(w2));
+    }
+  }
+
+  const slow = b.vel.lengthSq() < 0.020 && b.omega.lengthSq() < 0.95;
   if (touched && slow) b.contact += dt;
   else if (!touched) b.contact = 0;
 
-  if ((touched && b.contact > 0.16) || b.age > MAX_AGE) {
+  if ((touched && b.contact > 0.22) || b.age > MAX_AGE) {
     sleep(b, ground);
   }
 }
