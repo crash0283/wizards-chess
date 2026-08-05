@@ -5,3 +5,4 @@ refs/frames/*
 !refs/frames/.gitkeep
 *.log
 .vite
+refs/strips/
