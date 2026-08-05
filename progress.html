@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wizard's Chess — build progress</title>
+<style>
+  :root{--bg:#0d0c0b;--panel:#17150f;--panel2:#1e1b14;--line:#332c20;--ink:#e8ddc8;--dim:#9c8d74;
+        --warm:#d9a05b;--pass:#7fb069;--fail:#c4644f;--mid:#c9a227;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 24px 96px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.015em;font-weight:650}
+  .lede{color:var(--dim);margin:0 0 8px;max-width:76ch}
+  .meta{color:var(--dim);font:12.5px/1.5 ui-monospace,Menlo,monospace;margin-bottom:26px}
+  .banner{background:#2a1c14;border:1px solid #573career;border-color:#5a3a22;border-radius:10px;
+          padding:14px 16px;margin:0 0 30px;color:#e6c9a8;font-size:14px}
+  .banner strong{color:#f0b978}
+  .tally{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 30px}
+  .pill{background:var(--panel);border:1px solid var(--line);border-radius:999px;
+        padding:5px 13px;font:12.5px ui-monospace,monospace;color:var(--dim)}
+  .pill b{color:var(--ink)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+        padding:22px;margin-bottom:22px}
+  .card header{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:18px}
+  h2{margin:0;font-size:19px;font-weight:620;letter-spacing:-.01em}
+  .sub{margin:4px 0 0;color:var(--dim);font-size:13.5px;max-width:64ch}
+  .badges{display:flex;gap:7px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+  .badge{font:11.5px ui-monospace,monospace;padding:4px 10px;border-radius:999px;
+         border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+  .badge.round{background:#221e16}
+  .s-passed{color:var(--pass);border-color:#3c5233}.s-building{color:var(--warm);border-color:#5a4526}
+  .s-critiqued{color:var(--mid);border-color:#5a4d20}.s-failing{color:var(--fail);border-color:#5c3128}
+  .s-improving{color:var(--warm);border-color:#5a4526}.s-pending{opacity:.7}
+  .frames{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+  @media(max-width:820px){.frames{grid-template-columns:1fr}}
+  figure{margin:0}
+  figcaption{font:11.5px ui-monospace,monospace;color:var(--dim);margin-bottom:6px;letter-spacing:.04em}
+  figure img{width:100%;display:block;border-radius:8px;border:1px solid var(--line);background:#000}
+  .missing{border:1px dashed var(--line);border-radius:8px;padding:18px;color:var(--dim);
+           font-size:13px;min-height:120px;display:flex;flex-direction:column;gap:8px;justify-content:center}
+  .missing.brief strong{color:var(--warm);font-size:13px}
+  .missing code{background:#241f17;padding:1px 5px;border-radius:4px;font-size:12px;color:#c3ad8a}
+  .critique{background:var(--panel2);border:1px solid var(--line);border-left-width:3px;
+            border-radius:9px;padding:14px 16px}
+  .critique.v-pass{border-left-color:var(--pass)}
+  .critique.v-fail{border-left-color:var(--fail)}
+  .critique.v-mid{border-left-color:var(--mid)}
+  .verdict-line{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .label{font:11px ui-monospace,monospace;color:var(--dim);text-transform:uppercase;letter-spacing:.09em}
+  .verdict-line strong{font-size:15px}
+  .v-pass strong{color:var(--pass)}.v-fail strong{color:var(--fail)}
+  .conf{font:11.5px ui-monospace,monospace;color:var(--dim)}
+  .gap{margin:0;font-size:14.5px}
+  .gap .label{display:block;margin-bottom:3px}
+  .detail{margin:10px 0 0;color:var(--dim);font-size:13.5px}
+  .metrics{margin:10px 0 0;background:#12100c;border:1px solid var(--line);border-radius:6px;
+           padding:9px 11px;font:11.5px/1.5 ui-monospace,monospace;color:#9db08d;overflow-x:auto}
+  .history{margin-top:14px}
+  .history summary{cursor:pointer;font:12px ui-monospace,monospace;color:var(--dim)}
+  .history table{width:100%;border-collapse:collapse;margin-top:9px;font-size:13px}
+  .history td{padding:5px 8px;border-top:1px solid var(--line);vertical-align:top}
+  .history .rnd{font:11.5px ui-monospace,monospace;color:var(--dim);width:38px}
+  .history .vd{width:132px;font:11.5px ui-monospace,monospace}
+  .history .v-pass{color:var(--pass)}.history .v-fail{color:var(--fail)}
+  footer{color:var(--dim);font-size:12.5px;margin-top:40px;border-top:1px solid var(--line);padding-top:18px}
+</style></head><body><div class="wrap">
+  <h1>Wizard's Chess — build progress</h1>
+  <p class="lede">Each piece is built by one agent and judged by a separate one with fresh context.
+     The critic runs the real app, captures the shot itself, and has to say whether it is looking at
+     a film frame or a render. If it can tell, it names the single biggest gap and the piece goes
+     back for another round.</p>
+  <p class="meta">updated round 0 — scaffold live, baseline captured &nbsp;·&nbsp; harness verified end-to-end; builders not yet dispatched</p>
+
+  <div class="banner"><strong>Reference frames could not be fetched.</strong>
+    movie-screencaps.com, imgs.screencaps.us, i0.wp.com and external-preview.redd.it are all denied
+    by this session's egress policy (HTTP 403 at the gateway, on both curl and the sanctioned fetch
+    tool). Policy says not to route around a gateway denial, so the right-hand panel below shows the
+    written shot brief instead of a frame. Drop any frame into
+    <code>refs/frames/&lt;shot&gt;.jpg</code> and the critic harness switches to true blind A/B on the
+    next round with no code change.</div>
+
+  <div class="tally">
+    <span class="pill"><b>8</b> pieces</span>
+    <span class="pill"><b>0</b> passed</span>
+    <span class="pill"><b>0</b> critique rounds run</span>
+    <span class="pill">seed <b>20250811</b></span>
+  </div>
+
+  
+  <section class="card" data-status="pending">
+    <header>
+      <div class="titles">
+        <h2>Chamber — the stone hall</h2>
+        <p class="sub">Architecture, masonry, scale, the darkness overhead. Judged on whether the room reads as a real 25 m subterranean hall.</p>
+      </div>
+      <div class="badges">
+        <span class="badge round">round 0</span>
+        <span class="badge status s-pending">pending</span>
+      </div>
+    </header>
+
+    <div class="frames">
+      <figure>
+        <figcaption>our render &middot; wide-establishing</figcaption>
+        <div class="missing">no render yet</div>
+      </figure>
+      <figure>
+        <figcaption>reference &middot; wide-establishing</figcaption>
+        <div class="missing brief"><strong>reference frame unavailable</strong>
+                 <span>All four frame sources are blocked by this session's egress policy (403 at the
+                 gateway). Judged against the written brief for this shot in
+                 <code>refs/SHOT_BRIEFS.md</code> instead. Drop a frame at
+                 <code>refs/frames/wide-establishing.jpg</code> and the critic switches to blind A/B
+                 automatically.</span></div>
+      </figure>
+    </div>
+
+    <div class="critique v-mid">
+      <div class="verdict-line">
+        <span class="label">critic's call</span>
+        <strong>—</strong>
+        
+      </div>
+      <p class="gap"><span class="label">biggest remaining gap</span>—</p>
+      
+      
+    </div>
+
+    
+  </section>
+  <section class="card" data-status="pending">
+    <header>
+      <div class="titles">
+        <h2>Lighting — firelight and air</h2>
+        <p class="sub">Uplight from low sources, unstable flicker, fast falloff, volumetric haze, filmic tone response.</p>
+      </div>
+      <div class="badges">
+        <span class="badge round">round 0</span>
+        <span class="badge status s-pending">pending</span>
+      </div>
+    </header>
+
+    <div class="frames">
+      <figure>
+        <figcaption>our render &middot; wide-establishing</figcaption>
+        <div class="missing">no render yet</div>
+      </figure>
+      <figure>
+        <figcaption>reference &middot; wide-establishing</figcaption>
+        <div class="missing brief"><strong>reference frame unavailable</strong>
+                 <span>All four frame sources are blocked by this session's egress policy (403 at the
+                 gateway). Judged against the written brief for this shot in
+                 <code>refs/SHOT_BRIEFS.md</code> instead. Drop a frame at
+                 <code>refs/frames/wide-establishing.jpg</code> and the critic switches to blind A/B
+                 automatically.</span></div>
+      </figure>
+    </div>
+
+    <div class="critique v-mid">
+      <div class="verdict-line">
+        <span class="label">critic's call</span>
+        <strong>—</strong>
+        
+      </div>
+      <p class="gap"><span class="label">biggest remaining gap</span>—</p>
+      
+      
+    </div>
+
+    
+  </section>
+  <section class="card" data-status="pending">
+    <header>
+      <div class="titles">
+        <h2>Board — the playing floor</h2>
+        <p class="sub">8×8 of worn stone set flush with the floor. Mortar, grit, dust drifts, and impact scarring.</p>
+      </div>
+      <div class="badges">
+        <span class="badge round">round 0</span>
+        <span class="badge status s-pending">pending</span>
+      </div>
+    </header>
+
+    <div class="frames">
+      <figure>
+        <figcaption>our render &middot; low-across-board</figcaption>
+        <div class="missing">no render yet</div>
+      </figure>
+      <figure>
+        <figcaption>reference &middot; low-across-board</figcaption>
+        <div class="missing brief"><strong>reference frame unavailable</strong>
+                 <span>All four frame sources are blocked by this session's egress policy (403 at the
+                 gateway). Judged against the written brief for this shot in
+                 <code>refs/SHOT_BRIEFS.md</code> instead. Drop a frame at
+                 <code>refs/frames/low-across-board.jpg</code> and the critic switches to blind A/B
+                 automatically.</span></div>
+      </figure>
+    </div>
+
+    <div class="critique v-mid">
+      <div class="verdict-line">
+        <span class="label">critic's call</span>
+        <strong>—</strong>
+        
+      </div>
+      <p class="gap"><span class="label">biggest remaining gap</span>—</p>
+      
+      
+    </div>
+
+    
+  </section>
+  <section class="card" data-status="pending">
+    <header>
+      <div class="titles">
+        <h2>Pieces — carved stone chessmen</h2>
+        <p class="sub">Six piece types per side as chiselled, weathered, chipped stone. Judged at extreme low angle.</p>
+      </div>
+      <div class="badges">
+        <span class="badge round">round 0</span>
+        <span class="badge status s-pending">pending</span>
+      </div>
+    </header>
+
+    <div class="frames">
+      <figure>
+        <figcaption>our render &middot; knight-looking-up</figcaption>
+        <div class="missing">no render yet</div>
+      </figure>
+      <figure>
+        <figcaption>reference &middot; knight-looking-up</figcaption>
+        <div class="missing brief"><strong>reference frame unavailable</strong>
+                 <span>All four frame sources are blocked by this session's egress policy (403 at the
+                 gateway). Judged against the written brief for this shot in
+                 <code>refs/SHOT_BRIEFS.md</code> instead. Drop a frame at
+                 <code>refs/frames/knight-looking-up.jpg</code> and the critic switches to blind A/B
+                 automatically.</span></div>
+      </figure>
+    </div>
+
+    <div class="critique v-mid">
+      <div class="verdict-line">
+        <span class="label">critic's call</span>
+        <strong>—</strong>
+        
+      </div>
+      <p class="gap"><span class="label">biggest remaining gap</span>—</p>
+      
+      
+    </div>
+
+    
+  </section>
+  <section class="card" data-status="pending">
+    <header>
+      <div class="titles">
+        <h2>Destruction — stone breaking stone</h2>
+        <p class="sub">Angular fracture, bright fresh interior faces, debris that settles, dust lit through.</p>
+      </div>
+      <div class="badges">
+        <span class="badge round">round 0</span>
+        <span class="badge status s-pending">pending</span>
+      </div>
+    </header>
+
+    <div class="frames">
+      <figure>
+        <figcaption>our render &middot; aftermath-rubble</figcaption>
+        <div class="missing">no render yet</div>
+      </figure>
+      <figure>
+        <figcaption>reference &middot; aftermath-rubble</figcaption>
+        <div class="missing brief"><strong>reference frame unavailable</strong>
+                 <span>All four frame sources are blocked by this session's egress policy (403 at the
+                 gateway). Judged against the written brief for this shot in
+                 <code>refs/SHOT_BRIEFS.md</code> instead. Drop a frame at
+                 <code>refs/frames/aftermath-rubble.jpg</code> and the critic switches to blind A/B
+                 automatically.</span></div>
+      </figure>
+    </div>
+
+    <div class="critique v-mid">
+      <div class="verdict-line">
+        <span class="label">critic's call</span>
+        <strong>—</strong>
+        
+      </div>
+      <p class="gap"><span class="label">biggest remaining gap</span>—</p>
+      
+      
+    </div>
+
+    
+  </section>
+  <section class="card" data-status="pending">
+    <header>
+      <div class="titles">
+        <h2>Camera — lens and operator</h2>
+        <p class="sub">Anamorphic character, real depth of field, handheld weight, reaction lag on impacts, film grain.</p>
+      </div>
+      <div class="badges">
+        <span class="badge round">round 0</span>
+        <span class="badge status s-pending">pending</span>
+      </div>
+    </header>
+
+    <div class="frames">
+      <figure>
+        <figcaption>our render &middot; piece-mid-strike</figcaption>
+        <div class="missing">no render yet</div>
+      </figure>
+      <figure>
+        <figcaption>reference &middot; piece-mid-strike</figcaption>
+        <div class="missing brief"><strong>reference frame unavailable</strong>
+                 <span>All four frame sources are blocked by this session's egress policy (403 at the
+                 gateway). Judged against the written brief for this shot in
+                 <code>refs/SHOT_BRIEFS.md</code> instead. Drop a frame at
+                 <code>refs/frames/piece-mid-strike.jpg</code> and the critic switches to blind A/B
+                 automatically.</span></div>
+      </figure>
+    </div>
+
+    <div class="critique v-mid">
+      <div class="verdict-line">
+        <span class="label">critic's call</span>
+        <strong>—</strong>
+        
+      </div>
+      <p class="gap"><span class="label">biggest remaining gap</span>—</p>
+      
+      
+    </div>
+
+    
+  </section>
+  <section class="card" data-status="pending">
+    <header>
+      <div class="titles">
+        <h2>Chess — rules and engine</h2>
+        <p class="sub">Full legal chess verified by perft, plus a search that genuinely fights back. Judged on numbers, not looks.</p>
+      </div>
+      <div class="badges">
+        <span class="badge round">round 0</span>
+        <span class="badge status s-pending">pending</span>
+      </div>
+    </header>
+
+    <div class="frames">
+      <figure>
+        <figcaption>our render &middot; king-surrender</figcaption>
+        <div class="missing">no render yet</div>
+      </figure>
+      <figure>
+        <figcaption>reference &middot; king-surrender</figcaption>
+        <div class="missing brief"><strong>reference frame unavailable</strong>
+                 <span>All four frame sources are blocked by this session's egress policy (403 at the
+                 gateway). Judged against the written brief for this shot in
+                 <code>refs/SHOT_BRIEFS.md</code> instead. Drop a frame at
+                 <code>refs/frames/king-surrender.jpg</code> and the critic switches to blind A/B
+                 automatically.</span></div>
+      </figure>
+    </div>
+
+    <div class="critique v-mid">
+      <div class="verdict-line">
+        <span class="label">critic's call</span>
+        <strong>—</strong>
+        
+      </div>
+      <p class="gap"><span class="label">biggest remaining gap</span>—</p>
+      
+      
+    </div>
+
+    
+  </section>
+  <section class="card" data-status="pending">
+    <header>
+      <div class="titles">
+        <h2>Game — the fight itself</h2>
+        <p class="sub">Turn loop, pieces walking, captures triggering destruction, the engine answering, checkmate ending it.</p>
+      </div>
+      <div class="badges">
+        <span class="badge round">round 0</span>
+        <span class="badge status s-pending">pending</span>
+      </div>
+    </header>
+
+    <div class="frames">
+      <figure>
+        <figcaption>our render &middot; piece-mid-strike</figcaption>
+        <div class="missing">no render yet</div>
+      </figure>
+      <figure>
+        <figcaption>reference &middot; piece-mid-strike</figcaption>
+        <div class="missing brief"><strong>reference frame unavailable</strong>
+                 <span>All four frame sources are blocked by this session's egress policy (403 at the
+                 gateway). Judged against the written brief for this shot in
+                 <code>refs/SHOT_BRIEFS.md</code> instead. Drop a frame at
+                 <code>refs/frames/piece-mid-strike.jpg</code> and the critic switches to blind A/B
+                 automatically.</span></div>
+      </figure>
+    </div>
+
+    <div class="critique v-mid">
+      <div class="verdict-line">
+        <span class="label">critic's call</span>
+        <strong>—</strong>
+        
+      </div>
+      <p class="gap"><span class="label">biggest remaining gap</span>—</p>
+      
+      
+    </div>
+
+    
+  </section>
+
+  <footer>Renders are captured deterministically: <code>npm run capture -- --shot=&lt;id&gt; --t=&lt;s&gt;</code>
+  always produces the same pixels for a given seed, which is what makes round-to-round comparison
+  mean anything.</footer>
+</div></body></html>

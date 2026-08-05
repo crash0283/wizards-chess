@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wizard's Chess</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #000; overflow: hidden; height: 100%; }
+      #stage { position: fixed; inset: 0; display: grid; place-items: center; }
+      canvas { display: block; max-width: 100%; max-height: 100%; }
+      #hud {
+        position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 14px;
+        font: 13px/1.45 ui-monospace, "SF Mono", Menlo, monospace;
+        color: #d8c3a2; background: linear-gradient(transparent, rgba(0,0,0,.75));
+        pointer-events: none; text-shadow: 0 1px 3px #000; letter-spacing: .02em;
+      }
+      #hud.hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <div id="hud"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

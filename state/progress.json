@@ -1,0 +1,112 @@
+{
+  "updated": "round 0 — scaffold live, baseline captured",
+  "note": "harness verified end-to-end; builders not yet dispatched",
+  "seed": 20250811,
+  "totalRounds": 0,
+  "pieces": [
+    {
+      "id": "chamber",
+      "label": "Chamber — the stone hall",
+      "blurb": "Architecture, masonry, scale, the darkness overhead. Judged on whether the room reads as a real 25 m subterranean hall.",
+      "shot": "wide-establishing",
+      "round": 0,
+      "status": "pending",
+      "render": "refs/renders/r0-wide.png",
+      "reference": null,
+      "verdict": null,
+      "biggestGap": null,
+      "history": []
+    },
+    {
+      "id": "lighting",
+      "label": "Lighting — firelight and air",
+      "blurb": "Uplight from low sources, unstable flicker, fast falloff, volumetric haze, filmic tone response.",
+      "shot": "wide-establishing",
+      "round": 0,
+      "status": "pending",
+      "render": "refs/renders/r0-wide.png",
+      "reference": null,
+      "verdict": null,
+      "biggestGap": null,
+      "history": []
+    },
+    {
+      "id": "board",
+      "label": "Board — the playing floor",
+      "blurb": "8×8 of worn stone set flush with the floor. Mortar, grit, dust drifts, and impact scarring.",
+      "shot": "low-across-board",
+      "round": 0,
+      "status": "pending",
+      "render": null,
+      "reference": null,
+      "verdict": null,
+      "biggestGap": null,
+      "history": []
+    },
+    {
+      "id": "pieces",
+      "label": "Pieces — carved stone chessmen",
+      "blurb": "Six piece types per side as chiselled, weathered, chipped stone. Judged at extreme low angle.",
+      "shot": "knight-looking-up",
+      "round": 0,
+      "status": "pending",
+      "render": null,
+      "reference": null,
+      "verdict": null,
+      "biggestGap": null,
+      "history": []
+    },
+    {
+      "id": "destruction",
+      "label": "Destruction — stone breaking stone",
+      "blurb": "Angular fracture, bright fresh interior faces, debris that settles, dust lit through.",
+      "shot": "aftermath-rubble",
+      "round": 0,
+      "status": "pending",
+      "render": null,
+      "reference": null,
+      "verdict": null,
+      "biggestGap": null,
+      "history": []
+    },
+    {
+      "id": "camera",
+      "label": "Camera — lens and operator",
+      "blurb": "Anamorphic character, real depth of field, handheld weight, reaction lag on impacts, film grain.",
+      "shot": "piece-mid-strike",
+      "round": 0,
+      "status": "pending",
+      "render": null,
+      "reference": null,
+      "verdict": null,
+      "biggestGap": null,
+      "history": []
+    },
+    {
+      "id": "chess",
+      "label": "Chess — rules and engine",
+      "blurb": "Full legal chess verified by perft, plus a search that genuinely fights back. Judged on numbers, not looks.",
+      "shot": "king-surrender",
+      "round": 0,
+      "status": "pending",
+      "render": null,
+      "reference": null,
+      "verdict": null,
+      "biggestGap": null,
+      "history": []
+    },
+    {
+      "id": "game",
+      "label": "Game — the fight itself",
+      "blurb": "Turn loop, pieces walking, captures triggering destruction, the engine answering, checkmate ending it.",
+      "shot": "piece-mid-strike",
+      "round": 0,
+      "status": "pending",
+      "render": null,
+      "reference": null,
+      "verdict": null,
+      "biggestGap": null,
+      "history": []
+    }
+  ]
+}

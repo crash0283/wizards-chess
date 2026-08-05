@@ -1,0 +1,7 @@
+node_modules
+dist
+.critic-keys/
+refs/frames/*
+!refs/frames/.gitkeep
+*.log
+.vite
