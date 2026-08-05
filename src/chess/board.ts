@@ -148,9 +148,10 @@ export class Board {
     this.setFen(fen);
   }
 
+  /** A fresh Board on the same position. The move stack and repetition history do NOT
+   *  come along — the clone starts as if that position had just been set up. */
   clone(): Board {
-    const b = new Board(this.fen());
-    return b;
+    return new Board(this.fen());
   }
 
   // --- FEN ---------------------------------------------------------------------------

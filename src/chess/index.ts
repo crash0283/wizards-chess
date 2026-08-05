@@ -41,7 +41,7 @@ export type {
   SearchOptions, SearchResult,
 } from './types';
 export { FLAG_LETTERS } from './types';
-export { Board, squareName, squareFromName } from './board';
+export { Board, squareName, squareFromName, fileOf, rankOf, sq0x88 } from './board';
 export { MATE, MATE_IN_MAX } from './search';
 export { PERFT_SUITE } from './perft';
 export { evaluate, materialBalance } from './eval';
@@ -466,24 +466,49 @@ export class Engine {
 
 // --- the demo game ------------------------------------------------------------------------
 
-/** SAN of a short, real, forced-looking game that ends in a genuine mate on e8. */
-const DEMO_SAN = ['e4', 'e5', 'Bc4', 'Nc6', 'Qh5', 'Nf6', 'Qxf7#'];
+/**
+ * Short, real games that end in a genuine mate with the black king still on e8 — which is
+ * exactly where the `king-surrender` shot is aimed (`squareCentre(4, 7)`).
+ *
+ * 'strike' is the default: same mate, same square, but Black grabs the e4 pawn on the way,
+ * so the sequence contains two captures. The scene gets a strike and a destruction before
+ * the final blow instead of only the mating one.
+ */
+const DEMO_LINES: Record<string, { name: string; san: string[] }> = {
+  strike: {
+    name: "Scholar's mate, with the pawn grab",
+    san: ['e4', 'e5', 'Bc4', 'Nf6', 'Qh5', 'Nxe4', 'Qxf7#'],
+  },
+  scholar: {
+    name: "Scholar's mate",
+    san: ['e4', 'e5', 'Bc4', 'Nc6', 'Qh5', 'Nf6', 'Qxf7#'],
+  },
+};
 
-let demoCache: DemoGame | null = null;
+export type DemoLineId = keyof typeof DEMO_LINES;
+
+/** Which scripted games buildDemoGame() will build. */
+export const DEMO_LINE_IDS = Object.keys(DEMO_LINES);
+
+const demoCache = new Map<string, DemoGame>();
 
 /**
  * A short legal game ending in a real checkmate, for the king-surrender shot.
  *
- * Scholar's mate: the black king is mated on e8 with White's queen on f7 backed by the
- * bishop on c4. That is the position the shot wants — the king is on e8 (file 4, rank 7,
- * exactly where `king-surrender` is aimed), the checking piece is adjacent and in frame,
- * and every escape square is visibly blocked by Black's own pieces or covered by the
- * queen. Every move is verified legal at build time and the final position is verified to
- * be checkmate; if any of that ever fails, `verified` comes back false rather than
- * quietly handing the scene a fake mate.
+ * The black king is mated on e8 with White's queen on f7 backed by the bishop on c4. That
+ * is the position the shot wants: the king stands on e8 (file 4, rank 7 — exactly where
+ * `king-surrender` is aimed), the checking piece is adjacent and in frame, and every
+ * escape square is visibly blocked by Black's own pieces or covered by the queen.
+ *
+ * Every move is verified legal as the game is built and the final position is verified to
+ * be checkmate. If any of that ever fails, `verified` comes back false rather than quietly
+ * handing the scene a fake mate.
  */
-export function buildDemoGame(): DemoGame {
-  if (demoCache) return demoCache;
+export function buildDemoGame(line: DemoLineId | string = 'strike'): DemoGame {
+  const cached = demoCache.get(line);
+  if (cached) return cached;
+  const spec = DEMO_LINES[line] ?? DEMO_LINES.strike;
+  const DEMO_SAN = spec.san;
 
   const b = new Board(START_FEN);
   const moves: DemoMove[] = [];
@@ -599,8 +624,8 @@ export function buildDemoGame(): DemoGame {
     }
   }
 
-  demoCache = {
-    name: "Scholar's mate",
+  const game: DemoGame = {
+    name: spec.name,
     startFen: START_FEN,
     moves,
     finalFen: b.fen(),
@@ -611,10 +636,11 @@ export function buildDemoGame(): DemoGame {
     blockedEscapes,
     verified,
   };
-  return demoCache;
+  demoCache.set(line, game);
+  return game;
 }
 
 /** FEN of the checkmate the demo game arrives at — handy for `--fen=` captures. */
-export function demoMateFen(): string {
-  return buildDemoGame().finalFen;
+export function demoMateFen(line: DemoLineId | string = 'strike'): string {
+  return buildDemoGame(line).finalFen;
 }

@@ -343,8 +343,9 @@ async function runBench(E) {
     ['6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1', 'Ra8#', 1],
     ['6k1/5ppp/8/8/8/8/5PPP/1R4K1 w - - 0 1', 'Rb8#', 1],
     ['k7/8/5R2/6R1/8/8/8/7K w - - 0 1', null, 2],
-    ['7k/8/8/8/8/8/5R2/6RK w - - 0 1', null, 2],
-    ['8/8/8/8/8/1k6/8/K1r5 b - - 0 1', null, 2],
+    ['k7/8/1K6/8/8/8/8/1R6 w - - 0 1', null, 2],
+    ['7k/8/8/8/8/8/5R2/6RK w - - 0 1', 'Rh2#', 1],
+    ['8/8/8/8/8/1k6/8/K1r5 b - - 0 1', 'Rd1#', 1],
   ];
   for (const [fen, expectSan, expectMate] of mates) {
     const r = E.search(fen, { maxNodes: 500000 });
@@ -466,8 +467,12 @@ async function runMatch(E) {
 async function runDemo(E) {
   console.log('DEMO GAME — buildDemoGame() must end in a real, legal checkmate');
   console.log('');
-  const d = E.buildDemoGame();
-  console.log(`  ${d.name}`);
+  for (const id of E.DEMO_LINE_IDS) await checkDemo(E, id);
+}
+
+async function checkDemo(E, id) {
+  const d = E.buildDemoGame(id);
+  console.log(`  [${id}] ${d.name}`);
   console.log(`  moves: ${d.moves.map((m) => (m.side === 'white' ? `${m.moveNumber}. ` : '') + m.san).join(' ')}`);
   console.log(`  final: ${d.finalFen}`);
   console.log(`  mated: ${d.matedSide} king on ${d.king.name} (file ${d.king.file}, rank ${d.king.rank})`);

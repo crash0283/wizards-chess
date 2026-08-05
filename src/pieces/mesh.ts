@@ -479,6 +479,20 @@ export function analyse(m: CMesh): SurfaceInfo {
     nrm[i * 3] = x / l; nrm[i * 3 + 1] = y / l; nrm[i * 3 + 2] = z / l;
   }
 
+  // Dihedral sharpness — how far the sharpest face at this vertex bends away from the
+  // welded normal. Independent of how finely the surface happens to be tessellated, which
+  // matters: a 12-sided loft must not read as twelve sharp arrises.
+  const sharp = new Float32Array(nv).fill(1);
+  for (let f = 0; f < m.idx.length; f += 3) {
+    const l = Math.hypot(fn[f], fn[f + 1], fn[f + 2]) || 1;
+    const nx = fn[f] / l, ny = fn[f + 1] / l, nz = fn[f + 2] / l;
+    for (let k = 0; k < 3; k++) {
+      const vi = m.idx[f + k];
+      const d = nx * nrm[vi * 3] + ny * nrm[vi * 3 + 1] + nz * nrm[vi * 3 + 2];
+      if (d < sharp[vi]) sharp[vi] = d;
+    }
+  }
+
   // Neighbour centroid + edge scale.
   for (let f = 0; f < m.idx.length; f += 3) {
     for (let k = 0; k < 3; k++) {
@@ -491,7 +505,8 @@ export function analyse(m: CMesh): SurfaceInfo {
       cnt[a]++; cnt[b]++;
     }
   }
-  // Convex arris: how far the vertex stands proud of its own neighbourhood.
+  // A vertex is on an arris when it is both sharp and convex. Concave corners fill with
+  // grit and survive; convex ones are what a thousand years knocks off.
   for (let i = 0; i < nv; i++) {
     const c = cnt[i] || 1;
     scale[i] /= c;
@@ -499,7 +514,11 @@ export function analyse(m: CMesh): SurfaceInfo {
     const dy = p[i * 3 + 1] - cen[i * 3 + 1] / c;
     const dz = p[i * 3 + 2] - cen[i * 3 + 2] / c;
     const proud = dx * nrm[i * 3] + dy * nrm[i * 3 + 1] + dz * nrm[i * 3 + 2];
-    const k = proud / Math.max(1e-4, scale[i] * 0.42);
+    if (proud <= 0) {
+      arris[i] = 0;
+      continue;
+    }
+    const k = (1 - sharp[i] - 0.035) / 0.255;
     arris[i] = k <= 0 ? 0 : k >= 1 ? 1 : k * k * (3 - 2 * k);
   }
   return { nrm, fresh, arris, scale };
