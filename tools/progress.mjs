@@ -16,6 +16,36 @@ import { resolve, extname } from 'node:path';
 const ROOT = resolve(import.meta.dirname, '..');
 const state = JSON.parse(await readFile(resolve(ROOT, 'state/progress.json'), 'utf8'));
 
+/** Unfinished work sorts to the top so the page reads as a worklist, not a gallery. */
+const STATUS_RANK = { failing: 0, improving: 1, critiqued: 2, building: 3, pending: 4, passed: 5 };
+
+/**
+ * Merge per-piece critique files over the base state.
+ *
+ * Each critic writes ONLY state/critiques/<pieceId>.json, never the shared file, so
+ * concurrent agents cannot clobber each other. Anything a critique file sets wins.
+ */
+{
+  const dir = resolve(ROOT, 'state/critiques');
+  if (existsSync(dir)) {
+    const { readdir } = await import('node:fs/promises');
+    for (const f of await readdir(dir)) {
+      if (!f.endsWith('.json')) continue;
+      let patch;
+      try {
+        patch = JSON.parse(await readFile(resolve(dir, f), 'utf8'));
+      } catch {
+        console.error(`skipping malformed ${f}`);
+        continue;
+      }
+      const piece = state.pieces.find((p) => p.id === (patch.id ?? f.replace(/\.json$/, '')));
+      if (piece) Object.assign(piece, patch);
+    }
+  }
+  state.totalRounds = state.pieces.reduce((n, p) => n + (p.history?.length ?? 0), 0);
+  state.pieces.sort((a, b) => (STATUS_RANK[a.status] ?? 9) - (STATUS_RANK[b.status] ?? 9));
+}
+
 const mime = (p) => ({ '.png': 'image/png', '.webp': 'image/webp' })[extname(p).toLowerCase()] ?? 'image/jpeg';
 
 const SHRINK = `async ([url, maxW]) => {
