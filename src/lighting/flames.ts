@@ -207,7 +207,7 @@ void main(){
   float size = aParams.y;
   float fl = flicker(uTime, ph);
   vFlick = fl;
-  float r = size * (2.70 + 0.60 * (fl - 0.5));
+  float r = size * (1.90 + 0.45 * (fl - 0.5));
   vec3 right = normalize(vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]));
   vec3 up = normalize(vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]));
   vec3 wp = aCentre + vec3(0.0, size * 0.55, 0.0) + right * (aCorner.x * r) + up * (aCorner.y * r);
@@ -296,7 +296,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const bodyMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 4.2 },
+      uIntensity: { value: 5.0 },
       uCore: { value: new THREE.Color(FIRE.core).convertSRGBToLinear() },
       uMid: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
       uEdge: { value: new THREE.Color(FIRE.edge).convertSRGBToLinear() },
@@ -354,7 +354,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const glowMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 0.16 },
+      uIntensity: { value: 0.22 },
       uColor: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
     },
     vertexShader: GLOW_VERT,
@@ -373,23 +373,47 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   group.add(glowMesh);
 
   // --- the real light pool ------------------------------------------------------------
-  // Each of these is a genuine inverse-square source sitting half a metre above the kerb.
-  // That is the whole point: a flame has to burn a warm pool into the stone it stands on
-  // and uplight the nearest plinth, or it reads as a sprite pasted over the frame. Range
-  // is deliberately short — bright inside a metre, a visible wash at two, gone by six —
-  // so thirty-odd of them still do not warm the room.
-  // Decay 1.7 rather than a textbook 2. A 0.5 m column of burning gas is nowhere near a
-  // point at the distances that matter here, and the exact inverse square of a point
-  // source gives a pool that is blown at the base and gone a metre later. The shallower
-  // exponent is the usual stand-in for an extended emitter: same core, a far longer
-  // usable tail, which is what actually reads as "this fire is lighting the room".
+  // Each of these is a genuine inverse-square source sitting inside its flame's lower
+  // body. That is the whole point: a flame has to burn a warm pool into the stone it
+  // stands on and uplight the nearest plinth, or it reads as a sprite pasted over the
+  // frame. Range is deliberately short — blown at the base, a clear wash at two metres,
+  // into the noise floor by six — and shorter than the spacing between fires, so the
+  // pools stay discrete instead of merging into one warm band along the kerb. Thirty-odd
+  // of them at this range still do not warm the room.
   const lights: THREE.PointLight[] = [];
   const lightCount = Math.min(opts.lightCount, flames.length);
   for (let i = 0; i < lightCount; i++) {
-    const l = new THREE.PointLight(new THREE.Color(FIRE.light), 0, 9, 1.7);
+    const l = new THREE.PointLight(new THREE.Color(FIRE.light), 0, 9, 2.0);
     l.castShadow = false;
     group.add(l);
     lights.push(l);
+  }
+
+  // --- the bounce -----------------------------------------------------------------------
+  // Four very dim, very wide warm sources hanging well above each side of the kerb —
+  // high enough that their own falloff is nearly flat across the board, which is what
+  // makes them read as ambient bounce rather than as four more fires. This is the one
+  // thing a direct-lighting renderer cannot get from the fires themselves:
+  // in the reference, firelight that has bounced once off marble and stone puts a broad
+  // warm cast across the near board that never becomes bright anywhere. Without it the
+  // only warm pixels in frame are the hot cores of the pools, and the ratio of
+  // warm-and-bright to warm-at-all comes out at about 2:3 against the frame's 1:2 — the
+  // render reads as fires punched into a cold plate rather than as fires in a room.
+  // These must stay *dim*: they are a bounce term, not a second key, and the brief is
+  // explicit that the flames do not warm the room.
+  const bounce: THREE.PointLight[] = [];
+  const kerbR = HALF + 1.05;
+  for (const p of [
+    [-kerbR, 6.0, 0],
+    [kerbR, 6.0, 0],
+    [0, 6.0, -kerbR],
+    [0, 6.0, kerbR],
+  ] as const) {
+    const l = new THREE.PointLight(new THREE.Color(FIRE.bounce), 0, 26, 1.15);
+    l.position.set(p[0], p[1], p[2]);
+    l.castShadow = false;
+    group.add(l);
+    bounce.push(l);
   }
 
   // CPU-side flicker uses the same shape as the shader's, but from the seeded noise so
@@ -414,9 +438,14 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
     tick(t: number) {
       bodyMat.uniforms.uTime.value = t;
       glowMat.uniforms.uTime.value = t;
+      let mean = 0;
       for (const f of flames) {
         f.flicker = THREE.MathUtils.clamp(flick(t, f.phase) + 0.5, 0, 1);
+        mean += f.flicker;
       }
+      // The bounce breathes with the whole fire population, not with any one flame.
+      mean = flames.length ? mean / flames.length : 0.5;
+      for (const l of bounce) l.intensity = 0.5 * (0.78 + 0.44 * mean);
     },
 
     assign(camera: THREE.Camera) {
@@ -448,11 +477,11 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
         // roughly the flame's own upper body approximates the integral over the volume:
         // the peak comes down, the useful pool widens, and the reference's ratio of
         // warm-and-bright to warm-at-all (about 1:2, ours was 2:3) falls into place.
-        l.position.set(f.pos.x, f.pos.y + f.size * 0.9 + 0.7, f.pos.z);
+        l.position.set(f.pos.x, f.pos.y + f.size * 0.45, f.pos.z);
         // Inverse-square with a soft cutoff: a clear warm wash on the marble at two
         // metres, into the noise floor by six.
-        l.distance = 9.0 + f.size * 3.0;
-        l.intensity = (2.15 + f.size * 4.4) * (0.60 + 0.72 * f.flicker);
+        l.distance = 4.9 + f.size * 2.8;
+        l.intensity = (2.45 + f.size * 5.3) * (0.60 + 0.72 * f.flicker);
       }
     },
 
@@ -462,6 +491,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
       glowGeo.dispose();
       glowMat.dispose();
       for (const l of lights) l.dispose();
+      for (const l of bounce) l.dispose();
     },
   };
 }

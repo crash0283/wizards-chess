@@ -33,21 +33,23 @@ export const GradeShader = {
      * reference's high-frequency energy.
      */
     uDiffusion: { value: 0.30 },
-    uVigStrength: { value: 0.84 },
-    uVigInner: { value: 0.30 },
+    uVigStrength: { value: 0.77 },
+    uVigInner: { value: 0.34 },
     uVigOuter: { value: 0.95 },
     uVigAspect: { value: 1.25 },
     uLift: { value: 0.94 },
     uContrast: { value: 0.99 },
     /** Saturation in the deep shadows — the film's blacks are close to neutral. */
-    uSatShadow: { value: 0.42 },
+    uSatShadow: { value: 0.36 },
     /** Saturation from the mid-tones up, where the cold marble has to read blue. */
-    uSaturation: { value: 1.16 },
+    uSaturation: { value: 1.06 },
     uSatRamp: { value: new THREE.Vector2(0.03, 0.28) },
     /** Cold DI balance. Applied to everything the flames are not already warming. */
-    uCoolBalance: { value: new THREE.Vector3(0.965, 1.015, 1.03) },
+    uCoolBalance: { value: new THREE.Vector3(0.968, 1.013, 1.027) },
     uShadowTint: { value: new THREE.Vector3(0.004, 0.006, 0.011) },
     uHighlightTint: { value: new THREE.Vector3(0.006, 0.004, -0.004) },
+    /** Print black: the picture's floor, which is never literal zero. */
+    uToe: { value: 0.017 },
     uGrain: { value: 0.013 },
     uSeed: { value: 0.0 },
     uFlash: { value: 0.0 },
@@ -68,7 +70,7 @@ uniform float uVigStrength, uVigInner, uVigOuter, uVigAspect;
 uniform float uLift, uContrast, uSaturation, uSatShadow;
 uniform vec2 uSatRamp;
 uniform vec3 uCoolBalance, uShadowTint, uHighlightTint;
-uniform float uGrain, uSeed, uFlash;
+uniform float uGrain, uSeed, uFlash, uToe;
 varying vec2 vUv;
 
 vec3 aces(vec3 x){
@@ -122,8 +124,12 @@ void main(){
   col = max((col - 0.16) * uContrast + 0.16, 0.0);
 
   // Cold balance. The room is graded cold; anything already warm — a flame and the
-  // metre or two of stone it is lighting — keeps its own colour and is left alone.
-  float warmth = clamp((col.r - col.b) * 2.6, 0.0, 1.0);
+  // stone it is lighting — keeps its own colour and is left alone. The warmth test has
+  // to trip early and the push has to stay small, because the outer part of a firelit
+  // pool is only barely warm: at the old sensitivity a pixel a hundredth above neutral
+  // read as "not warm", took the full cold push, and came out of the grade measurably
+  // *blue*. That single line was inverting most of the bounce light in the frame.
+  float warmth = clamp((col.r - col.b) * 3.2, 0.0, 1.0);
   col *= mix(uCoolBalance, vec3(1.0), warmth);
 
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
@@ -133,8 +139,15 @@ void main(){
   // this ramp neutralises, so applying it uniformly greys out the outer two-thirds of
   // every warm pool and the fires stop reading as sources — which is the whole gap.
   float warmSat = mix(uSatShadow, uSaturation, smoothstep(uSatRamp.x, uSatRamp.y, l));
-  float sat = mix(warmSat, uSaturation, warmth);
+  float sat = mix(warmSat, uSaturation, warmth * 0.6);
   col = mix(vec3(l), col, sat);
+
+  // Print black. A negative never scans to zero and a release print carries base fog, so
+  // the reference frame's darkest decile sits around 0.043 rather than on the floor —
+  // its true zeros are the letterbox bars, not the picture. Rendering the corners and
+  // the vault to literal black is a tell in its own right, and it costs a large chunk of
+  // the shadow histogram. This lifts only the bottom of the curve and leaves the rest.
+  col += uToe * (1.0 - smoothstep(0.0, 0.11, l));
 
   float sh = 1.0 - smoothstep(0.0, 0.5, l);
   float hi = smoothstep(0.55, 1.0, l);

@@ -8,7 +8,8 @@
  *   subdivide conforming red-green refinement (no T-junctions, no cracks)
  *   clipMesh  half-space cut with a capped cross-section — this is how stone breaks
  *   analyse   welded normals, convex "arris-ness", freshness bleed
- *   toGeometry explode to non-indexed with true face normals -> flat chisel facets
+ *   toGeometry explode to non-indexed, shading by crease angle: smooth across a
+ *              tessellated curve, faceted across a genuine arris
  *
  * Deterministic by construction: no randomness lives in this file at all.
  */
@@ -20,6 +21,12 @@ export interface CMesh {
   pos: number[];
   /** 1 float per vertex, 0..1 — how thin/translucent the stone is here (ears, blade edges). */
   thin: number[];
+  /**
+   * 1 float per vertex, 0..1 — how much this surface is carved *chainmail* rather than
+   * plate or bare stone. Drives a fine ring relief in the shader and suppresses the
+   * mason's chisel facets, because mail is cloth: it drapes, it does not get dressed.
+   */
+  mail: number[];
   /** 3 indices per triangle. */
   idx: number[];
   /** 1 float per triangle, 0..1 — 0 weathered outer skin, 1 freshly exposed break face. */
@@ -32,10 +39,13 @@ const QK = 1e4;
 export class Part {
   pos: number[] = [];
   thin: number[] = [];
+  mail: number[] = [];
   idx: number[] = [];
   face: number[] = [];
   /** Thinness stamped onto every vertex created from now on. */
   thinNow = 0;
+  /** Mail-ness stamped onto every vertex created from now on. */
+  mailNow = 0;
   /** Target triangle edge length for this part when it is refined. */
   detail = 0.14;
   private buckets = new Map<number, number[]>();
@@ -53,6 +63,7 @@ export class Part {
           Math.round(this.pos[i * 3 + 2] * QK) === kz
         ) {
           if (this.thinNow > this.thin[i]) this.thin[i] = this.thinNow;
+          if (this.mailNow > this.mail[i]) this.mail[i] = this.mailNow;
           return i;
         }
       }
@@ -63,6 +74,7 @@ export class Part {
     const i = this.pos.length / 3;
     this.pos.push(x, y, z);
     this.thin.push(this.thinNow);
+    this.mail.push(this.mailNow);
     b.push(i);
     return i;
   }
@@ -90,7 +102,7 @@ export class Part {
   }
 
   mesh(): CMesh {
-    return { pos: this.pos, thin: this.thin, idx: this.idx, face: this.face };
+    return { pos: this.pos, thin: this.thin, mail: this.mail, idx: this.idx, face: this.face };
   }
 }
 
@@ -116,11 +128,12 @@ export function orientOutward(m: CMesh): void {
 }
 
 export function mergeMeshes(list: CMesh[]): CMesh {
-  const out: CMesh = { pos: [], thin: [], idx: [], face: [] };
+  const out: CMesh = { pos: [], thin: [], mail: [], idx: [], face: [] };
   for (const m of list) {
     const off = out.pos.length / 3;
     for (let i = 0; i < m.pos.length; i++) out.pos.push(m.pos[i]);
     for (let i = 0; i < m.thin.length; i++) out.thin.push(m.thin[i]);
+    for (let i = 0; i < m.mail.length; i++) out.mail.push(m.mail[i]);
     for (let i = 0; i < m.idx.length; i++) out.idx.push(m.idx[i] + off);
     for (let i = 0; i < m.face.length; i++) out.face.push(m.face[i]);
   }
@@ -283,7 +296,9 @@ export function subdivide(m: CMesh, maxEdge: number, maxPasses = 7): CMesh {
       for (const t of e) if (t[2] > mx * 0.80) marked.add(edgeKey(t[0], t[1]));
     }
 
-    const out: CMesh = { pos: pos.slice(), thin: cur.thin.slice(), idx: [], face: [] };
+    const out: CMesh = {
+      pos: pos.slice(), thin: cur.thin.slice(), mail: cur.mail.slice(), idx: [], face: [],
+    };
     const mid = new Map<number, number>();
     const midpoint = (a: number, b: number): number => {
       const k = edgeKey(a, b);
@@ -296,6 +311,7 @@ export function subdivide(m: CMesh, maxEdge: number, maxPasses = 7): CMesh {
         (pos[a * 3 + 2] + pos[b * 3 + 2]) * 0.5,
       );
       out.thin.push((cur.thin[a] + cur.thin[b]) * 0.5);
+      out.mail.push((cur.mail[a] + cur.mail[b]) * 0.5);
       mid.set(k, i);
       return i;
     };
@@ -360,17 +376,18 @@ export function clipMesh(
   const EPS = 1e-6;
   const out = new Part();
   const cut: number[] = [];
-  const px: number[] = [], py: number[] = [], pz: number[] = [], pt: number[] = [], ps: number[] = [];
+  const px: number[] = [], py: number[] = [], pz: number[] = [], pt: number[] = [],
+    pm: number[] = [], ps: number[] = [];
 
   for (let f = 0; f < m.idx.length; f += 3) {
     const vi = [m.idx[f], m.idx[f + 1], m.idx[f + 2]];
-    px.length = 0; py.length = 0; pz.length = 0; pt.length = 0; ps.length = 0;
+    px.length = 0; py.length = 0; pz.length = 0; pt.length = 0; pm.length = 0; ps.length = 0;
     for (let e = 0; e < 3; e++) {
       const a = vi[e], b = vi[(e + 1) % 3];
       const sa = s[a], sb = s[b];
       if (sa <= EPS) {
         px.push(m.pos[a * 3]); py.push(m.pos[a * 3 + 1]); pz.push(m.pos[a * 3 + 2]);
-        pt.push(m.thin[a]); ps.push(sa);
+        pt.push(m.thin[a]); pm.push(m.mail[a]); ps.push(sa);
       }
       if ((sa < -EPS && sb > EPS) || (sa > EPS && sb < -EPS)) {
         const u = sa / (sa - sb);
@@ -378,6 +395,7 @@ export function clipMesh(
         py.push(m.pos[a * 3 + 1] + (m.pos[b * 3 + 1] - m.pos[a * 3 + 1]) * u);
         pz.push(m.pos[a * 3 + 2] + (m.pos[b * 3 + 2] - m.pos[a * 3 + 2]) * u);
         pt.push(m.thin[a] + (m.thin[b] - m.thin[a]) * u);
+        pm.push(m.mail[a] + (m.mail[b] - m.mail[a]) * u);
         ps.push(0);
       }
     }
@@ -386,9 +404,11 @@ export function clipMesh(
     const ids: number[] = [];
     for (let k = 0; k < cnt; k++) {
       out.thinNow = pt[k];
+      out.mailNow = pm[k];
       ids.push(out.v(px[k], py[k], pz[k]));
     }
     out.thinNow = 0;
+    out.mailNow = 0;
     const fv = m.face[f / 3];
     for (let k = 1; k + 1 < cnt; k++) out.t(ids[0], ids[k], ids[k + 1], fv);
     for (let k = 0; k < cnt; k++) {
@@ -432,6 +452,7 @@ export function clipMesh(
       cx += out.pos[i * 3]; cy += out.pos[i * 3 + 1]; cz += out.pos[i * 3 + 2];
     }
     out.thinNow = 0;
+    out.mailNow = 0;
     const c = out.v(cx / ordered.length, cy / ordered.length, cz / ordered.length);
     for (let i = 0; i < ordered.length; i++) {
       out.t(c, ordered[i], ordered[(i + 1) % ordered.length], freshVal);
@@ -453,6 +474,13 @@ export interface SurfaceInfo {
   arris: Float32Array;
   /** Mean length of the edges meeting this vertex. */
   scale: Float32Array;
+  /**
+   * 0..1 — how far this vertex's shading should be carried by the welded normal instead of
+   * the raw face normal. 1 on a tessellated curve, 0 on a genuine arris. Without this,
+   * every lofted barrel and helm reads as a faceted gemstone, and the frame's chessmen are
+   * smooth carved stone with crisp edges only where the mason actually cut one.
+   */
+  smooth: Float32Array;
 }
 
 export function analyse(m: CMesh): SurfaceInfo {
@@ -461,6 +489,7 @@ export function analyse(m: CMesh): SurfaceInfo {
   const fresh = new Float32Array(nv);
   const arris = new Float32Array(nv);
   const scale = new Float32Array(nv);
+  const smooth = new Float32Array(nv);
   const cnt = new Float32Array(nv);
   const cen = new Float32Array(nv * 3);
   const p = m.pos;
@@ -528,21 +557,32 @@ export function analyse(m: CMesh): SurfaceInfo {
     const k = (1 - sharp[i] - 0.035) / 0.255;
     arris[i] = k <= 0 ? 0 : k >= 1 ? 1 : k * k * (3 - 2 * k);
   }
-  return { nrm, fresh, arris, scale };
+  // A 9- or 12-sided loft bends ~35 degrees per facet and must shade as the curve it
+  // stands for; a box corner bends 90 and must stay an edge. The cut is at ~36 degrees
+  // between the welded normal and the sharpest face touching the vertex.
+  for (let i = 0; i < nv; i++) {
+    const k = (sharp[i] - 0.775) / 0.145;
+    smooth[i] = k <= 0 ? 0 : k >= 1 ? 1 : k * k * (3 - 2 * k);
+  }
+  return { nrm, fresh, arris, scale, smooth };
 }
 
 /** Push every vertex along its welded normal. Returns the applied offsets. */
 export function displaceMesh(
   m: CMesh,
   info: SurfaceInfo,
-  fn: (x: number, y: number, z: number, nx: number, ny: number, nz: number, fresh: number, arris: number) => number,
+  fn: (
+    x: number, y: number, z: number,
+    nx: number, ny: number, nz: number,
+    fresh: number, arris: number, mail: number,
+  ) => number,
 ): Float32Array {
   const nv = m.pos.length / 3;
   const out = new Float32Array(nv);
   for (let i = 0; i < nv; i++) {
     const x = m.pos[i * 3], y = m.pos[i * 3 + 1], z = m.pos[i * 3 + 2];
     const nx = info.nrm[i * 3], ny = info.nrm[i * 3 + 1], nz = info.nrm[i * 3 + 2];
-    const d = fn(x, y, z, nx, ny, nz, info.fresh[i], info.arris[i]);
+    const d = fn(x, y, z, nx, ny, nz, info.fresh[i], info.arris[i], m.mail[i]);
     out[i] = d;
     m.pos[i * 3] = x + nx * d;
     m.pos[i * 3 + 1] = y + ny * d;
@@ -566,13 +606,14 @@ export type Shader = (
   out: ShadeOut,
   x: number, y: number, z: number,
   nx: number, ny: number, nz: number,
-  fresh: number, thin: number, recess: number,
+  fresh: number, thin: number, recess: number, mail: number,
 ) => void;
 
 export function toGeometry(
   m: CMesh,
   disp: Float32Array,
   shade: Shader,
+  info?: SurfaceInfo,
 ): THREE.BufferGeometry {
   const tris = m.idx.length / 3;
   const pos = new Float32Array(tris * 9);
@@ -580,6 +621,7 @@ export function toGeometry(
   const col = new Float32Array(tris * 9);
   const rgh = new Float32Array(tris * 3);
   const thn = new Float32Array(tris * 3);
+  const mai = new Float32Array(tris * 3);
   const out: ShadeOut = { r: 0, g: 0, b: 0, rough: 0.9 };
   const p = m.pos;
 
@@ -598,11 +640,23 @@ export function toGeometry(
       const vi = vs[k];
       const o = ti * 9 + k * 3;
       pos[o] = p[vi * 3]; pos[o + 1] = p[vi * 3 + 1]; pos[o + 2] = p[vi * 3 + 2];
-      nor[o] = nx; nor[o + 1] = ny; nor[o + 2] = nz;
-      shade(out, pos[o], pos[o + 1], pos[o + 2], nx, ny, nz, fv, m.thin[vi], -disp[vi]);
+      if (info === undefined) {
+        nor[o] = nx; nor[o + 1] = ny; nor[o + 2] = nz;
+      } else {
+        const w = info.smooth[vi];
+        let sx2 = nx + (info.nrm[vi * 3] - nx) * w;
+        let sy2 = ny + (info.nrm[vi * 3 + 1] - ny) * w;
+        let sz2 = nz + (info.nrm[vi * 3 + 2] - nz) * w;
+        const sl = Math.hypot(sx2, sy2, sz2) || 1;
+        sx2 /= sl; sy2 /= sl; sz2 /= sl;
+        nor[o] = sx2; nor[o + 1] = sy2; nor[o + 2] = sz2;
+      }
+      shade(out, pos[o], pos[o + 1], pos[o + 2], nx, ny, nz, fv, m.thin[vi], -disp[vi], m.mail[vi]);
       col[o] = out.r; col[o + 1] = out.g; col[o + 2] = out.b;
       rgh[ti * 3 + k] = out.rough;
       thn[ti * 3 + k] = m.thin[vi];
+      // A cut face is bare stone however woven the skin around it was.
+      mai[ti * 3 + k] = m.mail[vi] * (1 - fv);
     }
   }
 
@@ -612,6 +666,7 @@ export function toGeometry(
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   g.setAttribute('aRough', new THREE.BufferAttribute(rgh, 1));
   g.setAttribute('aThin', new THREE.BufferAttribute(thn, 1));
+  g.setAttribute('aMail', new THREE.BufferAttribute(mai, 1));
   g.computeBoundingSphere();
   return g;
 }

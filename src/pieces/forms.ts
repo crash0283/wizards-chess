@@ -1,19 +1,33 @@
 /**
  * PIECE: pieces — the six carvings.
  *
- * Built against refs/frames/knight-looking-up.webp. These are not abstract chess forms:
- * they are figurative armoured combatants in carved stone, each on its own hexagonal
- * stepped and moulded plinth.
+ * Built against refs/frames/knight-looking-up.webp, and against nothing else. What that
+ * frame actually shows, once you stop guessing and look:
  *
- *   pawn    a crouching, hunched foot-soldier under a domed helm, shield and short blade
- *           held close. From behind — which is how the judging camera sees the dark army —
- *           a row of domed shells. The most distinctive silhouette on the board.
- *   knight  an armoured rider on a horse: conical helm with a cross-shaped visor slit, a
- *           cape falling behind as heavy drapery, leaning forward over a curved blade.
- *   bishop  a tall standing armoured figure, hands joined at the chest, narrow.
- *   rook    a castle turret in real masonry courses, crenellated, one merlon long gone.
- *   queen   a robed figure under a crowned helm inside a wide falling cape.
- *   king    the same but heavier and taller, and carrying a staff he can let fall.
+ *   pawn    a crouching foot-soldier under a smooth rounded dome helm, head down, both
+ *           arms folded forward onto the plinth in front of him, kite shield leaning at
+ *           his side. Wider than he is tall. From behind, a row of domed shells.
+ *   knight  an armoured rider on a horse: a flat-topped crusader helm with a CROSS-SHAPED
+ *           void in the face, a vast chainmail cape falling off the shoulders and over the
+ *           horse's rump, the body committed forward, a CURVED sabre out at arm's length.
+ *   bishop  a tall standing armoured figure: helm, pauldrons, hands joined at the chest on
+ *           a sword carried point-down, a kite shield at the side, armoured legs with a
+ *           real gap between them. Narrow.
+ *   rook    a castle turret in banded masonry courses: arrow slits, a corbelled machicolation,
+ *           crenellations, one merlon long gone.
+ *   queen   the standing figure again, taller, under a crowned helm inside a long cape.
+ *   king    the same, taller still, the tallest thing on the board, carrying a staff.
+ *
+ * Three rules the previous round broke and this one does not:
+ *
+ *   1. NOTHING is a cone. Every figure has a helm narrower than its shoulders, shoulders
+ *      wider than its waist, and a gap between its legs. That trio is what makes a
+ *      silhouette read as a person rather than as a bollard.
+ *   2. The plinth is roughly a third of the object. It is stepped and moulded and carries a
+ *      blind arcade of colonnettes and a dentil course — it is architecture, and in the
+ *      frame it is a third of every piece's pixels.
+ *   3. Capes are chainmail, hooded, deeply folded, and their hems stop clear of the plinth
+ *      so the legs beneath them show. A cape that reaches the ground IS a cone.
  *
  * Everything is cut, not revolved: cross-sections are small polygons lofted in stacks and
  * along paths, so every surface is a plane and every silhouette has corners in it.
@@ -95,20 +109,17 @@ function boxProf(hw: number, up: number, dn: number, cut = 0.34): number[][] {
 }
 
 /**
- * A drapery section: a ring with alternating radii so a cape falls in real vertical folds
- * rather than as a smooth cone. `back` deepens the rear of the fall.
+ * A breastplate section: flat-ish across the back, a shallow keel down the front. This is
+ * what makes a torso read as armour instead of as a pipe.
  */
-function foldRing(n: number, r: number, fold: number, back: number): number[][] {
-  const out: number[][] = [];
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2 + Math.PI / n;
-    // Alternating ridge/valley plus a slower second harmonic, so the drapery reads as
-    // cloth gathering rather than as a regular fluted column.
-    const f = 1 + (i % 2 ? -fold : fold) + Math.sin(i * 1.7 + 0.6) * fold * 0.55;
-    const rr = r * f * (1 + back * -Math.cos(a));
-    out.push([Math.cos(a) * rr, Math.sin(a) * rr]);
-  }
-  return out;
+function cuirass(hw: number, front: number, back: number): number[][] {
+  return [
+    [-hw * 0.62, -back], [hw * 0.62, -back],
+    [hw, -back * 0.35], [hw * 0.94, front * 0.42],
+    [hw * 0.52, front * 0.88], [0, front],
+    [-hw * 0.52, front * 0.88], [-hw * 0.94, front * 0.42],
+    [-hw, -back * 0.35],
+  ];
 }
 
 function scaleProf(prof: number[][], sx: number, sz: number, ox = 0, oz = 0): number[][] {
@@ -156,26 +167,7 @@ function tube(
   loft(p, rings, capA, capB);
 }
 
-/**
- * The plinth. Hexagonal, stepped, with a real moulded profile: bottom slab, set-back,
- * fillet, ovolo roll, die, cornice. Architectural, not a disc.
- */
-function plinth(p: Part, r: number, h: number, sides: number, rng: Rng): void {
-  const prof = ngon(sides, r, r, Math.PI / sides + rng.float(-0.05, 0.05), jitArr(sides, rng, 0.010));
-  const S = (t: number, s: number): Station => ({ y: t * h, sx: s, sz: s });
-  stack(p, prof, [
-    S(0.00, 0.985), S(0.05, 1.000), S(0.21, 0.998),
-    S(0.24, 0.928), S(0.38, 0.922),
-    S(0.41, 0.896),
-    S(0.49, 0.952), S(0.58, 0.950),
-    S(0.62, 0.892),
-    S(0.68, 0.856), S(0.85, 0.850),
-    S(0.89, 0.898), S(0.955, 0.892),
-    S(1.00, 0.828),
-  ]);
-}
-
-/** A faceted dome — helms, pauldrons, the pawn's shell back. */
+/** A faceted dome — helm caps, pauldrons, shield bosses, the pawn's shell back. */
 function dome(
   p: Part,
   cx: number, cy: number, cz: number,
@@ -199,7 +191,16 @@ function quatFromAxes(x: THREE.Vector3, y: THREE.Vector3, z: THREE.Vector3): THR
   return new THREE.Quaternion().setFromRotationMatrix(m);
 }
 
-/** A tapering wedge — crown points, ears, merlon spurs. */
+/** Bake a transform into everything this Part has grown since `from`. */
+function xform(p: Part, from: number, m: THREE.Matrix4): void {
+  const v = new THREE.Vector3();
+  for (let i = from; i < p.pos.length; i += 3) {
+    v.set(p.pos[i], p.pos[i + 1], p.pos[i + 2]).applyMatrix4(m);
+    p.pos[i] = v.x; p.pos[i + 1] = v.y; p.pos[i + 2] = v.z;
+  }
+}
+
+/** A tapering wedge — crown points, ears, merlon spurs, finials. */
 function spike(
   p: Part,
   base: THREE.Vector3,
@@ -281,158 +282,481 @@ function curvedBlade(
   p.thinNow = 0;
 }
 
+/** Grip, crossguard and pommel — the bit that makes a blade read as a *sword*. */
+function hilt(
+  p: Part,
+  grip: THREE.Vector3,
+  up: THREE.Vector3,
+  across: THREE.Vector3,
+  guardHalf: number,
+  scale: number,
+): void {
+  const q = quatFromAxes(
+    across.clone().normalize(),
+    up.clone().normalize(),
+    new THREE.Vector3().crossVectors(across, up).normalize().negate(),
+  );
+  slab(p, grip.clone(), V(0.055 * scale, 0.13 * scale, 0.048 * scale), q);
+  slab(p, grip.clone().addScaledVector(up, -0.14 * scale),
+    V(guardHalf, 0.042 * scale, 0.052 * scale), q);
+  slab(p, grip.clone().addScaledVector(up, 0.16 * scale),
+    V(0.085 * scale, 0.065 * scale, 0.075 * scale), q);
+}
+
+// ---------------------------------------------------------------------------------------
+// The plinth. Hexagonal, stepped, moulded, and carrying a blind arcade — in the reference
+// frame it is a full third of every piece, and it is the most obviously *carved* thing
+// on the board. It is not a disc and it is not a footnote.
+// ---------------------------------------------------------------------------------------
+
+function plinth(p: Part, r: number, h: number, sides: number, rng: Rng, cols: number): void {
+  const rot = Math.PI / sides + rng.float(-0.04, 0.04);
+  const jit = jitArr(sides, rng, 0.008);
+  const prof = ngon(sides, r, r, rot, jit);
+  const S = (t: number, s: number): Station => ({ y: t * h, sx: s, sz: s });
+  // bottom step - chamfer - fillet - cavetto - DIE - astragal - cornice - top plate
+  stack(p, prof, [
+    S(0.000, 0.988), S(0.070, 1.000), S(0.145, 0.996),
+    S(0.180, 0.934),
+    S(0.200, 0.922), S(0.248, 0.918),
+    S(0.276, 0.870),
+    S(0.312, 0.846), S(0.638, 0.842),
+    S(0.672, 0.880), S(0.706, 0.886),
+    S(0.744, 0.858),
+    S(0.788, 0.898), S(0.858, 0.910),
+    S(0.900, 0.882),
+    S(0.944, 0.862), S(1.000, 0.848),
+  ]);
+
+  const faceStep = (Math.PI * 2) / sides;
+  const apo = Math.cos(Math.PI / sides);
+  const half = Math.sin(Math.PI / sides);
+
+  // Blind arcade on the die: shafts with capitals, standing proud of each flat face.
+  const dieR = r * 0.844;
+  const y0 = h * 0.330, y1 = h * 0.618;
+  for (let f = 0; f < sides; f++) {
+    const a = rot + (f + 0.5) * faceStep;
+    const nx = Math.cos(a), nz = Math.sin(a);
+    const tx = Math.sin(a), tz = -Math.cos(a);
+    const q = quatFromAxes(V(tx, 0, tz), V(0, 1, 0), V(nx, 0, nz));
+    for (let k = 0; k < cols; k++) {
+      const u = cols === 1 ? 0 : (k / (cols - 1) - 0.5) * 1.34;
+      const off = u * dieR * half;
+      const cx = nx * dieR * apo + tx * off;
+      const cz = nz * dieR * apo + tz * off;
+      const wsh = Math.min(0.088 * r, dieR * half * 0.62 / Math.max(1, cols));
+      slab(p, V(cx, (y0 + y1) * 0.5, cz),
+        V(wsh, (y1 - y0) * 0.42, 0.052 * r), q);
+      slab(p, V(cx, y1 - (y1 - y0) * 0.06, cz),
+        V(wsh * 1.45, (y1 - y0) * 0.055, 0.064 * r), q);
+    }
+  }
+
+  // Dentil course under the cornice — small square blocks, twice the arcade's density.
+  const denR = r * 0.888;
+  const dy = h * 0.822;
+  for (let f = 0; f < sides; f++) {
+    const a = rot + (f + 0.5) * faceStep;
+    const nx = Math.cos(a), nz = Math.sin(a);
+    const tx = Math.sin(a), tz = -Math.cos(a);
+    const q = quatFromAxes(V(tx, 0, tz), V(0, 1, 0), V(nx, 0, nz));
+    const n = cols + 2;
+    for (let k = 0; k < n; k++) {
+      const off = (k / (n - 1) - 0.5) * 1.5 * denR * half;
+      slab(
+        p,
+        V(nx * denR * apo + tx * off, dy, nz * denR * apo + tz * off),
+        V(0.042 * r, h * 0.030, 0.040 * r),
+        q,
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------
+// Drapery. A cape is a hollow cone only if you build it as one: this one is pulled tight
+// at the front, billows at the back, falls in real alternating folds, and finishes on a
+// scalloped hem well above the plinth so what is underneath still reads.
+// ---------------------------------------------------------------------------------------
+
+function drape(
+  p: Part,
+  st: Station[],
+  n: number,
+  fold: number,
+  frontIn: number,
+  backOut: number,
+  hem: number,
+  rng: Rng,
+): void {
+  const prof: number[][] = [];
+  const ridge: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + Math.PI / n;
+    // 0 at the front of the piece, 1 directly behind it.
+    const k = 0.5 - 0.5 * Math.sin(a);
+    const rg = i % 2 === 0 ? 1 : -1;
+    const f =
+      1 + rg * fold + Math.sin(i * 2.27 + 0.7) * fold * 0.55 + rng.float(-0.014, 0.014);
+    const rr = f * (1 - frontIn * (1 - k)) * (1 + backOut * k);
+    prof.push([Math.cos(a) * rr, Math.sin(a) * rr]);
+    ridge.push(rg > 0 ? 1 : 0);
+  }
+  const rings = st.map((s) => ringXZ(s.y, scaleProf(prof, s.sx, s.sz, s.ox ?? 0, s.oz ?? 0)));
+  if (hem > 0) {
+    const last = rings[rings.length - 1];
+    for (let i = 0; i < n; i++) {
+      last[i].y -= ridge[i] * hem * (0.55 + 0.45 * Math.abs(Math.sin(i * 1.93 + 0.4)));
+    }
+  }
+  loft(p, rings, true, true);
+}
+
 /**
- * A conical crusader helm with a rolled brim and a cross-shaped visor slit rendered in
- * relief — a proud nasal and eye-bar, which is what actually reads at distance.
+ * The cowl over the shoulders. In the frame the dark knight's cape rises into a distinct
+ * hood that leans back off the helm — it is the single feature that stops the mass from
+ * being a bell, and it is visible from every angle.
  */
-function conicalHelm(
+function cowl(
+  p: Part,
+  cy: number, cz: number,
+  rx: number, rz: number, h: number,
+  lean: number,
+  rng: Rng,
+): void {
+  const n = 12;
+  const prof: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + Math.PI / n;
+    const f = 1 + (i % 2 ? -0.055 : 0.055) + rng.float(-0.012, 0.012);
+    prof.push([Math.cos(a) * f, Math.sin(a) * f]);
+  }
+  const st: Station[] = [];
+  const rows = 5;
+  for (let i = 0; i <= rows; i++) {
+    const t = i / rows;
+    const s = Math.pow(Math.cos((t * Math.PI) / 2), 0.60);
+    st.push({ y: cy + t * h, sx: rx * s, sz: rz * s, oz: cz - lean * t * t });
+  }
+  stack(p, prof, st);
+}
+
+// ---------------------------------------------------------------------------------------
+// Helms. A helm is narrower than the shoulders under it, has a brim, and has a face.
+// ---------------------------------------------------------------------------------------
+
+/**
+ * The crusader great-helm the frame puts front and centre: a slightly tapered drum with a
+ * rolled brim, a flat crown and a finial. The cross-shaped visor is cut as the GAP between
+ * four proud quadrant plates, so it reads as a dark cross at any distance — a modelled
+ * groove that shallow would vanish, and a painted one would be a lie.
+ */
+function helmCross(
+  p: Part,
+  cx: number, cy: number, cz: number,
+  r: number, h: number,
+  flat: boolean,
+): void {
+  const prof = ngon(9, r, r, Math.PI / 9);
+  const st: Station[] = [
+    { y: cy, sx: 0.88, sz: 0.88, ox: cx, oz: cz },
+    { y: cy + h * 0.045, sx: 1.10, sz: 1.10, ox: cx, oz: cz },
+    { y: cy + h * 0.125, sx: 1.02, sz: 1.02, ox: cx, oz: cz },
+    { y: cy + h * 0.50, sx: 0.99, sz: 0.99, ox: cx, oz: cz },
+  ];
+  if (flat) {
+    st.push(
+      { y: cy + h * 0.80, sx: 0.93, sz: 0.93, ox: cx, oz: cz },
+      { y: cy + h * 0.90, sx: 0.86, sz: 0.86, ox: cx, oz: cz },
+      { y: cy + h * 0.945, sx: 0.70, sz: 0.70, ox: cx, oz: cz },
+    );
+  } else {
+    st.push(
+      { y: cy + h * 0.74, sx: 0.72, sz: 0.72, ox: cx, oz: cz },
+      { y: cy + h * 0.90, sx: 0.36, sz: 0.36, ox: cx, oz: cz },
+      { y: cy + h * 0.965, sx: 0.10, sz: 0.10, ox: cx, oz: cz },
+    );
+  }
+  stack(p, prof, st);
+
+  // The four visor plates. The cross is the cross-shaped void they leave between them.
+  const fz = cz + r * 0.90;
+  const q = new THREE.Quaternion();
+  for (const sx of [-1, 1]) {
+    for (const sy of [-1, 1]) {
+      slab(
+        p,
+        V(cx + sx * r * 0.335, cy + h * 0.455 + sy * h * 0.125, fz),
+        V(r * 0.255, h * 0.088, r * 0.055),
+        q,
+      );
+    }
+  }
+  // A brow band and a chin band close the face off top and bottom.
+  slab(p, V(cx, cy + h * 0.632, fz - r * 0.02), V(r * 0.62, h * 0.038, r * 0.048), q);
+  slab(p, V(cx, cy + h * 0.272, fz - r * 0.02), V(r * 0.58, h * 0.036, r * 0.044), q);
+  if (flat) {
+    p.thinNow = 0.55;
+    spike(p, V(cx, cy + h * 0.94, cz), V(cx, cy + h * 1.30, cz), r * 0.10, r * 0.10, V(0, 0, 0));
+    p.thinNow = 0;
+  }
+}
+
+/** The pawn's helm: a smooth rounded dome with a rolled brim and a stubby nasal. */
+function kettleHelm(
   p: Part,
   cx: number, cy: number, cz: number,
   r: number, h: number,
 ): void {
-  const prof = ngon(8, r, r, Math.PI / 8);
-  stack(p, prof, [
-    { y: cy, sx: 0.96, sz: 0.96, ox: cx, oz: cz },
-    { y: cy + h * 0.06, sx: 1.08, sz: 1.08, ox: cx, oz: cz },
-    { y: cy + h * 0.14, sx: 1.02, sz: 1.02, ox: cx, oz: cz },
-    { y: cy + h * 0.44, sx: 0.94, sz: 0.94, ox: cx, oz: cz },
-    { y: cy + h * 0.74, sx: 0.66, sz: 0.66, ox: cx, oz: cz },
-    { y: cy + h * 0.91, sx: 0.32, sz: 0.32, ox: cx, oz: cz },
-    { y: cy + h, sx: 0.085, sz: 0.085, ox: cx, oz: cz },
+  stack(p, ngon(9, r, r, Math.PI / 9), [
+    { y: cy, sx: 0.84, sz: 0.84, ox: cx, oz: cz },
+    { y: cy + h * 0.10, sx: 1.14, sz: 1.14, ox: cx, oz: cz },
+    { y: cy + h * 0.23, sx: 1.04, sz: 1.04, ox: cx, oz: cz },
   ]);
-  const fz = cz + r * 0.88;
-  const bar = new THREE.Quaternion();
-  slab(p, V(cx, cy + h * 0.38, fz), V(r * 0.12, h * 0.36, r * 0.14), bar);
-  slab(p, V(cx, cy + h * 0.44, fz - r * 0.02), V(r * 0.60, h * 0.085, r * 0.13), bar);
+  // A rounded skull, not an egg: the frame's pawns wear a low hemisphere with a brim.
+  dome(p, cx, cy + h * 0.22, cz, r * 1.03, r * 1.03, h * 0.58, 9, 4, Math.PI / 9);
+  // Brow band and nasal — the front has to have a face on it.
+  slab(p, V(cx, cy + h * 0.30, cz + r * 1.00), V(r * 0.085, h * 0.30, r * 0.10),
+    new THREE.Quaternion());
+  slab(p, V(cx, cy + h * 0.19, cz + r * 0.86), V(r * 0.62, h * 0.055, r * 0.30),
+    new THREE.Quaternion());
+}
+
+/** A circlet of points over a helm — the royal crown. */
+function crown(
+  p: Part,
+  cx: number, cy: number, cz: number,
+  r: number, top: number, pts: number,
+): void {
+  stack(p, ngon(9, r, r, Math.PI / 9), [
+    { y: cy, sx: 1.00, sz: 1.00, ox: cx, oz: cz },
+    { y: cy + (top - cy) * 0.20, sx: 1.10, sz: 1.10, ox: cx, oz: cz },
+    { y: cy + (top - cy) * 0.34, sx: 1.05, sz: 1.05, ox: cx, oz: cz },
+  ]);
+  p.thinNow = 0.7;
+  for (let i = 0; i < pts; i++) {
+    const a = (i / pts) * Math.PI * 2 + 0.31;
+    const bx = cx + Math.cos(a) * r * 1.02;
+    const bz = cz + Math.sin(a) * r * 1.02;
+    const y = cy + (top - cy) * 0.30;
+    spike(p, V(bx, y, bz), V(bx * 1.02, top, bz * 1.02), r * 0.24, r * 0.20, V(0, 0, 0));
+  }
+  p.thinNow = 0;
 }
 
 // ---------------------------------------------------------------------------------------
-// PAWN — a crouching, hunched armoured foot-soldier. Domed shell back, shield, short blade.
+// Limbs and kit.
+// ---------------------------------------------------------------------------------------
+
+/** Sabaton, greave, knee cop, thigh. Built as one swept limb plus a proud knee. */
+function armouredLeg(
+  p: Part,
+  hip: THREE.Vector3,
+  knee: THREE.Vector3,
+  ankle: THREE.Vector3,
+  toe: THREE.Vector3,
+  r: number,
+): void {
+  tube(p, [hip, knee.clone().lerp(hip, 0.30), knee, ankle, toe], [
+    rrect(r * 1.12, r * 1.18, 0.34),
+    rrect(r * 0.90, r * 0.96, 0.34),
+    rrect(r * 0.80, r * 0.88, 0.32),
+    rrect(r * 0.60, r * 0.66, 0.32),
+    rrect(r * 0.56, r * 0.92, 0.30),
+  ], V(1, 0, 0));
+  dome(p, knee.x, knee.y - r * 0.34, knee.z + r * 0.62, r * 0.62, r * 0.42, r * 0.70, 6, 3);
+}
+
+/** Upper arm, elbow cop, forearm, gauntlet. */
+function armTo(
+  p: Part,
+  shoulder: THREE.Vector3,
+  elbow: THREE.Vector3,
+  wrist: THREE.Vector3,
+  r: number,
+): void {
+  tube(p, [shoulder, shoulder.clone().lerp(elbow, 0.55), elbow, wrist], [
+    rrect(r * 1.10, r * 1.16, 0.34),
+    rrect(r * 0.88, r * 0.94, 0.34),
+    rrect(r * 0.82, r * 0.88, 0.32),
+    rrect(r * 0.68, r * 0.74, 0.32),
+  ], V(0, 1, 0));
+  slab(p, wrist.clone(), V(r * 0.80, r * 0.72, r * 0.80), new THREE.Quaternion());
+}
+
+/**
+ * A kite shield: rounded head, straight flanks, a point at the bottom, a raised rim and a
+ * boss. Laid out flat then rotated into place — the frame shows every pale piece carrying
+ * one and they are half of what reads at the edges of the ranks.
+ */
+function kiteShield(
+  p: Part,
+  at: THREE.Vector3,
+  q: THREE.Quaternion,
+  hw: number,
+  up: number,
+  dn: number,
+  thick: number,
+): void {
+  const prof: number[][] = [
+    [-hw * 0.52, up], [hw * 0.52, up],
+    [hw * 0.94, up * 0.62], [hw, up * 0.10],
+    [hw * 0.90, -dn * 0.30], [hw * 0.52, -dn * 0.70],
+    [0, -dn],
+    [-hw * 0.52, -dn * 0.70], [-hw * 0.90, -dn * 0.30],
+    [-hw, up * 0.10], [-hw * 0.94, up * 0.62],
+  ];
+  const from = p.pos.length;
+  p.thinNow = 0.40;
+  stack(p, prof, [
+    { y: -thick, sx: 0.90, sz: 0.90 },
+    { y: -thick * 0.35, sx: 0.985, sz: 0.985 },
+    { y: thick * 0.30, sx: 1.0, sz: 1.0 },
+    { y: thick, sx: 0.90, sz: 0.90 },
+  ]);
+  p.thinNow = 0;
+  // Boss and a cross band on the face.
+  dome(p, 0, thick * 0.6, up * 0.10, hw * 0.20, hw * 0.20, hw * 0.24, 7, 3);
+  slab(p, V(0, thick * 0.75, up * 0.10), V(hw * 0.86, thick * 0.30, up * 0.11),
+    new THREE.Quaternion());
+  slab(p, V(0, thick * 0.75, (up - dn) * 0.08), V(up * 0.10, thick * 0.30, (up + dn) * 0.40),
+    new THREE.Quaternion());
+  xform(p, from, new THREE.Matrix4().compose(at, q, V(1, 1, 1)));
+}
+
+// ---------------------------------------------------------------------------------------
+// PAWN — a crouching foot-soldier: dome helm, head down, arms folded onto the plinth.
 // ---------------------------------------------------------------------------------------
 
 function pawn(rng: Rng, d: number): FormResult {
   const body: Part[] = [];
+  const PH = 0.72;
 
   const base = new Part();
-  base.detail = d * 1.2;
-  plinth(base, 0.82, 0.46, 6, rng);
+  base.detail = d * 1.15;
+  plinth(base, 0.80, PH, 6, rng, 3);
   body.push(base);
 
-  // The hunched back: a shell curling from a low rear up and over to the shoulders.
+  // The hunched back: a carapace curling from a low, wide rear up over the shoulders and
+  // down into a bowed neck. Rounded in section and RIBBED in banded lames, because from
+  // behind this shell is the pawn's entire silhouette and a smooth box the size of a car
+  // bonnet just reads as a boulder that happens to be lit.
   const shell = new Part();
-  shell.detail = d * 0.8;
-  tube(shell, [
-    V(0, 0.80, -0.50),
-    V(0, 1.24, -0.48),
-    V(0, 1.72, -0.28),
-    V(0, 1.96, 0.06),
-    V(0, 1.92, 0.34),
-  ], [
-    boxProf(0.44, 0.26, 0.24, 0.42),
-    boxProf(0.54, 0.34, 0.30, 0.42),
-    boxProf(0.58, 0.34, 0.34, 0.42),
-    boxProf(0.54, 0.30, 0.34, 0.42),
-    boxProf(0.42, 0.22, 0.26, 0.42),
-  ], V(0, 1, 0));
+  shell.detail = d * 0.88;
+  const carapace = (hw: number, up: number, dn: number, k: number): number[][] => {
+    const out: number[][] = [];
+    const n = 12;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.PI / n;
+      const c = Math.cos(a), sn = Math.sin(a);
+      out.push([c * hw * k, sn * (sn > 0 ? up : dn) * k]);
+    }
+    return out;
+  };
+  {
+    const spine: THREE.Vector3[] = [];
+    const profs: number[][][] = [];
+    const key = [
+      [0.12, -0.50, 0.24, 0.14, 0.12],
+      [0.28, -0.44, 0.33, 0.19, 0.19],
+      [0.42, -0.30, 0.36, 0.21, 0.24],
+      [0.52, -0.10, 0.35, 0.20, 0.25],
+      [0.55, 0.08, 0.31, 0.17, 0.23],
+      [0.50, 0.22, 0.25, 0.13, 0.19],
+      [0.42, 0.32, 0.19, 0.10, 0.15],
+    ];
+    for (let i = 0; i < key.length; i++) {
+      const [y, z, hw, up, dn] = key[i];
+      // Alternating collar scale turns the sweep into banded lames for free.
+      const k = i % 2 === 0 ? 1.0 : 1.085;
+      spine.push(V(0, PH + y, z));
+      profs.push(carapace(hw, up, dn, k));
+    }
+    tube(shell, spine, profs, V(0, 1, 0));
+  }
+  // Pauldrons. These are the widest thing about him and they must stand OUTSIDE the back,
+  // not inside it: shoulder lobes either side of a spine is what separates a crouching man
+  // from a snail shell, and at this distance it is the whole read.
   for (const s of [-1, 1]) {
-    dome(shell, 0.42 * s, 1.70, 0.08, 0.25, 0.29, 0.24, 6, 3);
+    dome(shell, 0.36 * s, PH + 0.40, 0.02, 0.22, 0.26, 0.24, 7, 3);
+    dome(shell, 0.30 * s, PH + 0.34, 0.22, 0.16, 0.19, 0.18, 6, 3);
   }
   body.push(shell);
 
-  // Domed helm, tipped forward, with a rolled brim, brow band and nasal.
+  // The helm rides forward of the spine and above it. If it sits inside the back's envelope
+  // the two masses fuse and the piece stops being a figure at all — which is exactly what
+  // the round-1 carving did.
   const helm = new Part();
-  helm.detail = d * 0.5;
-  stack(helm, ngon(8, 0.29, 0.29, Math.PI / 8), [
-    { y: 1.82, sx: 0.90, sz: 0.90, oz: 0.30 },
-    { y: 1.92, sx: 1.10, sz: 1.10, oz: 0.32 },
-    { y: 2.00, sx: 1.04, sz: 1.04, oz: 0.33 },
-  ]);
-  dome(helm, 0, 2.00, 0.33, 0.30, 0.30, 0.44, 8, 4, Math.PI / 8);
-  slab(helm, V(0, 2.04, 0.58), V(0.20, 0.045, 0.075), new THREE.Quaternion());
-  slab(helm, V(0, 1.94, 0.60), V(0.045, 0.115, 0.065), new THREE.Quaternion());
+  helm.detail = d * 0.58;
+  kettleHelm(helm, 0, PH + 0.46, 0.42, 0.250, 0.52);
+  // Bowed neck joining the helm back to the spine.
+  tube(helm, [V(0, PH + 0.54, 0.10), V(0, PH + 0.52, 0.26), V(0, PH + 0.48, 0.38)], [
+    rrect(0.15, 0.13, 0.34), rrect(0.14, 0.12, 0.34), rrect(0.13, 0.12, 0.34),
+  ], V(0, 1, 0));
   body.push(helm);
 
-  // One knee down, one foot planted — a soldier braced on the plinth.
+  // Both arms fold forward and down onto the plinth in front of him — that low, braced
+  // triangle under the dome is the pawn's whole silhouette.
+  const arms = new Part();
+  arms.detail = d * 0.66;
+  for (const s of [-1, 1]) {
+    armTo(
+      arms,
+      V(0.36 * s, PH + 0.40, 0.06),
+      V(0.42 * s, PH + 0.20, 0.36),
+      V(0.28 * s, PH + 0.05, 0.58),
+      0.110,
+    );
+  }
+  slab(arms, V(0, PH + 0.04, 0.62), V(0.26, 0.080, 0.115), new THREE.Quaternion());
+  body.push(arms);
+
+  // Legs tucked under: one knee down, one foot planted.
   const legs = new Part();
-  legs.detail = d * 0.68;
-  tube(legs, [
-    V(0.30, 1.10, -0.26),
-    V(0.32, 0.74, 0.06),
-    V(0.32, 0.52, 0.30),
-    V(0.31, 0.48, 0.10),
-    V(0.30, 0.48, -0.22),
-  ], [
-    rrect(0.20, 0.22, 0.34),
-    rrect(0.17, 0.19, 0.34),
-    rrect(0.15, 0.16, 0.30),
-    rrect(0.14, 0.15, 0.32),
-    rrect(0.13, 0.16, 0.32),
-  ], V(1, 0, 0));
-  tube(legs, [
-    V(-0.30, 1.16, -0.18),
-    V(-0.33, 0.90, 0.22),
-    V(-0.34, 0.56, 0.44),
-    V(-0.34, 0.48, 0.60),
-  ], [
-    rrect(0.21, 0.23, 0.34),
-    rrect(0.17, 0.19, 0.34),
-    rrect(0.15, 0.16, 0.32),
-    rrect(0.15, 0.20, 0.30),
-  ], V(1, 0, 0));
+  legs.detail = d * 0.76;
+  armouredLeg(
+    legs,
+    V(0.26, PH + 0.24, -0.30), V(0.30, PH + 0.08, 0.06),
+    V(0.30, PH + 0.02, 0.24), V(0.29, PH + 0.02, -0.16), 0.125,
+  );
+  armouredLeg(
+    legs,
+    V(-0.26, PH + 0.28, -0.24), V(-0.32, PH + 0.14, 0.20),
+    V(-0.32, PH + 0.03, 0.42), V(-0.32, PH + 0.02, 0.58), 0.125,
+  );
   body.push(legs);
 
-  // Shield held close on the left, a rounded kite leaning against the shoulder.
+  // Shield leaning on his left, tilted back against the shoulder.
   const shield = new Part();
-  shield.detail = d * 0.55;
-  shield.thinNow = 0.45;
-  stack(shield, ngon(7, 0.30, 0.42, 0.22), [
-    { y: -0.055, sx: 0.97, sz: 0.97 },
-    { y: 0.0, sx: 1.0, sz: 1.0 },
-    { y: 0.055, sx: 0.90, sz: 0.90 },
-  ]);
-  shield.thinNow = 0;
-  {
-    // Stand the plate up and lean it on the pawn's left shoulder.
-    const q = quatFromAxes(V(0.94, 0, 0.34), V(-0.30, 0.24, 0.92), V(0.08, 0.97, -0.23));
-    const m = new THREE.Matrix4().compose(V(-0.54, 1.34, 0.24), q, V(1, 1, 1));
-    for (let i = 0; i < shield.pos.length; i += 3) {
-      const v = V(shield.pos[i], shield.pos[i + 1], shield.pos[i + 2]).applyMatrix4(m);
-      shield.pos[i] = v.x; shield.pos[i + 1] = v.y; shield.pos[i + 2] = v.z;
-    }
-  }
+  shield.detail = d * 0.66;
+  kiteShield(
+    shield,
+    V(-0.54, PH + 0.28, 0.18),
+    quatFromAxes(V(0.94, 0, 0.34), V(-0.31, 0.30, 0.90), V(0.10, 0.95, -0.28)),
+    0.30, 0.36, 0.54, 0.055,
+  );
   body.push(shield);
 
-  // Right arm + short blade held low and forward across the body.
+  // Short blade held upright against the right shoulder.
   const arm = new Part();
-  arm.detail = d * 0.55;
-  tube(arm, [
-    V(0.42, 1.72, 0.10),
-    V(0.44, 1.42, 0.28),
-    V(0.34, 1.22, 0.48),
-    V(0.24, 1.16, 0.58),
-  ], [
-    rrect(0.13, 0.14, 0.32),
-    rrect(0.11, 0.12, 0.32),
-    rrect(0.10, 0.11, 0.32),
-    rrect(0.10, 0.11, 0.32),
-  ], V(0, 1, 0));
-  slab(arm, V(0.24, 1.16, 0.60), V(0.10, 0.09, 0.08), new THREE.Quaternion());
-  slab(arm, V(0.24, 1.26, 0.62), V(0.16, 0.04, 0.05), new THREE.Quaternion());
-  // Held close and upright against the shoulder — a foot-soldier's short blade, not a pike.
-  blade(arm, V(0.24, 1.24, 0.62), V(0.19, 2.06, 0.82), 0.095, 0.030);
+  arm.detail = d * 0.66;
+  armTo(arm, V(0.40, PH + 0.40, -0.08), V(0.46, PH + 0.28, 0.16), V(0.40, PH + 0.24, 0.40), 0.10);
+  hilt(arm, V(0.40, PH + 0.32, 0.44), V(0.02, 1, 0.10), V(1, 0, 0), 0.15, 0.85);
+  blade(arm, V(0.40, PH + 0.42, 0.46), V(0.34, PH + 1.16, 0.60), 0.085, 0.028);
 
   return {
     body,
     arm: [arm],
-    armPivot: V(0.42, 1.74, 0.10),
-    tip: V(0.19, 2.06, 0.82),
-    comY: 1.14,
+    armPivot: V(0.40, PH + 0.42, -0.08),
+    tip: V(0.34, PH + 1.16, 0.60),
+    comY: PH * 0.62 + 0.20,
     breaks: [
-      { p: V(0, 2.34, 0.42), n: V(0.30, 0.86, 0.42).normalize(), depth: 0.05 },
-      { p: V(0.56, 1.72, 0.08), n: V(0.92, 0.30, -0.24).normalize(), depth: 0.07 },
-      { p: V(-0.64, 1.55, 0.28), n: V(-0.86, 0.42, 0.28).normalize(), depth: 0.06 },
-      { p: V(-0.72, 0.10, -0.30), n: V(-0.84, -0.30, -0.45).normalize(), depth: 0.09 },
-      { p: V(0.70, 0.12, 0.34), n: V(0.82, -0.32, 0.47).normalize(), depth: 0.08 },
+      { p: V(0, PH + 0.86, 0.44), n: V(0.28, 0.88, 0.40).normalize(), depth: 0.05 },
+      { p: V(0.54, PH + 0.42, 0.02), n: V(0.92, 0.30, -0.24).normalize(), depth: 0.07 },
+      { p: V(-0.62, PH + 0.48, 0.24), n: V(-0.86, 0.42, 0.28).normalize(), depth: 0.06 },
+      { p: V(-0.66, 0.10, -0.28), n: V(-0.84, -0.30, -0.45).normalize(), depth: 0.09 },
+      { p: V(0.64, 0.12, 0.32), n: V(0.82, -0.32, 0.47).normalize(), depth: 0.08 },
     ],
   };
 }
@@ -443,54 +767,56 @@ function pawn(rng: Rng, d: number): FormResult {
 
 function knight(rng: Rng, d: number): FormResult {
   const body: Part[] = [];
+  const PH = 1.10;
 
   const base = new Part();
-  base.detail = d * 1.2;
-  plinth(base, 0.94, 0.48, 6, rng);
+  base.detail = d * 1.15;
+  plinth(base, 1.36, PH, 6, rng, 3);
   body.push(base);
 
   // --- the horse ------------------------------------------------------------------
   const horse = new Part();
-  horse.detail = d * 0.8;
+  horse.detail = d * 0.78;
+  const barrelY = PH + 1.08;
   tube(horse, [
-    V(0, 1.44, 0.66),
-    V(0, 1.42, 0.30),
-    V(0, 1.44, -0.12),
-    V(0, 1.46, -0.50),
-    V(0, 1.44, -0.74),
+    V(0, barrelY + 0.02, 0.70),
+    V(0, barrelY, 0.32),
+    V(0, barrelY + 0.02, -0.10),
+    V(0, barrelY + 0.04, -0.48),
+    V(0, barrelY + 0.02, -0.74),
   ], [
-    boxProf(0.30, 0.28, 0.36, 0.40),
+    boxProf(0.29, 0.28, 0.34, 0.40),
     boxProf(0.34, 0.32, 0.42, 0.40),
     boxProf(0.33, 0.32, 0.40, 0.40),
     boxProf(0.32, 0.30, 0.38, 0.40),
-    boxProf(0.27, 0.24, 0.30, 0.40),
+    boxProf(0.26, 0.23, 0.29, 0.40),
   ], V(0, 1, 0));
 
   // Neck out of the withers, turning progressively so the head reads in profile.
-  const headYaw = rng.float(-0.52, -0.30);
+  const headYaw = rng.float(-0.54, -0.32);
   const spine: THREE.Vector3[] = [];
   const necks: number[][][] = [];
   const nsteps = 5;
-  const pivotZ = 0.60;
+  const pivotZ = 0.62;
   for (let i = 0; i <= nsteps; i++) {
     const t = i / nsteps;
-    const y = 1.58 + t * 0.72;
-    const z = 0.60 + t * 0.28 + t * t * 0.18;
+    const y = barrelY + 0.16 + t * 0.74;
+    const z = 0.62 + t * 0.28 + t * t * 0.18;
     const c = V(0, y, z - pivotZ);
     c.applyAxisAngle(V(0, 1, 0), headYaw * t * t);
     c.z += pivotZ;
     spine.push(c);
-    necks.push(boxProf(0.235 - t * 0.075, 0.30 - t * 0.09, 0.27 - t * 0.10, 0.32));
+    necks.push(boxProf(0.230 - t * 0.072, 0.30 - t * 0.09, 0.27 - t * 0.10, 0.32));
   }
   tube(horse, spine, necks, V(0, 1, 0));
   body.push(horse);
 
   // --- head ------------------------------------------------------------------------
   const head = new Part();
-  head.detail = d * 0.45;
+  head.detail = d * 0.42;
   const poll = spine[nsteps].clone().add(V(0, 0.09, 0.02));
   const nose = poll.clone().add(
-    V(Math.sin(headYaw) * 0.62, -0.34, Math.cos(headYaw) * 0.62),
+    V(Math.sin(headYaw) * 0.64, -0.36, Math.cos(headYaw) * 0.64),
   );
   const hpath = [0, 0.22, 0.46, 0.70, 1].map((t) => {
     const q = poll.clone().lerp(nose, t);
@@ -499,21 +825,25 @@ function knight(rng: Rng, d: number): FormResult {
   });
   tube(head, hpath, [
     boxProf(0.145, 0.14, 0.19, 0.28),
-    boxProf(0.160, 0.12, 0.24, 0.28),
+    boxProf(0.162, 0.12, 0.24, 0.28),
     boxProf(0.130, 0.10, 0.17, 0.30),
-    boxProf(0.108, 0.08, 0.12, 0.30),
-    boxProf(0.092, 0.06, 0.09, 0.30),
+    boxProf(0.106, 0.08, 0.12, 0.30),
+    boxProf(0.090, 0.06, 0.09, 0.30),
   ], V(0, 1, 0));
+  // Cheek plate and a chamfron band — armour on the horse, as the frame shows.
+  slab(head, hpath[1].clone(), V(0.175, 0.115, 0.135),
+    quatFromAxes(V(Math.cos(headYaw), 0, -Math.sin(headYaw)), V(0, 1, 0),
+      V(Math.sin(headYaw), 0, Math.cos(headYaw))));
   head.thinNow = 1.0;
   for (const s of [-1, 1]) {
     const e = poll.clone().add(V(0.085 * s, -0.02, -0.05));
-    spike(head, e, e.clone().add(V(0.02 * s, 0.24, -0.02)), 0.05, 0.038, V(0.012 * s, 0, 0));
+    spike(head, e, e.clone().add(V(0.02 * s, 0.25, -0.02)), 0.05, 0.038, V(0.012 * s, 0, 0));
   }
   head.thinNow = 0;
   body.push(head);
 
   const mane = new Part();
-  mane.detail = d * 0.5;
+  mane.detail = d * 0.48;
   mane.thinNow = 0.45;
   for (let i = 0; i < 7; i++) {
     const t = i / 6;
@@ -524,7 +854,7 @@ function knight(rng: Rng, d: number): FormResult {
     const right = new THREE.Vector3().crossVectors(V(0, 1, 0), fwd).normalize();
     const up2 = new THREE.Vector3().crossVectors(fwd, right).normalize();
     const crest = 0.30 - (si / (spine.length - 1)) * 0.09;
-    const proud = 0.055 + 0.030 * Math.sin(t * 2.4 + 0.4) + rng.float(-0.008, 0.008);
+    const proud = 0.058 + 0.032 * Math.sin(t * 2.4 + 0.4) + rng.float(-0.008, 0.008);
     const centre = c.clone().addScaledVector(up2, crest + proud * 0.4);
     centre.addScaledVector(right, i % 2 ? 0.014 : -0.014);
     const q = quatFromAxes(right, up2, fwd);
@@ -536,39 +866,40 @@ function knight(rng: Rng, d: number): FormResult {
 
   // --- legs and tail ------------------------------------------------------------------
   const legs = new Part();
-  legs.detail = d * 0.58;
+  legs.detail = d * 0.56;
   const leg = (pts: THREE.Vector3[], w: number[]) =>
     tube(legs, pts, w.map((k) => rrect(k, k * 1.08, 0.32)), V(1, 0, 0));
   for (const s of [-1, 1]) {
     leg([
-      V(0.26 * s, 1.36, -0.62),
-      V(0.28 * s, 1.00, -0.74),
-      V(0.28 * s, 0.72, -0.56),
-      V(0.28 * s, 0.54, -0.52),
-      V(0.28 * s, 0.46, -0.60),
-    ], [0.175, 0.135, 0.095, 0.088, 0.125]);
+      V(0.26 * s, barrelY - 0.10, -0.62),
+      V(0.28 * s, barrelY - 0.44, -0.76),
+      V(0.28 * s, PH + 0.44, -0.58),
+      V(0.28 * s, PH + 0.20, -0.54),
+      V(0.28 * s, PH + 0.02, -0.62),
+    ], [0.175, 0.132, 0.092, 0.085, 0.122]);
   }
   leg([
-    V(-0.26, 1.30, 0.52),
-    V(-0.28, 0.98, 0.60),
-    V(-0.29, 0.70, 0.60),
-    V(-0.29, 0.52, 0.58),
-    V(-0.29, 0.46, 0.66),
-  ], [0.165, 0.125, 0.090, 0.085, 0.120]);
+    V(-0.26, barrelY - 0.14, 0.54),
+    V(-0.28, barrelY - 0.46, 0.62),
+    V(-0.29, PH + 0.42, 0.62),
+    V(-0.29, PH + 0.18, 0.60),
+    V(-0.29, PH + 0.02, 0.68),
+  ], [0.165, 0.124, 0.088, 0.083, 0.118]);
+  // The near foreleg is up and reaching — the horses in the frame are never at rest.
   leg([
-    V(0.26, 1.30, 0.56),
-    V(0.31, 1.06, 0.92),
-    V(0.35, 0.92, 1.22),
-    V(0.37, 0.70, 1.30),
-    V(0.38, 0.54, 1.22),
-    V(0.38, 0.46, 1.18),
+    V(0.26, barrelY - 0.14, 0.58),
+    V(0.32, barrelY - 0.36, 0.96),
+    V(0.36, PH + 0.66, 1.26),
+    V(0.38, PH + 0.38, 1.34),
+    V(0.38, PH + 0.14, 1.24),
+    V(0.38, PH + 0.02, 1.20),
   ], [0.165, 0.130, 0.100, 0.086, 0.082, 0.118]);
   legs.thinNow = 0.3;
   tube(legs, [
-    V(0, 1.44, -0.80),
-    V(0.04, 1.16, -0.94),
-    V(0.06, 0.86, -0.92),
-    V(0.05, 0.62, -0.80),
+    V(0, barrelY + 0.02, -0.82),
+    V(0.04, barrelY - 0.28, -0.96),
+    V(0.06, PH + 0.60, -0.94),
+    V(0.05, PH + 0.34, -0.82),
   ], [
     rrect(0.10, 0.11, 0.3),
     rrect(0.095, 0.105, 0.3),
@@ -579,169 +910,301 @@ function knight(rng: Rng, d: number): FormResult {
   body.push(legs);
 
   // --- the rider ----------------------------------------------------------------------
+  const seatY = barrelY + 0.30;
+  const shoY = seatY + 0.86;
   const rider = new Part();
-  rider.detail = d * 0.55;
+  rider.detail = d * 0.52;
+  // Torso: leaning forward, waisted, and clearly narrower than the shoulders above it.
   tube(rider, [
-    V(0, 1.62, -0.18),
-    V(0, 2.00, -0.10),
-    V(0, 2.38, 0.02),
-    V(0, 2.62, 0.10),
-    V(0, 2.74, 0.12),
+    V(0, seatY - 0.10, -0.20),
+    V(0, seatY + 0.30, -0.14),
+    V(0, seatY + 0.62, -0.02),
+    V(0, shoY, 0.10),
+    V(0, shoY + 0.16, 0.14),
   ], [
-    boxProf(0.26, 0.22, 0.24, 0.36),
-    boxProf(0.28, 0.24, 0.26, 0.36),
-    boxProf(0.30, 0.24, 0.26, 0.36),
-    boxProf(0.32, 0.22, 0.24, 0.36),
-    boxProf(0.20, 0.16, 0.17, 0.36),
+    cuirass(0.30, 0.26, 0.28),
+    cuirass(0.25, 0.22, 0.24),
+    cuirass(0.28, 0.26, 0.24),
+    cuirass(0.31, 0.24, 0.24),
+    cuirass(0.18, 0.16, 0.16),
   ], V(0, 1, 0));
+  // Thighs gripping the barrel, boots down at the flank.
   for (const s of [-1, 1]) {
-    tube(rider, [
-      V(0.20 * s, 1.86, -0.10),
-      V(0.34 * s, 1.72, 0.16),
-      V(0.36 * s, 1.50, 0.34),
-      V(0.35 * s, 1.28, 0.36),
-    ], [
-      rrect(0.15, 0.16, 0.34),
-      rrect(0.13, 0.14, 0.34),
-      rrect(0.105, 0.115, 0.34),
-      rrect(0.10, 0.13, 0.32),
-    ], V(1, 0, 0));
+    armouredLeg(
+      rider,
+      V(0.24 * s, seatY - 0.06, -0.12),
+      V(0.36 * s, seatY - 0.30, 0.26),
+      V(0.35 * s, barrelY - 0.42, 0.34),
+      V(0.35 * s, barrelY - 0.50, 0.50),
+      0.115,
+    );
   }
-  tube(rider, [
-    V(-0.30, 2.56, 0.06),
-    V(-0.36, 2.26, 0.26),
-    V(-0.32, 2.06, 0.50),
-    V(-0.28, 2.00, 0.62),
-  ], [
-    rrect(0.115, 0.125, 0.32),
-    rrect(0.10, 0.11, 0.32),
-    rrect(0.09, 0.10, 0.32),
-    rrect(0.09, 0.10, 0.32),
-  ], V(0, 1, 0));
-  conicalHelm(rider, 0, 2.74, 0.10, 0.215, 0.62);
+  for (const s of [-1, 1]) dome(rider, 0.30 * s, shoY - 0.06, 0.02, 0.20, 0.24, 0.20, 6, 3);
+  // Bridle arm, reaching down and forward to the reins.
+  armTo(rider, V(-0.30, shoY - 0.06, 0.06), V(-0.38, shoY - 0.36, 0.30),
+    V(-0.32, shoY - 0.58, 0.62), 0.105);
+  helmCross(rider, 0, shoY + 0.14, 0.12, 0.215, 0.56, true);
   body.push(rider);
 
-  // Cape: heavy drapery from the shoulders over the horse's flank — the silhouette the
-  // camera sees when it looks at the dark army from behind.
+  // Cape: chainmail drapery off the shoulders and over the horse's rump. Hooded, deeply
+  // folded, hem scalloped and stopping high enough that the horse still reads under it.
   const cape = new Part();
-  cape.detail = d * 0.65;
-  cape.thinNow = 0.35;
-  stack(cape, foldRing(14, 1, 0.095, 0.10), [
-    { y: 2.66, sx: 0.24, sz: 0.24, oz: 0.02 },
-    { y: 2.50, sx: 0.33, sz: 0.30, oz: -0.06 },
-    { y: 2.10, sx: 0.44, sz: 0.38, oz: -0.16 },
-    { y: 1.70, sx: 0.52, sz: 0.44, oz: -0.24 },
-    { y: 1.34, sx: 0.56, sz: 0.47, oz: -0.30 },
-    { y: 1.16, sx: 0.51, sz: 0.43, oz: -0.32 },
-  ]);
+  cape.detail = d * 0.60;
+  cape.thinNow = 0.20;
+  cape.mailNow = 1;
+  drape(cape, [
+    { y: shoY + 0.10, sx: 0.30, sz: 0.28, oz: -0.04 },
+    { y: shoY - 0.14, sx: 0.44, sz: 0.40, oz: -0.14 },
+    { y: shoY - 0.62, sx: 0.60, sz: 0.52, oz: -0.28 },
+    { y: barrelY + 0.10, sx: 0.70, sz: 0.60, oz: -0.36 },
+    { y: barrelY - 0.34, sx: 0.72, sz: 0.62, oz: -0.40 },
+    { y: barrelY - 0.60, sx: 0.66, sz: 0.57, oz: -0.40 },
+  ], 16, 0.115, 0.30, 0.34, 0.20, rng);
+  cowl(cape, shoY + 0.06, -0.16, 0.34, 0.30, 0.52, 0.30, rng);
+  cape.mailNow = 0;
   cape.thinNow = 0;
   body.push(cape);
 
-  // Right arm and the curved blade, carried forward and high.
+  // Saddle and caparison over the barrel.
+  const tack = new Part();
+  tack.detail = d * 0.55;
+  stack(tack, rrect(1, 1, 0.30), [
+    { y: barrelY + 0.26, sx: 0.34, sz: 0.42, oz: 0.10 },
+    { y: barrelY + 0.34, sx: 0.30, sz: 0.40, oz: 0.10 },
+  ]);
+  for (const s of [-1, 1]) {
+    slab(tack, V(0.30 * s, barrelY + 0.24, 0.14), V(0.06, 0.16, 0.30),
+      new THREE.Quaternion());
+  }
+  body.push(tack);
+
+  // Sabre arm: out and forward, the way the frame's rider carries it.
   const arm = new Part();
-  arm.detail = d * 0.5;
-  tube(arm, [
-    V(0.30, 2.58, 0.08),
-    V(0.42, 2.44, 0.34),
-    V(0.48, 2.34, 0.62),
-    V(0.50, 2.30, 0.76),
-  ], [
-    rrect(0.115, 0.125, 0.32),
-    rrect(0.10, 0.11, 0.32),
-    rrect(0.09, 0.10, 0.32),
-    rrect(0.09, 0.10, 0.32),
-  ], V(0, 1, 0));
-  slab(arm, V(0.50, 2.30, 0.82), V(0.085, 0.085, 0.075), new THREE.Quaternion());
-  slab(arm, V(0.50, 2.40, 0.84), V(0.17, 0.04, 0.05), new THREE.Quaternion());
-  curvedBlade(arm, V(0.50, 2.38, 0.86), V(0.62, 3.02, 1.42), V(0.10, 0.16, -0.10), 0.085, 0.028);
+  arm.detail = d * 0.46;
+  armTo(arm, V(0.30, shoY - 0.04, 0.10), V(0.46, shoY - 0.22, 0.44),
+    V(0.52, shoY - 0.28, 0.78), 0.105);
+  hilt(arm, V(0.52, shoY - 0.22, 0.84), V(0.10, 0.92, 0.38), V(1, 0, -0.1), 0.19, 1.0);
+  curvedBlade(
+    arm,
+    V(0.53, shoY - 0.14, 0.88),
+    V(0.62, shoY + 0.44, 1.46),
+    V(0.10, 0.20, -0.14),
+    0.085, 0.028,
+  );
 
   return {
     body,
     arm: [arm],
-    armPivot: V(0.30, 2.60, 0.08),
-    tip: V(0.62, 3.02, 1.42),
-    comY: 1.52,
+    armPivot: V(0.30, shoY - 0.02, 0.10),
+    tip: V(0.62, shoY + 0.44, 1.46),
+    comY: PH * 0.55 + 0.72,
     breaks: [
-      { p: V(0, 3.26, 0.10), n: V(0.28, 0.90, 0.34).normalize(), depth: 0.05 },
-      { p: V(0.36, 0.52, 1.22), n: V(0.44, -0.40, 0.80).normalize(), depth: 0.07 },
-      { p: V(-0.05, 2.20, -0.62), n: V(-0.24, 0.20, -0.95).normalize(), depth: 0.08 },
-      { p: V(-0.86, 0.14, -0.36), n: V(-0.84, -0.30, -0.45).normalize(), depth: 0.10 },
-      { p: V(0.84, 0.14, 0.40), n: V(0.82, -0.32, 0.47).normalize(), depth: 0.09 },
+      { p: V(0, shoY + 0.74, 0.12), n: V(0.28, 0.90, 0.34).normalize(), depth: 0.06 },
+      { p: V(0.36, PH + 0.10, 1.24), n: V(0.44, -0.40, 0.80).normalize(), depth: 0.07 },
+      { p: V(-0.05, shoY - 0.40, -0.86), n: V(-0.24, 0.20, -0.95).normalize(), depth: 0.09 },
+      { p: V(-1.10, 0.14, -0.44), n: V(-0.84, -0.30, -0.45).normalize(), depth: 0.11 },
+      { p: V(1.06, 0.14, 0.48), n: V(0.82, -0.32, 0.47).normalize(), depth: 0.10 },
     ],
   };
 }
 
 // ---------------------------------------------------------------------------------------
-// BISHOP — a tall standing armoured figure, hands joined at the chest, narrow silhouette.
+// The standing armoured figure — bishop, queen and king are all this, at three sizes.
+//
+// Proportions come off the two standing pale figures at the centre of the reference frame:
+// shoulders about a quarter of the figure's height across, helm about a sixth of it tall,
+// hands joined at the chest over a sword carried point-down, and a plain gap between the
+// legs that you can see the floor through.
+// ---------------------------------------------------------------------------------------
+
+interface StandOpts {
+  /** Plinth top. */
+  y0: number;
+  /** Figure height above the plinth. */
+  hf: number;
+  /** Lateral scale. */
+  w: number;
+  /** Cape hem, as a fraction of hf. 0 = no cape. */
+  hem: number;
+  /** Cape shoulder-to-hem billow. */
+  billow: number;
+  /** Long robe over the legs instead of bare greaves. */
+  robe: boolean;
+}
+
+interface StandOut {
+  shoulderY: number;
+  handY: number;
+  handZ: number;
+  helmY: number;
+  helmR: number;
+  helmH: number;
+}
+
+function standing(body: Part[], rng: Rng, d: number, o: StandOpts): StandOut {
+  const { y0, hf, w } = o;
+  const Y = (t: number) => y0 + hf * t;
+  const shoulderY = Y(0.780);
+  const helmY = Y(0.828);
+  const helmH = hf * 0.172;
+  const helmR = hf * 0.076 * w;
+
+  // --- legs: two of them, with daylight between --------------------------------------
+  const legs = new Part();
+  legs.detail = d * 0.58;
+  const legR = hf * 0.052 * w;
+  for (const s of [-1, 1]) {
+    armouredLeg(
+      legs,
+      V(0.082 * hf * w * s, Y(0.480), -0.01 * hf),
+      V(0.086 * hf * w * s, Y(0.260), 0.012 * hf),
+      V(0.080 * hf * w * s, Y(0.040), -0.004 * hf),
+      V(0.080 * hf * w * s, Y(0.012), 0.075 * hf),
+      legR,
+    );
+  }
+  body.push(legs);
+
+  // --- torso: waisted, with a fauld skirt over the hips -------------------------------
+  const torso = new Part();
+  torso.detail = d * 0.62;
+  tube(torso, [
+    V(0, Y(0.440), 0),
+    V(0, Y(0.530), 0.004 * hf),
+    V(0, Y(0.640), 0.010 * hf),
+    V(0, Y(0.742), 0.012 * hf),
+    V(0, Y(0.800), 0.008 * hf),
+  ], [
+    cuirass(0.098 * hf * w, 0.070 * hf, 0.066 * hf),
+    cuirass(0.082 * hf * w, 0.060 * hf, 0.058 * hf),
+    cuirass(0.104 * hf * w, 0.076 * hf, 0.064 * hf),
+    cuirass(0.112 * hf * w, 0.072 * hf, 0.062 * hf),
+    cuirass(0.062 * hf * w, 0.048 * hf, 0.046 * hf),
+  ], V(0, 1, 0));
+  // Fauld / hauberk skirt: mail, flaring over the hips and cut off above the knee. It has
+  // to stay NARROWER than the shoulders and narrower than the cape, or the figure turns
+  // back into a bell from the waist down.
+  torso.mailNow = 0.85;
+  drape(torso, [
+    { y: Y(0.520), sx: 0.088 * hf * w, sz: 0.074 * hf },
+    { y: Y(0.440), sx: 0.104 * hf * w, sz: 0.088 * hf },
+    { y: Y(o.robe ? 0.180 : 0.330), sx: 0.108 * hf * w, sz: 0.092 * hf },
+    { y: Y(o.robe ? 0.026 : 0.300), sx: 0.116 * hf * w, sz: 0.098 * hf },
+  ], 14, 0.085, 0.05, 0.06, hf * 0.026, rng);
+  torso.mailNow = 0;
+  // Collar and pauldrons — the shoulders must out-measure everything above them.
+  for (const s of [-1, 1]) {
+    dome(torso, 0.112 * hf * w * s, shoulderY - 0.030 * hf, 0.004 * hf,
+      0.062 * hf * w, 0.068 * hf, 0.058 * hf, 6, 3);
+  }
+  stack(torso, ngon(8, 0.058 * hf * w, 0.052 * hf, Math.PI / 8), [
+    { y: Y(0.790), sx: 1.06, sz: 1.06, oz: 0.008 * hf },
+    { y: Y(0.822), sx: 0.96, sz: 0.96, oz: 0.008 * hf },
+  ]);
+  body.push(torso);
+
+  // --- arms brought together at the chest ----------------------------------------------
+  const arms = new Part();
+  arms.detail = d * 0.50;
+  const handY = Y(0.600);
+  const handZ = 0.128 * hf;
+  for (const s of [-1, 1]) {
+    armTo(
+      arms,
+      V(0.108 * hf * w * s, Y(0.762), 0.004 * hf),
+      V(0.126 * hf * w * s, Y(0.632), 0.060 * hf),
+      V(0.048 * hf * w * s, handY, handZ),
+      0.042 * hf * w,
+    );
+  }
+  body.push(arms);
+
+  // --- the sword carried point-down between the hands ----------------------------------
+  const sword = new Part();
+  sword.detail = d * 0.46;
+  hilt(sword, V(0, Y(0.650), handZ + 0.014 * hf), V(0, 1, 0.04), V(1, 0, 0), 0.100 * hf * w, hf * 0.30);
+  blade(
+    sword,
+    V(0, Y(0.596), handZ + 0.020 * hf),
+    V(0, Y(o.robe ? 0.150 : 0.118), handZ + 0.034 * hf),
+    0.040 * hf * w, 0.013 * hf,
+  );
+  body.push(sword);
+
+  // --- the cape ------------------------------------------------------------------------
+  //
+  // A mantle, not a marquee. It is clasped at the throat, hangs off the BACK of the
+  // shoulders — the front is pulled hard in so the breastplate, the joined hands and the
+  // sword all stay clear of it — and it stops well short of the plinth. Its top edge sits
+  // under the pauldrons so the shoulder line survives as a separate, wider mass.
+  if (o.hem > 0) {
+    const cape = new Part();
+    cape.detail = d * 0.62;
+    cape.thinNow = 0.18;
+    cape.mailNow = 1;
+    const b = o.billow;
+    drape(cape, [
+      { y: Y(0.790), sx: 0.062 * hf * w, sz: 0.058 * hf, oz: -0.024 * hf },
+      { y: Y(0.734), sx: 0.116 * hf * w, sz: 0.098 * hf, oz: -0.040 * hf },
+      { y: Y(0.600), sx: 0.132 * hf * w * b, sz: 0.108 * hf * b, oz: -0.056 * hf },
+      { y: Y(0.420), sx: 0.140 * hf * w * b, sz: 0.114 * hf * b, oz: -0.066 * hf },
+      { y: Y(o.hem + 0.070), sx: 0.144 * hf * w * b, sz: 0.117 * hf * b, oz: -0.070 * hf },
+      { y: Y(o.hem), sx: 0.128 * hf * w * b, sz: 0.104 * hf * b, oz: -0.070 * hf },
+    ], 18, 0.150, 0.48, 0.34, hf * 0.052, rng);
+    cape.mailNow = 0;
+    cape.thinNow = 0;
+    body.push(cape);
+  }
+
+  return { shoulderY, handY, handZ, helmY, helmR, helmH };
+}
+
+// ---------------------------------------------------------------------------------------
+// BISHOP — the standing figure, armoured, kite shield at the side, short cape.
 // ---------------------------------------------------------------------------------------
 
 function bishop(rng: Rng, d: number): FormResult {
   const body: Part[] = [];
+  const PH = 0.98;
+  const HF = 2.62;
+
   const base = new Part();
-  base.detail = d * 1.2;
-  plinth(base, 0.80, 0.48, 6, rng);
+  base.detail = d * 1.15;
+  plinth(base, 1.10, PH, 6, rng, 3);
   body.push(base);
 
-  const figure = new Part();
-  figure.detail = d * 0.8;
-  stack(figure, foldRing(12, 1, 0.075, 0.03), [
-    { y: 0.44, sx: 0.48, sz: 0.42 },
-    { y: 0.90, sx: 0.45, sz: 0.39, oz: 0.01 },
-    { y: 1.60, sx: 0.41, sz: 0.36, oz: 0.02 },
-    { y: 2.20, sx: 0.38, sz: 0.33, oz: 0.03 },
-    { y: 2.58, sx: 0.41, sz: 0.34, oz: 0.03 },
-    { y: 2.86, sx: 0.46, sz: 0.35, oz: 0.02 },
-    { y: 3.02, sx: 0.36, sz: 0.28, oz: 0.02 },
-  ]);
-  body.push(figure);
-
-  // Surcoat: a flat panel down the front, the way a tabard hangs over mail.
-  const coat = new Part();
-  coat.detail = d * 0.65;
-  coat.thinNow = 0.3;
-  stack(coat, rrect(1, 1, 0.30), [
-    { y: 0.62, sx: 0.30, sz: 0.05, oz: 0.335 },
-    { y: 1.60, sx: 0.29, sz: 0.05, oz: 0.330 },
-    { y: 2.40, sx: 0.26, sz: 0.05, oz: 0.310 },
-    { y: 2.72, sx: 0.22, sz: 0.05, oz: 0.295 },
-  ]);
-  coat.thinNow = 0;
-  body.push(coat);
-
-  const arms = new Part();
-  arms.detail = d * 0.55;
-  for (const s of [-1, 1]) {
-    tube(arms, [
-      V(0.36 * s, 2.78, 0.02),
-      V(0.40 * s, 2.50, 0.14),
-      V(0.26 * s, 2.34, 0.30),
-      V(0.09 * s, 2.32, 0.36),
-    ], [
-      rrect(0.115, 0.125, 0.32),
-      rrect(0.10, 0.11, 0.32),
-      rrect(0.09, 0.10, 0.32),
-      rrect(0.085, 0.095, 0.32),
-    ], V(0, 1, 0));
-  }
-  slab(arms, V(0, 2.36, 0.40), V(0.13, 0.14, 0.09), new THREE.Quaternion());
-  body.push(arms);
+  const s = standing(body, rng, d, {
+    y0: PH, hf: HF, w: 1.0, hem: 0.395, billow: 0.98, robe: false,
+  });
 
   const helm = new Part();
-  helm.detail = d * 0.45;
-  conicalHelm(helm, 0, 3.00, 0.03, 0.215, 0.60);
+  helm.detail = d * 0.42;
+  helmCross(helm, 0, s.helmY, 0.020 * HF, s.helmR, s.helmH, false);
   body.push(helm);
+
+  // Shield stood on its point beside him, leaning in against the hip.
+  const shield = new Part();
+  shield.detail = d * 0.50;
+  kiteShield(
+    shield,
+    V(0.46, PH + HF * 0.400, 0.16),
+    quatFromAxes(V(0.97, 0, 0.24), V(-0.20, 0.24, 0.95), V(0.14, 0.97, -0.20)),
+    0.34, 0.44, 0.62, 0.055,
+  );
+  body.push(shield);
 
   return {
     body,
     arm: null,
-    armPivot: V(0, 2.60, 0.20),
-    tip: V(0, 2.36, 0.44),
-    comY: 1.55,
+    armPivot: V(0, PH + HF * 0.760, 0.10),
+    tip: V(0, s.handY, s.handZ + 0.06),
+    comY: PH * 0.55 + HF * 0.34,
     breaks: [
-      { p: V(0, 3.52, 0.03), n: V(0.32, 0.88, 0.36).normalize(), depth: 0.05 },
-      { p: V(0.46, 2.84, 0.06), n: V(0.90, 0.30, 0.32).normalize(), depth: 0.07 },
-      { p: V(-0.44, 2.60, 0.20), n: V(-0.88, 0.26, 0.40).normalize(), depth: 0.07 },
-      { p: V(-0.70, 0.12, -0.28), n: V(-0.84, -0.30, -0.45).normalize(), depth: 0.09 },
+      { p: V(0, PH + HF * 0.985, 0.02), n: V(0.32, 0.88, 0.36).normalize(), depth: 0.05 },
+      { p: V(0.34, PH + HF * 0.790, 0.02), n: V(0.90, 0.30, 0.32).normalize(), depth: 0.07 },
+      { p: V(-0.34, PH + HF * 0.790, 0.02), n: V(-0.88, 0.26, 0.40).normalize(), depth: 0.07 },
+      { p: V(0.62, PH + HF * 0.150, 0.30), n: V(0.86, -0.18, 0.42).normalize(), depth: 0.08 },
+      { p: V(-0.94, 0.12, -0.30), n: V(-0.84, -0.30, -0.45).normalize(), depth: 0.10 },
     ],
   };
 }
@@ -752,187 +1215,160 @@ function bishop(rng: Rng, d: number): FormResult {
 
 function rook(rng: Rng, d: number): FormResult {
   const body: Part[] = [];
+  const PH = 0.86;
+
   const base = new Part();
-  base.detail = d * 1.2;
-  plinth(base, 0.92, 0.46, 6, rng);
+  base.detail = d * 1.15;
+  plinth(base, 1.10, PH, 6, rng, 3);
   body.push(base);
 
   const shaft = new Part();
-  shaft.detail = d * 1.0;
-  const sp = rrect(1, 1, 0.26);
-  const courses = 5;
+  shaft.detail = d * 0.95;
+  const sp = ngon(8, 1, 1, Math.PI / 8);
+  const courses = 7;
   const st: Station[] = [];
+  const shaftTop = PH + 1.44;
   for (let i = 0; i <= courses; i++) {
     const t = i / courses;
-    const y = 0.42 + t * 1.72;
-    const s = 0.74 - t * 0.13;
-    st.push({ y: y - 0.028, sx: s * 1.026, sz: s * 1.026 });
-    st.push({ y, sx: s, sz: s });
+    const y = PH + 0.02 + t * 1.42;
+    const sc = 0.80 - t * 0.11;
+    st.push({ y: y - 0.024, sx: sc * 1.030, sz: sc * 1.030 });
+    st.push({ y, sx: sc, sz: sc });
   }
   stack(shaft, sp, st);
   body.push(shaft);
 
+  // Arrow slits: proud jambs either side of a recessed centre, on three faces.
+  const detailPart = new Part();
+  detailPart.detail = d * 0.50;
+  for (let f = 0; f < 3; f++) {
+    const a = -Math.PI / 2 + (f - 1) * 0.95;
+    const nx = Math.cos(a), nz = Math.sin(a);
+    const tx = Math.sin(a), tz = -Math.cos(a);
+    const q = quatFromAxes(V(tx, 0, tz), V(0, 1, 0), V(nx, 0, nz));
+    const rr = 0.66;
+    for (const sgn of [-1, 1]) {
+      slab(detailPart,
+        V(nx * rr + tx * 0.10 * sgn, PH + 0.86, nz * rr + tz * 0.10 * sgn),
+        V(0.048, 0.30, 0.045), q);
+    }
+    slab(detailPart, V(nx * rr, PH + 1.19, nz * rr), V(0.155, 0.048, 0.045), q);
+  }
+  body.push(detailPart);
+
+  // Corbelled machicolation, then the parapet.
   const cor = new Part();
-  cor.detail = d * 0.75;
-  stack(cor, rrect(1, 1, 0.24), [
-    { y: 2.08, sx: 0.60, sz: 0.60 },
-    { y: 2.20, sx: 0.78, sz: 0.78 },
-    { y: 2.42, sx: 0.80, sz: 0.80 },
-    { y: 2.52, sx: 0.74, sz: 0.74 },
+  cor.detail = d * 0.70;
+  stack(cor, ngon(8, 1, 1, Math.PI / 8), [
+    { y: shaftTop - 0.10, sx: 0.70, sz: 0.70 },
+    { y: shaftTop, sx: 0.86, sz: 0.86 },
+    { y: shaftTop + 0.16, sx: 0.90, sz: 0.90 },
+    { y: shaftTop + 0.26, sx: 0.84, sz: 0.84 },
   ]);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    slab(cor, V(Math.cos(a) * 0.80, shaftTop - 0.02, Math.sin(a) * 0.80),
+      V(0.10, 0.11, 0.09),
+      new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), -a + Math.PI / 2));
+  }
   body.push(cor);
 
-  const crown = new Part();
-  crown.detail = d * 0.55;
+  const crownP = new Part();
+  crownP.detail = d * 0.55;
   const merlons: THREE.Vector3[] = [];
-  for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-    const c = V(Math.cos(a) * 0.49, 2.78, Math.sin(a) * 0.49);
+  const my = shaftTop + 0.50;
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+    const c = V(Math.cos(a) * 0.58, my, Math.sin(a) * 0.58);
     merlons.push(c);
-    slab(
-      crown, c, V(0.30, 0.27, 0.18),
-      new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), -a + Math.PI / 2),
-    );
+    slab(crownP, c, V(0.23, 0.24, 0.14),
+      new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), -a + Math.PI / 2));
   }
-  stack(crown, rrect(1, 1, 0.24), [
-    { y: 2.48, sx: 0.70, sz: 0.70 },
-    { y: 2.66, sx: 0.68, sz: 0.68 },
+  stack(crownP, ngon(8, 1, 1, Math.PI / 8), [
+    { y: shaftTop + 0.24, sx: 0.76, sz: 0.76 },
+    { y: shaftTop + 0.40, sx: 0.74, sz: 0.74 },
   ]);
-  // A pair of jamb shafts flanking a blind arch on the front face — architecture, not lump.
-  for (const s of [-1, 1]) {
-    slab(crown, V(0.17 * s, 1.32, 0.66), V(0.05, 0.36, 0.055), new THREE.Quaternion());
-  }
-  body.push(crown);
+  body.push(crownP);
 
-  const pick = rng.int(0, 4);
+  const pick = rng.int(0, 6);
   const bm = merlons[pick];
   const dir = bm.clone().setY(0).normalize();
 
   return {
     body,
     arm: null,
-    armPivot: V(0, 1.6, 0.5),
-    tip: V(0, 2.7, 0.7),
-    comY: 1.15,
+    armPivot: V(0, PH + 0.9, 0.6),
+    tip: V(0, my, 0.7),
+    comY: PH * 0.55 + 0.62,
     breaks: [
-      { p: bm.clone().add(V(0, 0.06, 0)), n: dir.clone().add(V(0, 0.55, 0)).normalize(), depth: 0.10 },
-      { p: merlons[(pick + 2) % 4].clone().add(V(0, 0.16, 0)), n: V(0, 1, 0.25).normalize(), depth: 0.05 },
-      { p: V(0.86, 0.14, 0.42), n: V(0.80, -0.34, 0.50).normalize(), depth: 0.09 },
-      { p: V(-0.66, 1.20, -0.60), n: V(-0.72, 0.10, -0.68).normalize(), depth: 0.07 },
+      { p: bm.clone().add(V(0, 0.06, 0)), n: dir.clone().add(V(0, 0.55, 0)).normalize(), depth: 0.12 },
+      { p: merlons[(pick + 3) % 6].clone().add(V(0, 0.14, 0)), n: V(0, 1, 0.25).normalize(), depth: 0.06 },
+      { p: V(0.96, 0.14, 0.46), n: V(0.80, -0.34, 0.50).normalize(), depth: 0.10 },
+      { p: V(-0.62, PH + 0.90, -0.56), n: V(-0.72, 0.10, -0.68).normalize(), depth: 0.07 },
     ],
   };
 }
 
 // ---------------------------------------------------------------------------------------
-// QUEEN / KING — robed figures under crowned helms, inside a wide falling cape.
+// QUEEN / KING — the standing figure again, taller, crowned, inside a long cape.
 // ---------------------------------------------------------------------------------------
 
 function royal(rng: Rng, d: number, isKing: boolean): FormResult {
   const body: Part[] = [];
-  const H = isKing ? 4.55 : 4.15;
-  const w = isKing ? 1.0 : 0.90;
+  const PH = isKing ? 1.14 : 1.06;
+  const HF = isKing ? 3.46 : 3.14;
+  const w = isKing ? 1.02 : 0.94;
 
   const base = new Part();
-  base.detail = d * 1.2;
-  plinth(base, isKing ? 0.98 : 0.90, 0.52, 6, rng);
+  base.detail = d * 1.15;
+  plinth(base, isKing ? 1.12 : 1.06, PH, 6, rng, 3);
   body.push(base);
 
-  // The cape is the piece: a wide fall of drapery from the shoulders to the plinth.
-  const cape = new Part();
-  cape.detail = d * 0.8;
-  cape.thinNow = 0.3;
-  const top = H - 1.12;
-  stack(cape, foldRing(16, 1, 0.108, 0.075), [
-    { y: 0.48, sx: 0.86 * w, sz: 0.74 * w },
-    { y: 1.10, sx: 0.83 * w, sz: 0.72 * w, oz: 0.01 },
-    { y: 2.05, sx: 0.74 * w, sz: 0.64 * w, oz: 0.02 },
-    { y: 2.85, sx: 0.63 * w, sz: 0.55 * w, oz: 0.03 },
-    { y: top - 0.30, sx: 0.55 * w, sz: 0.47 * w, oz: 0.03 },
-    { y: top, sx: 0.50 * w, sz: 0.42 * w, oz: 0.02 },
-    { y: top + 0.18, sx: 0.36 * w, sz: 0.31 * w, oz: 0.02 },
-  ]);
-  cape.thinNow = 0;
-  body.push(cape);
-
-  const figure = new Part();
-  figure.detail = d * 0.7;
-  stack(figure, foldRing(12, 1, 0.062, 0.0), [
-    { y: 0.52, sx: 0.52 * w, sz: 0.44 * w, oz: 0.14 },
-    { y: 1.60, sx: 0.47 * w, sz: 0.40 * w, oz: 0.16 },
-    { y: 2.70, sx: 0.42 * w, sz: 0.36 * w, oz: 0.18 },
-    { y: top, sx: 0.38 * w, sz: 0.32 * w, oz: 0.16 },
-    { y: top + 0.22, sx: 0.26 * w, sz: 0.22 * w, oz: 0.14 },
-  ]);
-  for (const s of [-1, 1]) {
-    tube(figure, [
-      V(0.40 * w * s, top - 0.02, 0.14),
-      V(0.44 * w * s, top - 0.44, 0.24),
-      V(0.34 * w * s, top - 0.80, 0.36),
-      V(0.22 * w * s, top - 0.92, 0.42),
-    ], [
-      rrect(0.135, 0.145, 0.32),
-      rrect(0.115, 0.125, 0.32),
-      rrect(0.10, 0.11, 0.32),
-      rrect(0.10, 0.11, 0.32),
-    ], V(0, 1, 0));
-  }
-  body.push(figure);
+  const s = standing(body, rng, d, {
+    y0: PH, hf: HF, w, hem: 0.300, billow: 1.06, robe: true,
+  });
 
   const helm = new Part();
-  helm.detail = d * 0.45;
-  const hy = top + 0.16;
-  conicalHelm(helm, 0, hy, 0.14, 0.245 * w, 0.58);
-  stack(helm, ngon(8, 0.275 * w, 0.275 * w, Math.PI / 8), [
-    { y: hy + 0.30, sx: 0.98, sz: 0.98, oz: 0.14 },
-    { y: hy + 0.46, sx: 1.02, sz: 1.02, oz: 0.14 },
-    { y: hy + 0.52, sx: 0.94, sz: 0.94, oz: 0.14 },
-  ]);
-  helm.thinNow = 0.7;
-  const pts = isKing ? 5 : 7;
-  for (let i = 0; i < pts; i++) {
-    const a = (i / pts) * Math.PI * 2 + 0.3;
-    const bx = Math.cos(a) * 0.245 * w, bz = Math.sin(a) * 0.245 * w + 0.14;
-    spike(
-      helm,
-      V(bx, hy + 0.48, bz),
-      V(bx * 1.06, H - (isKing ? 0.06 : 0.02), bz * 1.04),
-      0.070 * w, 0.062 * w, V(0, 0, 0),
-    );
-  }
-  helm.thinNow = 0;
+  helm.detail = d * 0.42;
+  helmCross(helm, 0, s.helmY, 0.016 * HF, s.helmR, s.helmH * 0.80, true);
+  crown(
+    helm, 0, s.helmY + s.helmH * 0.62, 0.016 * HF,
+    s.helmR * 1.02, PH + HF, isKing ? 5 : 7,
+  );
   body.push(helm);
 
-  // The king carries a staff; the queen a slender blade held point-down.
+  // The king carries a staff; the queen a long blade held point-down at her side. Both are
+  // the articulated part, so the king can let his fall when he is mated.
   const arm = new Part();
-  arm.detail = d * 0.5;
+  arm.detail = d * 0.46;
   let tip: THREE.Vector3;
   let pivot: THREE.Vector3;
+  const gx = 0.150 * HF * w;
   if (isKing) {
-    pivot = V(0.30 * w, top - 0.86, 0.52);
+    pivot = V(gx, PH + HF * 0.600, 0.30);
     tube(arm, [
-      V(0.30 * w, 0.58, 0.56),
-      V(0.30 * w, 1.80, 0.54),
-      V(0.30 * w, 3.10, 0.52),
-      V(0.30 * w, 3.86, 0.51),
+      V(gx, PH + 0.10, 0.32),
+      V(gx, PH + HF * 0.35, 0.31),
+      V(gx, PH + HF * 0.70, 0.30),
+      V(gx, PH + HF * 0.90, 0.29),
     ], [
-      rrect(0.075, 0.078, 0.3),
-      rrect(0.066, 0.068, 0.3),
-      rrect(0.062, 0.064, 0.3),
+      rrect(0.072, 0.075, 0.3),
+      rrect(0.064, 0.066, 0.3),
       rrect(0.060, 0.062, 0.3),
+      rrect(0.058, 0.060, 0.3),
     ], V(0, 0, 1));
-    stack(arm, ngon(8, 0.125, 0.125, Math.PI / 8), [
-      { y: 3.84, sx: 0.70, sz: 0.70, ox: 0.30 * w, oz: 0.51 },
-      { y: 3.94, sx: 1.00, sz: 1.00, ox: 0.30 * w, oz: 0.51 },
-      { y: 4.08, sx: 0.95, sz: 0.95, ox: 0.30 * w, oz: 0.51 },
-      { y: 4.18, sx: 0.55, sz: 0.55, ox: 0.30 * w, oz: 0.51 },
+    stack(arm, ngon(8, 0.135, 0.135, Math.PI / 8), [
+      { y: PH + HF * 0.892, sx: 0.68, sz: 0.68, ox: gx, oz: 0.29 },
+      { y: PH + HF * 0.918, sx: 1.00, sz: 1.00, ox: gx, oz: 0.29 },
+      { y: PH + HF * 0.950, sx: 0.94, sz: 0.94, ox: gx, oz: 0.29 },
+      { y: PH + HF * 0.972, sx: 0.52, sz: 0.52, ox: gx, oz: 0.29 },
     ]);
-    tip = V(0.30 * w, 0.58, 0.56);
+    tip = V(gx, PH + 0.10, 0.32);
   } else {
-    pivot = V(0.24 * w, top - 0.88, 0.48);
-    slab(arm, V(0.24 * w, top - 0.90, 0.50), V(0.10, 0.10, 0.075), new THREE.Quaternion());
-    slab(arm, V(0.24 * w, top - 0.78, 0.52), V(0.26, 0.045, 0.05), new THREE.Quaternion());
-    blade(arm, V(0.24 * w, top - 0.82, 0.54), V(0.24 * w, 0.58, 0.74), 0.125, 0.038);
-    tip = V(0.24 * w, 0.58, 0.74);
+    pivot = V(gx, PH + HF * 0.600, 0.30);
+    hilt(arm, V(gx, PH + HF * 0.640, 0.32), V(0, 1, 0.05), V(1, 0, 0), 0.24, HF * 0.30);
+    blade(arm, V(gx, PH + HF * 0.590, 0.34), V(gx, PH + 0.16, 0.44), 0.115, 0.036);
+    tip = V(gx, PH + 0.16, 0.44);
   }
 
   return {
@@ -940,13 +1376,13 @@ function royal(rng: Rng, d: number, isKing: boolean): FormResult {
     arm: [arm],
     armPivot: pivot,
     tip,
-    comY: H * 0.42,
+    comY: PH * 0.55 + HF * 0.36,
     breaks: [
-      { p: V(0.24 * w, H - 0.14, 0.20), n: V(0.60, 0.66, 0.45).normalize(), depth: 0.05 },
-      { p: V(-0.20 * w, H - 0.12, 0.02), n: V(-0.44, 0.70, -0.56).normalize(), depth: 0.05 },
-      { p: V(0.80 * w, 2.90, -0.18), n: V(0.82, 0.24, -0.52).normalize(), depth: 0.08 },
-      { p: V(-0.86 * w, 0.16, -0.34), n: V(-0.84, -0.30, -0.45).normalize(), depth: 0.10 },
-      { p: V(0.86 * w, 0.16, 0.40), n: V(0.82, -0.32, 0.47).normalize(), depth: 0.09 },
+      { p: V(0.22 * w, PH + HF * 0.985, 0.10), n: V(0.60, 0.66, 0.45).normalize(), depth: 0.05 },
+      { p: V(-0.18 * w, PH + HF * 0.985, -0.02), n: V(-0.44, 0.70, -0.56).normalize(), depth: 0.05 },
+      { p: V(0.36 * w, PH + HF * 0.780, -0.14), n: V(0.82, 0.24, -0.52).normalize(), depth: 0.08 },
+      { p: V(-1.00 * w, 0.16, -0.34), n: V(-0.84, -0.30, -0.45).normalize(), depth: 0.11 },
+      { p: V(0.98 * w, 0.16, 0.40), n: V(0.82, -0.32, 0.47).normalize(), depth: 0.10 },
     ],
   };
 }

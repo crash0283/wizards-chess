@@ -136,7 +136,10 @@ export function fillField(
   sink: InstanceSink, rng: Rng, weather: Weather, variants: number, o: FieldOpts,
   losses?: { u: number; v: number }[],
 ): void {
-  const joint = o.joint ?? 0.10;
+  // Fine joints. The reference is finished ashlar, not rubble: age shows on it as
+  // staining and soot, not as a grid of dark mortar lines and blocks tipped out of
+  // plane. A wide joint is the single loudest tell of the wrong idiom.
+  const joint = o.joint ?? 0.045;
   const spans = o.spans ?? ALL;
   const col = new THREE.Color();
   let v = o.v0;
@@ -172,11 +175,11 @@ export function fillField(
           continue;
         }
 
-        const cracked = len > o.blockLen * 0.8 && decay > 0.86 && rng.bool(0.35);
+        const cracked = len > o.blockLen * 0.8 && decay > 0.94 && rng.bool(0.10);
         const dz = rng.float(-0.42, 0.58) * o.relief;
-        const rx = rng.float(-0.010, 0.010);
-        const ry = rng.float(-0.012, 0.012);
-        const rz = rng.float(-0.006, 0.006);
+        const rx = rng.float(-0.003, 0.003);
+        const ry = rng.float(-0.004, 0.004);
+        const rz = rng.float(-0.002, 0.002);
         weather.tone(cu, cv, o.occ, col);
 
         if (cracked) {
@@ -266,7 +269,10 @@ export function buildWall(
   const bays: { u0: number; u1: number; index: number }[] = [];
   const col = new THREE.Color();
   const hi = quality === 'high';
-  const sizeK = hi ? 1.0 : 1.34;
+  // Large, ordered courses. Doubling the stone halves the block count, which is most of
+  // what pays for the shaft screens, and it is also the right look: the room is cut
+  // masonry laid to a system, not a heap of small irregular lumps.
+  const sizeK = hi ? 1.55 : 2.0;
 
   const L = spec.length;
   const uMin = -L / 2;
@@ -305,7 +311,7 @@ export function buildWall(
         u0: left, u1: right, v0: PLINTH_TOP, v1: STRING_TOP,
         faceZ: FACE_Z, depth: FACE_D,
         courseH: 0.88 * sizeK, blockLen: 1.62 * sizeK,
-        occ: 0.10, relief: 0.13, ruin: spec.ruin,
+        occ: 0.10, relief: 0.045, ruin: spec.ruin,
         spans: (v0) => (op ? minus([[-1e9, 1e9]], op.centre, op.halfWidthAt(v0)) : [[-1e9, 1e9]]),
       }, losses);
       continue;
@@ -333,7 +339,7 @@ export function buildWall(
       u0: left, u1: right, v0: PLINTH_TOP, v1: spring + r,
       faceZ: RECESS_Z, depth: RECESS_D,
       courseH: 0.86 * sizeK, blockLen: 1.55 * sizeK,
-      occ: 1.0, relief: 0.10, ruin: spec.ruin * 0.6, spans: inside,
+      occ: 1.0, relief: 0.04, ruin: spec.ruin * 0.6, spans: inside,
     }, losses);
 
     // the wall face either side of, and above, the opening
@@ -341,7 +347,7 @@ export function buildWall(
       u0: left, u1: right, v0: PLINTH_TOP, v1: BAND0,
       faceZ: FACE_Z, depth: FACE_D,
       courseH: 0.88 * sizeK, blockLen: 1.62 * sizeK,
-      occ: 0.10, relief: 0.19, ruin: spec.ruin, spans: outside,
+      occ: 0.10, relief: 0.055, ruin: spec.ruin, spans: outside,
     }, losses);
 
     voussoirs(sink, rng, weather, 700 + b * 37, cx, spring, r, ring, FACE_Z, FACE_D + 0.1,
@@ -366,7 +372,7 @@ export function buildWall(
       u0: bay.u0, u1: bay.u1, v0: BAND0, v1: BAND1,
       faceZ: FACE_Z, depth: FACE_D,
       courseH: 0.40 * sizeK, blockLen: 1.0 * sizeK,
-      occ: 0.30, relief: 0.06, ruin: 0,
+      occ: 0.30, relief: 0.025, ruin: 0,
     });
     if (!spec.blindArcade) continue;
     const w = bay.u1 - bay.u0;
@@ -466,7 +472,7 @@ export function buildWall(
     u0: uMin, u1: uMax, v0: STRING_TOP, v1: spec.height,
     faceZ: FACE_Z, depth: FACE_D,
     courseH: 1.00 * sizeK, blockLen: 2.05 * sizeK,
-    occ: 0.14, relief: 0.17, ruin: spec.ruin * 0.5, spans: ribSpans,
+    occ: 0.14, relief: 0.05, ruin: spec.ruin * 0.5, spans: ribSpans,
   }, losses);
 
   return { sink, blind, blindColor, losses, bays };

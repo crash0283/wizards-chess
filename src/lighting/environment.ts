@@ -98,7 +98,7 @@ export function createEnvironment(world: World): Environment {
   const hemi = new THREE.HemisphereLight(
     new THREE.Color(COLD.sky),
     new THREE.Color(COLD.ground),
-    0.86,
+    0.62,
   );
   hemi.position.set(0, 18, 0);
   group.add(hemi);
@@ -112,7 +112,7 @@ export function createEnvironment(world: World): Environment {
   // DirectionalLight would light the far corners of the chamber exactly as brightly as
   // the board; the reference frames put the light on the marble and let everything
   // outside it go. It is also the only shadow-caster in the scene.
-  const key = new THREE.SpotLight(new THREE.Color(COLD.key), 470, 0, 0.56, 0.31, 1.0);
+  const key = new THREE.SpotLight(new THREE.Color(COLD.key), 300, 0, 0.56, 0.31, 1.0);
   key.position.set(-2.5, 27, 1.5);
   key.target.position.set(0, 0, 0);
   group.add(key);
@@ -135,7 +135,7 @@ export function createEnvironment(world: World): Environment {
   // reference has a readable, gently modelled wall behind the ranks, and losing it costs
   // both the depth cue and most of the frame's upper-band detail. It casts no shadows,
   // so it stays a wash rather than becoming a second key.
-  const wash = new THREE.SpotLight(new THREE.Color(COLD.sky), 340, 0, 1.25, 0.45, 2.0);
+  const wash = new THREE.SpotLight(new THREE.Color(COLD.sky), 230, 0, 1.25, 0.45, 2.0);
   wash.position.set(0, 24, 2);
   wash.target.position.set(0, 2, -6);
   wash.castShadow = false;
@@ -161,7 +161,7 @@ export function createEnvironment(world: World): Environment {
       if (scene.background !== background) scene.background = background;
       if (envTexture && scene.environment !== envTexture) {
         scene.environment = envTexture;
-        scene.environmentIntensity = 0.20;
+        scene.environmentIntensity = 0.15;
       }
     },
     dispose() {

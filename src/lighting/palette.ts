@@ -39,7 +39,9 @@ export const FIRE = {
   /** Cooling outer tongues. */
   edge: 0xff7a24,
   /** The point light a flame casts. Warmer than the core, it has to tint stone. */
-  light: 0xffb877,
+  light: 0xffc794,
+  /** Once-bounced firelight: a broad dim warm cast off the marble and the kerb. */
+  bounce: 0xff9c55,
   /** Impact flare — a dust burst is lit white-grey, not orange. */
   flare: 0xffe8cf,
 } as const;

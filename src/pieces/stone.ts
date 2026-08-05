@@ -55,12 +55,13 @@ export interface StoneSpec {
 const SPEC: Record<Side, StoneSpec> = {
   white: {
     base: new THREE.Color().setHex(0xa8a294, THREE.SRGBColorSpace),
-    // Rust-ochre. Deliberately saturated: it is the only warm pigment in the room.
-    warm: new THREE.Color().setHex(0x8a5327, THREE.SRGBColorSpace),
+    // Rust-ochre. Present and identifiable, but the frame shows it as a dull mauve-brown
+    // bloom in the stone, not orange paint: a saturated warm here reads instantly as CG.
+    warm: new THREE.Color().setHex(0x7c5a48, THREE.SRGBColorSpace),
     // Soot / cold shadow grey the stone weathers toward.
     cool: new THREE.Color().setHex(0x6e737a, THREE.SRGBColorSpace),
     fresh: new THREE.Color().setHex(0xcdc7b8, THREE.SRGBColorSpace),
-    blotch: 0.80,
+    blotch: 0.60,
     stain: 0.26,
     mottle: 0.09,
     bedding: 0.035,
@@ -71,11 +72,11 @@ const SPEC: Record<Side, StoneSpec> = {
     roughCavity: 0.10,
     roughWorn: 0.14,
     roughFresh: 0.08,
-    facetLarge: 0.0062,
+    facetLarge: 0.0038,
     facetLargeCell: 0.360,
     facetFine: 0.0011,
     facetFineCell: 0.155,
-    swell: 0.0042,
+    swell: 0.0026,
     pit: 0.0009,
     erode: 0.0085,
   },
@@ -95,11 +96,11 @@ const SPEC: Record<Side, StoneSpec> = {
     roughCavity: 0.13,
     roughWorn: 0.16,
     roughFresh: 0.12,
-    facetLarge: 0.0068,
+    facetLarge: 0.0040,
     facetLargeCell: 0.310,
     facetFine: 0.0013,
     facetFineCell: 0.140,
-    swell: 0.0034,
+    swell: 0.0022,
     pit: 0.0011,
     erode: 0.0052,
   },
@@ -237,8 +238,10 @@ function makeGrainTexture(size: number, seed: number, side: Side): THREE.DataTex
 const VERT_HEAD = /* glsl */ `
 attribute float aRough;
 attribute float aThin;
+attribute float aMail;
 varying float vRough;
 varying float vThin;
+varying float vMail;
 varying vec3 vObjP;
 varying vec3 vObjN;
 varying vec3 vTanV;
@@ -250,6 +253,7 @@ vObjP = position;
 vObjN = normalize( normal );
 vRough = aRough;
 vThin = aThin;
+vMail = aMail;
 vec3 upRef = abs( vObjN.y ) < 0.9 ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 );
 vec3 oT = normalize( cross( upRef, vObjN ) );
 vec3 oB = cross( vObjN, oT );
@@ -264,13 +268,18 @@ uniform vec2 uGrainAmp;
 uniform float uGrainRough;
 uniform float uGrainAlb;
 uniform vec3 uSSS;
+uniform vec3 uMail;
 varying float vRough;
 varying float vThin;
+varying float vMail;
 varying vec3 vObjP;
 varying vec3 vObjN;
 varying vec3 vTanV;
 varying vec3 vBitV;
 float gGrain;
+float gMailH;
+float gMailK;
+vec3 gMailN;
 
 vec3 tpBlend( vec3 nn ) {
 	vec3 b = abs( nn );
@@ -296,6 +305,37 @@ float tpDetail( vec3 p, vec3 nn, float s ) {
 		+ texture2D( uGrain, p.xz * s ).w * bw.y
 		+ texture2D( uGrain, p.xy * s ).w * bw.z;
 }
+
+/**
+ * One plane of carved chainmail: staggered rows of interlocking rings. Returns the
+ * in-plane gradient in .xy and the ring height in .z. Purely analytic — a texture would
+ * alias into moire the moment a cape falls away from the camera, and this is the one
+ * surface treatment the reference frame makes unmistakable.
+ */
+vec3 mailPlane( vec2 q ) {
+	q.y *= 0.90;
+	q.x += 0.5 * floor( mod( q.y, 2.0 ) );
+	vec2 f = fract( q ) - 0.5;
+	float d = length( f * vec2( 1.0, 1.12 ) );
+	float t = clamp( ( d - 0.33 ) / 0.150, -1.0, 1.0 );
+	float h = sqrt( max( 0.0, 1.0 - t * t ) );
+	float dh = h > 0.05 ? -t / ( h * 0.150 ) : 0.0;
+	vec2 g = d > 1e-4 ? ( f / d ) * dh : vec2( 0.0 );
+	return vec3( clamp( g, -4.0, 4.0 ), h );
+}
+
+/** Triplanar mail. Writes gMailH; returns the perturbed object-space normal. */
+vec3 tpMail( vec3 p, vec3 nn, float s, float amp ) {
+	vec3 bw = tpBlend( nn );
+	vec3 mx = mailPlane( p.zy * s );
+	vec3 my = mailPlane( p.xz * s );
+	vec3 mz = mailPlane( p.xy * s );
+	gMailH = mx.z * bw.x + my.z * bw.y + mz.z * bw.z;
+	vec3 nx = vec3( -mx.xy * amp + nn.zy, nn.x );
+	vec3 ny = vec3( -my.xy * amp + nn.xz, nn.y );
+	vec3 nz = vec3( -mz.xy * amp + nn.xy, nn.z );
+	return normalize( nx.zyx * bw.x + ny.xzy * bw.y + nz.xyz * bw.z );
+}
 `;
 
 const FRAG_COLOR = /* glsl */ `
@@ -304,19 +344,35 @@ const FRAG_COLOR = /* glsl */ `
 	vec3 onn = normalize( vObjN );
 	gGrain = tpDetail( vObjP, onn, uGrainScale.x ) * 0.60 + tpDetail( vObjP, onn, uGrainScale.y ) * 0.40;
 	diffuseColor.rgb *= 1.0 + ( gGrain - 0.5 ) * uGrainAlb;
+	gMailH = 0.5;
+	gMailN = onn;
+	gMailK = 0.0;
+	if ( vMail > 0.004 ) {
+		// Fade the rings out once one of them is down to a pixel or two, or the analytic
+		// pattern beats against the sample grid and the far ranks crawl with moire.
+		float px = fwidth( vObjP.x + vObjP.y + vObjP.z ) * uMail.x;
+		gMailK = vMail * ( 1.0 - smoothstep( 0.16, 0.60, px ) );
+		if ( gMailK > 0.004 ) {
+			gMailN = tpMail( vObjP, onn, uMail.x, uMail.y * gMailK );
+			// Woven metal sits darker in its interstices and catches a rim on every ring.
+			diffuseColor.rgb *= 1.0 + ( gMailH - 0.62 ) * uMail.z * gMailK;
+		}
+	}
 }
 `;
 
 const FRAG_ROUGH = /* glsl */ `
-float roughnessFactor = clamp( roughness * vRough + ( gGrain - 0.5 ) * uGrainRough, 0.055, 1.0 );
+float roughnessFactor = clamp(
+	roughness * vRough + ( gGrain - 0.5 ) * uGrainRough + ( 0.5 - gMailH ) * 0.10 * gMailK,
+	0.055, 1.0 );
 `;
 
 const FRAG_NORMAL = /* glsl */ `
 {
 	vec3 onn = normalize( vObjN );
-	vec3 d1 = tpNormal( vObjP, onn, uGrainScale.x, uGrainAmp.x );
+	vec3 d1 = tpNormal( vObjP, onn, uGrainScale.x, uGrainAmp.x * ( 1.0 - 0.45 * gMailK ) );
 	vec3 d2 = tpNormal( vObjP, onn, uGrainScale.y, uGrainAmp.y );
-	vec3 nd = normalize( d1 + d2 - onn );
+	vec3 nd = normalize( d1 + d2 - onn + ( gMailN - onn ) );
 	vec3 upRef = abs( onn.y ) < 0.9 ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 );
 	vec3 oT = normalize( cross( upRef, onn ) );
 	vec3 oB = cross( onn, oT );
@@ -369,9 +425,13 @@ export function createStone(world: World, side: Side): Stone {
     // Fine tile ~8.5 cm (a 512 map puts a texel at 0.17 mm), coarse tile ~47 cm. The two
     // are deliberately non-harmonic so their beat never lines up into a visible grid.
     uGrainScale: { value: new THREE.Vector2(1 / 0.085, 1 / 0.47) },
-    uGrainAmp: { value: new THREE.Vector2(side === 'white' ? 0.26 : 0.34, 0.13) },
+    uGrainAmp: { value: new THREE.Vector2(side === 'white' ? 0.17 : 0.22, 0.11) },
     uGrainRough: { value: side === 'white' ? 0.13 : 0.17 },
-    uGrainAlb: { value: side === 'white' ? 0.14 : 0.22 },
+    uGrainAlb: { value: side === 'white' ? 0.10 : 0.15 },
+    // Carved chainmail: ring pitch ~5.2 cm on the piece, which is what the reference
+    // frame shows on the dark knight's cape at four metres. x = 1/pitch, y = normal
+    // amplitude, z = albedo contrast between ring and interstice.
+    uMail: { value: new THREE.Vector3(1 / 0.039, side === 'white' ? 0.042 : 0.052, 0.12) },
     uSSS: {
       value:
         side === 'white'

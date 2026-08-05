@@ -40,6 +40,11 @@ import { buildWall, BACK_Z, STRING_TOP, type WallSpec } from './wall';
 import { buildPortalOrders, buildPortalPassage, portalHalfWidth, type PortalSpec } from './portal';
 import { buildFloor, buildFloorSlab } from './floor';
 import { buildScree, type ScreeLine } from './rubble';
+import {
+  buildSideScreen, buildFarScreen, buildBackRow, makeCarvedTone, SIDE_Z, PORTAL_X,
+} from './screen';
+import { makeGrainNormal } from './carved';
+import { hashString } from '../core/rng';
 
 const VARIANTS = 12;
 const CHUNK_VARIANTS = 5;
@@ -93,6 +98,23 @@ export function createChamber(world: World): Chamber {
   });
   materials.push(voidStone);
 
+  // Carved stone: the shaft screens. Smooth and ordered, so it takes none of the pitting
+  // and chipped-arris atlas the rubble masonry wants — just one tiling grain map, so it
+  // is stone and not plaster, and per-vertex tone for the staining and the fall into
+  // dark. One fetch over the largest surfaces in frame instead of three.
+  const grain = makeGrainNormal(hashString('chamber-carved-grain') ^ world.seed, hi ? 256 : 128);
+  const carvedStone = new THREE.MeshStandardMaterial({
+    // A shade warm in the raw albedo. The room's fill does the cooling; stone that is
+    // neutral to start with lands violet once the cold ambient has had it.
+    color: 0x635646,
+    roughness: 0.88,
+    metalness: 0.0,
+    vertexColors: true,
+    normalMap: grain,
+    normalScale: new THREE.Vector2(0.30, 0.30),
+  });
+  materials.push(carvedStone);
+
   // --- unit geometries -------------------------------------------------------------------
   const blockRng = world.rng.fork('chamber-blocks');
   const blockGeos: THREE.BufferGeometry[] = [];
@@ -119,14 +141,16 @@ export function createChamber(world: World): Chamber {
 
   const longPiers = [-19, -11.4, -3.8, 3.8, 11.4, 19];
   const endPiers = [-15.5, -7.75, 0, 7.75, 15.5];
-  const portalPiers = [-15.5, -7.75, 7.75, 15.5];
+  // The portal sits off-centre on the north wall, in the one bay of the shaft screen
+  // that `wide-establishing` has already cropped away — see the note on BAY_X0.
+  const portalPiers = [-15.5, -3.2, 5.4, 15.5];
 
   const portal: PortalSpec = {
-    centre: 0,
+    centre: PORTAL_X,
     half: 2.90,
     spring: 4.30,
-    bayU0: -7.75 + 0.95,
-    bayU1: 7.75 - 0.95,
+    bayU0: -15.5 + 0.95,
+    bayU1: -3.2 - 0.95,
     wallTop: H,
   };
 
@@ -134,26 +158,26 @@ export function createChamber(world: World): Chamber {
   const specs: Spec[] = [
     {
       id: 'east', length: HD * 2, height: H, pierAt: longPiers, pierWidth: 1.9,
-      blindArcade: true, ruin: 0.16,
+      blindArcade: true, ruin: 0.05,
       place: (g) => { g.position.set(HW, 0, 0); g.rotation.y = -Math.PI / 2; },
       panel: { nx: -1, nz: 0, d: HW - 0.9 },
     },
     {
       id: 'west', length: HD * 2, height: H, pierAt: longPiers, pierWidth: 1.9,
-      blindArcade: true, ruin: 0.20,
+      blindArcade: true, ruin: 0.06,
       place: (g) => { g.position.set(-HW, 0, 0); g.rotation.y = Math.PI / 2; },
       panel: { nx: 1, nz: 0, d: HW - 0.9 },
     },
     {
       id: 'north', length: HW * 2, height: H, pierAt: portalPiers, pierWidth: 1.9,
-      blindArcade: true, ruin: 0.13, portalBay: 1,
-      opening: { centre: 0, halfWidthAt: (v: number) => portalHalfWidth(portal, v) },
+      blindArcade: true, ruin: 0.04, portalBay: 0,
+      opening: { centre: PORTAL_X, halfWidthAt: (v: number) => portalHalfWidth(portal, v) },
       place: (g) => { g.position.set(0, 0, -HD); },
       panel: { nx: 0, nz: 1, d: HD - 0.9 },
     },
     {
       id: 'south', length: HW * 2, height: H, pierAt: endPiers, pierWidth: 1.9,
-      blindArcade: true, ruin: 0.15,
+      blindArcade: true, ruin: 0.05,
       place: (g) => { g.position.set(0, 0, HD); g.rotation.y = Math.PI; },
       panel: { nx: 0, nz: -1, d: HD - 0.9 },
     },
@@ -283,6 +307,81 @@ export function createChamber(world: World): Chamber {
     group.add(sg);
     panel.groups.push(sg);
   }
+
+  // --- the shaft screens -------------------------------------------------------------------
+  // The room has to enclose the board, not contain it at a distance. These stand hard
+  // against both long kerbs, lean in over the ranks and leave frame top and bottom, and
+  // they are what makes the outer thirds stone instead of empty floor.
+  //
+  // Each side screen is culled by the same plane test the walls use, and for the same
+  // reason: `king-surrender` sits eight metres beyond the south screen and would
+  // otherwise be looking at the back of it. The threshold is set well inside the screen
+  // so no amount of handheld drift can pop it.
+  const carvedTone = makeCarvedTone('chamber-carved', world.seed);
+  const screenPanels: { sign: 1 | -1; bay: boolean }[] = [
+    { sign: -1, bay: true },   // the portal is on this wall: leave its bay clear
+    { sign: 1, bay: false },
+  ];
+  let screenTris = 0;
+  for (const s of screenPanels) {
+    const sg = new THREE.Group();
+    sg.name = `chamber-screen-${s.sign < 0 ? 'north' : 'south'}`;
+
+    const front = buildSideScreen(s.sign, hi, carvedTone, s.bay);
+    geometries.push(front.geometry);
+    const fm = new THREE.Mesh(front.geometry, carvedStone);
+    fm.name = `${sg.name}-shafts`;
+    fm.receiveShadow = true;
+    fm.castShadow = false;
+    sg.add(fm);
+    surfaces.push(fm);
+
+    const back = buildBackRow(s.sign, hi, carvedTone, s.bay);
+    geometries.push(back.geometry);
+    const bm = new THREE.Mesh(back.geometry, carvedStone);
+    bm.name = `${sg.name}-back`;
+    bm.receiveShadow = true;
+    bm.castShadow = false;
+    sg.add(bm);
+
+    // Scree banked against the foot of the screen. It closes the strip of bare floor
+    // between the board's kerb and the shafts — the last place the eye could find an
+    // edge to the room — and it is coarse structure, which is the band the render is
+    // short of against the reference.
+    const screeSink = new InstanceSink(CHUNK_VARIANTS);
+    buildScree(
+      screeSink,
+      world.rng.fork(`chamber-screen-scree-${s.sign}`),
+      screeWeather,
+      [{
+        ax: -17.0, az: s.sign * (SIDE_Z - 0.75),
+        bx: 19.6, bz: s.sign * (SIDE_Z - 0.75),
+        nx: 0, nz: -s.sign, losses: [], uMin: -17.0, uMax: 19.6,
+      }],
+      hi,
+    );
+    screeSink.bake(sg, chunkGeos, stone, `chamber-screen-scree-${s.sign}`, {
+      receiveShadow: true, castShadow: false,
+    });
+
+    screenTris += front.triangles + back.triangles;
+    group.add(sg);
+    panels.push({ groups: [sg], nx: 0, nz: -s.sign, d: SIDE_Z - 1.6 });
+  }
+
+  // The end wall behind the heap, in the same idiom, so the far end of the room is stone
+  // and not a receding plane of blocks.
+  const far = buildFarScreen(hi, carvedTone);
+  geometries.push(far.geometry);
+  const farMesh = new THREE.Mesh(far.geometry, carvedStone);
+  farMesh.name = 'chamber-screen-far';
+  farMesh.receiveShadow = true;
+  farMesh.castShadow = false;
+  group.add(farMesh);
+  surfaces.push(farMesh);
+  panels.push({ groups: [farMesh], nx: -1, nz: 0, d: HW - 0.9 });
+  screenTris += far.triangles;
+  void screenTris;
 
   // --- vault ---------------------------------------------------------------------------------
   const vaultGeo = makeVaultGeometry(HW, HD + 1.0, H, 5.5, hi ? 26 : 14, hi ? 10 : 5);

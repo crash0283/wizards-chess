@@ -9,7 +9,9 @@
  *               point, a corner of the plinth) then 5–9 smaller chips found automatically
  *               at convex arrises. Every cut face is tagged as fresh stone.
  *   weather.ts  chisel-facet + erosion displacement, then vertex colour / roughness
- *   toGeometry  exploded to face normals — the facets are the carving
+ *   toGeometry  crease-angle shading: welded normals across a tessellated curve, raw face
+ *               normals across a real arris, so a helm is smooth stone and a plinth
+ *               moulding still has edges
  *   stone.ts    triplanar mm-grain in normal and roughness, two genuinely different stones
  *   motion.ts   heavy grinding walk, committed strike, the king's blade falling
  *
@@ -117,7 +119,12 @@ export function createPieceFactory(world: World): PieceFactory {
     black: createStone(world, 'black'),
   };
   const hi = world.quality === 'high';
-  const detail = hi ? 0.155 : 0.27;
+  // Triangle budget, not a quality dial. The figuration is now explicit geometry — limbs,
+  // mouldings, colonnettes — so refinement only buys smoother *weathering*, and the
+  // reference frame has markedly LESS high-frequency energy than a finely tessellated
+  // stand-in. Refining past this spends memory to make the render worse.
+  const detail = hi ? 0.215 : 0.345;
+  const floor = hi ? 0.126 : 0.160;
 
   function carve(type: PieceType, side: Side, id: string) {
     const rng = world.rng.fork(id);
@@ -128,7 +135,7 @@ export function createPieceFactory(world: World): PieceFactory {
       form.body.map((p) => {
         const mm = p.mesh();
         orientOutward(mm);
-        return subdivide(mm, Math.max(0.085, p.detail));
+        return subdivide(mm, Math.max(floor, p.detail));
       }),
     );
     let arm: CMesh | null = form.arm
@@ -136,7 +143,7 @@ export function createPieceFactory(world: World): PieceFactory {
           form.arm.map((p) => {
             const mm = p.mesh();
             orientOutward(mm);
-            return subdivide(mm, Math.max(0.085, p.detail));
+            return subdivide(mm, Math.max(floor, p.detail));
           }),
         )
       : null;
@@ -187,14 +194,16 @@ export function createPieceFactory(world: World): PieceFactory {
     const weather = makeWeather(stone.spec, rng.fork('weather'), 1);
     const bi = analyse(body);
     const bd = displaceMesh(body, bi, weather.displace);
-    const bodyGeo = toGeometry(body, bd, weather.shade);
+    // Re-analyse AFTER displacement: the normals that shade the piece have to belong to
+    // the weathered surface, not to the smooth one it was cut from.
+    const bodyGeo = toGeometry(body, bd, weather.shade, analyse(body));
     geos.push(bodyGeo);
 
     let armGeo: THREE.BufferGeometry | null = null;
     if (arm) {
       const ai = analyse(arm);
       const ad = displaceMesh(arm, ai, weather.displace);
-      armGeo = toGeometry(arm, ad, weather.shade);
+      armGeo = toGeometry(arm, ad, weather.shade, analyse(arm));
       geos.push(armGeo);
     }
 

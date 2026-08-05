@@ -52,7 +52,7 @@ export function createLighting(
   env.apply(world.scene);
 
   // --- the flames ---------------------------------------------------------------------
-  const flames = createFlames(world, { lightCount: high ? 64 : 10 });
+  const flames = createFlames(world, { lightCount: high ? 34 : 10 });
   group.add(flames.group);
 
   // --- impact flares ------------------------------------------------------------------

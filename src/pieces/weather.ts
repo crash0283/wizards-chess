@@ -76,7 +76,7 @@ export interface Weather {
   displace: (
     x: number, y: number, z: number,
     nx: number, ny: number, nz: number,
-    fresh: number, arris: number,
+    fresh: number, arris: number, mail: number,
   ) => number;
   shade: Shader;
 }
@@ -110,7 +110,7 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
   const rustBias = rng.float(-0.06, 0.11);
   const base = spec.base, warm = spec.warm, cool = spec.cool, fresh = spec.fresh;
 
-  const displace: Weather['displace'] = (x, y, z, nx, ny, nz, freshV, arris) => {
+  const displace: Weather['displace'] = (x, y, z, nx, ny, nz, freshV, arris, mail) => {
     const swell = fSwell(x * 0.85 + ox, y * 0.72 + oy, z * 0.85 + oz) * spec.swell * wear;
     const pit = fPit(x * 2.6 + ox, y * 2.6 + oy, z * 2.6 + oz) * spec.pit * wear;
     const f1 = facets(
@@ -125,15 +125,18 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
     );
     // Break faces are rawer: no chisel work on them. Their relief stays low-frequency so
     // the cut face still reads as one plane, the way a real fracture does.
-    const raw = freshV;
+    // Mail is carved as cloth, not dressed as ashlar: no chisel facets across it, and its
+    // arrises are the hem and the fold ridges, which the mason left crisp.
+    const raw = Math.max(freshV, mail);
     const chisel = (f1 + f2) * (1 - raw);
-    const fracture = raw * fPit(x * 1.9 + sx, y * 1.9 + sy, z * 1.9 + sz) * 0.010;
+    const fracture = freshV * fPit(x * 1.9 + sx, y * 1.9 + sy, z * 1.9 + sz) * 0.010;
     // Arrises erode — but only genuine convex arrises, and limestone far more than basalt.
-    const ero = arris * erodeK * (0.55 + 0.9 * (fPit(x * 3.1 + sx, y * 3.1 + sy, z * 3.1 + sz) * 0.5 + 0.5));
+    const ero = arris * erodeK * (0.55 + 0.9 * (fPit(x * 3.1 + sx, y * 3.1 + sy, z * 3.1 + sz) * 0.5 + 0.5))
+      * (1 - 0.6 * mail);
     return (swell + pit + chisel + fracture - ero) * heightScale;
   };
 
-  const shade: Shader = (out, x, y, z, nx, ny, nz, freshV, _thin, recess) => {
+  const shade: Shader = (out, x, y, z, nx, ny, nz, freshV, _thin, recess, mail) => {
     const bl = fBlotch(x * 0.78 + ox, y * 0.62 + oy, z * 0.78 + oz);
     const st = fStain(x * 1.05 + sx, y * 0.17 + sy, z * 1.05 + sz);
     const mo = fMottle(x * 4.4 + oz, y * 4.4 + ox, z * 4.4 + oy);
@@ -191,7 +194,10 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
       freshV * spec.roughFresh +
       bed * spec.bedding * 0.6 +
       mo * 0.05 -
-      dust * 0.04;
+      dust * 0.04 -
+      // Mail is polished smooth by every fold rubbing on the next; it holds a sheen the
+      // dressed stone next to it never does, and that contrast is what sells it as cloth.
+      mail * 0.02;
     out.rough = rough < 0.34 ? 0.34 : rough > 1 ? 1 : rough;
   };
 
