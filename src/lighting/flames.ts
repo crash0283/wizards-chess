@@ -44,13 +44,21 @@ function layout(rng: Rng): Array<{ x: number; y: number; z: number; size: number
   const out: Array<{ x: number; y: number; z: number; size: number }> = [];
   const kerb = HALF + 0.78;
   const along = [-7.85, -4.72, -1.58, 1.58, 4.72, 7.85];
+  // The two ends the armies stand behind carry fewer fires than the long sides — in the
+  // reference the ranks themselves, not a row of flames, close off those edges.
+  const acrossEnds = [-6.3, 0.4, 6.9];
 
-  // Four kerb runs. These are the flames that read biggest in the wide shot.
+  // Four kerb runs. These are the flames that read biggest in the wide shot. They are
+  // jittered along and across the kerb: evenly spaced fires read as birthday candles.
+  const j = () => rng.float(-0.62, 0.62);
+  const k = () => rng.float(-0.16, 0.16);
   for (const a of along) {
-    out.push({ x: -kerb, y: 0.3, z: a, size: rng.float(0.42, 0.6) });
-    out.push({ x: kerb, y: 0.3, z: a, size: rng.float(0.42, 0.6) });
-    out.push({ x: a, y: 0.3, z: -kerb, size: rng.float(0.42, 0.6) });
-    out.push({ x: a, y: 0.3, z: kerb, size: rng.float(0.42, 0.6) });
+    out.push({ x: -kerb + k(), y: 0.3, z: a + j(), size: rng.float(0.34, 0.66) });
+    out.push({ x: kerb + k(), y: 0.3, z: a + j(), size: rng.float(0.34, 0.66) });
+  }
+  for (const a of acrossEnds) {
+    out.push({ x: a + j(), y: 0.3, z: -kerb + k(), size: rng.float(0.28, 0.44) });
+    out.push({ x: a + j(), y: 0.3, z: kerb + k(), size: rng.float(0.28, 0.44) });
   }
   // Corners of the kerb.
   for (const sx of [-1, 1]) {
@@ -75,8 +83,8 @@ function layout(rng: Rng): Array<{ x: number; y: number; z: number; size: number
       out.push({
         x: x + rng.float(-0.4, 0.4),
         y: rng.float(0.55, 0.95),
-        z: sz * rng.float(9.9, 11.2),
-        size: rng.float(0.3, 0.46),
+        z: sz * rng.float(8.6, 10.0),
+        size: rng.float(0.26, 0.4),
       });
     }
   }
@@ -131,8 +139,8 @@ void main(){
   vFlick = fl;
 
   float layerScale = 1.0 - vLayer * 0.27;
-  float h = size * (1.78 + 0.95 * (fl - 0.5)) * layerScale;
-  float w = size * (1.02 + 0.24 * (fl - 0.5)) * layerScale;
+  float h = size * (1.58 + 0.85 * (fl - 0.5)) * layerScale;
+  float w = size * (1.26 + 0.28 * (fl - 0.5)) * layerScale;
 
   // Lean and lick — grows with height, so the base stays planted.
   float sway = (vnoise1(uTime * 2.9 + ph * 7.0) - 0.5) * 0.55
@@ -199,7 +207,7 @@ void main(){
   float size = aParams.y;
   float fl = flicker(uTime, ph);
   vFlick = fl;
-  float r = size * (1.55 + 0.35 * (fl - 0.5));
+  float r = size * (2.70 + 0.60 * (fl - 0.5));
   vec3 right = normalize(vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]));
   vec3 up = normalize(vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]));
   vec3 wp = aCentre + vec3(0.0, size * 0.55, 0.0) + right * (aCorner.x * r) + up * (aCorner.y * r);
@@ -288,7 +296,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const bodyMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 5.0 },
+      uIntensity: { value: 4.2 },
       uCore: { value: new THREE.Color(FIRE.core).convertSRGBToLinear() },
       uMid: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
       uEdge: { value: new THREE.Color(FIRE.edge).convertSRGBToLinear() },
@@ -346,7 +354,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const glowMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 0.012 },
+      uIntensity: { value: 0.16 },
       uColor: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
     },
     vertexShader: GLOW_VERT,
@@ -365,9 +373,20 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   group.add(glowMesh);
 
   // --- the real light pool ------------------------------------------------------------
+  // Each of these is a genuine inverse-square source sitting half a metre above the kerb.
+  // That is the whole point: a flame has to burn a warm pool into the stone it stands on
+  // and uplight the nearest plinth, or it reads as a sprite pasted over the frame. Range
+  // is deliberately short — bright inside a metre, a visible wash at two, gone by six —
+  // so thirty-odd of them still do not warm the room.
+  // Decay 1.7 rather than a textbook 2. A 0.5 m column of burning gas is nowhere near a
+  // point at the distances that matter here, and the exact inverse square of a point
+  // source gives a pool that is blown at the base and gone a metre later. The shallower
+  // exponent is the usual stand-in for an extended emitter: same core, a far longer
+  // usable tail, which is what actually reads as "this fire is lighting the room".
   const lights: THREE.PointLight[] = [];
-  for (let i = 0; i < opts.lightCount; i++) {
-    const l = new THREE.PointLight(new THREE.Color(FIRE.light), 0, 7.5, 2);
+  const lightCount = Math.min(opts.lightCount, flames.length);
+  for (let i = 0; i < lightCount; i++) {
+    const l = new THREE.PointLight(new THREE.Color(FIRE.light), 0, 9, 1.7);
     l.castShadow = false;
     group.add(l);
     lights.push(l);
@@ -382,8 +401,10 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
     noise(t * 2.3, ph * 5.0, 8.1) * 0.17;
 
   const order: number[] = flames.map((_, i) => i);
-  const dist: number[] = new Array(flames.length).fill(0);
+  const score: number[] = new Array(flames.length).fill(0);
   const camPos = new THREE.Vector3();
+  const camFwd = new THREE.Vector3();
+  const toFlame = new THREE.Vector3();
 
   return {
     group,
@@ -401,35 +422,37 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
     assign(camera: THREE.Camera) {
       if (lights.length === 0) return;
       camera.getWorldPosition(camPos);
+      camera.getWorldDirection(camFwd);
+
+      // Rank by how much of the frame a flame's pool can possibly occupy: nearer is
+      // better, and a flame behind the camera is worth nothing however close it is. This
+      // beats plain distance because the wide shot looks down the long axis — the fires
+      // on the far kerb are the ones drawing the eye, and pure nearest-first spends the
+      // whole pool on the two flames just off the bottom edge.
       for (let i = 0; i < flames.length; i++) {
-        dist[i] = camPos.distanceToSquared(flames[i].pos);
+        toFlame.subVectors(flames[i].pos, camPos);
+        const d = Math.max(0.6, toFlame.length());
+        const facing = toFlame.dot(camFwd) / d; // cos of the angle off the lens axis
+        const visible = 0.16 + 0.84 * THREE.MathUtils.smoothstep(facing, -0.35, 0.35);
+        score[i] = (flames[i].size * visible) / (d * d);
         order[i] = i;
       }
-      order.sort((a, b) => dist[a] - dist[b]);
-
-      // Half the pool goes to whatever is nearest camera; the rest is strided across the
-      // remainder so the far side of the room never goes completely unlit.
-      const near = Math.min(lights.length, Math.max(1, Math.ceil(lights.length * 0.55)));
-      const chosen: number[] = [];
-      for (let i = 0; i < near && i < order.length; i++) chosen.push(order[i]);
-      const rest = order.length - near;
-      const want = lights.length - chosen.length;
-      if (rest > 0 && want > 0) {
-        const stride = Math.max(1, Math.floor(rest / want));
-        for (let k = 0; k < want; k++) {
-          const idx = near + Math.min(rest - 1, k * stride);
-          chosen.push(order[idx]);
-        }
-      }
-      while (chosen.length < lights.length) chosen.push(order[order.length - 1]);
+      order.sort((a, b) => score[b] - score[a]);
 
       for (let i = 0; i < lights.length; i++) {
-        const f = flames[chosen[i]];
+        const f = flames[order[Math.min(i, order.length - 1)]];
         const l = lights[i];
-        l.position.set(f.pos.x, f.pos.y + f.size * 0.75, f.pos.z);
-        // Tight, fast falloff: bright inside a metre, gone by three.
-        l.distance = 4.3 + f.size * 2.8;
-        l.intensity = (1.05 + f.size * 1.7) * (0.66 + 0.62 * f.flicker);
+        // Height matters more than it looks. A flame is an extended emitter, and a point
+        // light sitting on the stone gives 1/h² right under it — a searing white core a
+        // few centimetres across with almost nothing past a metre. Lifting the point to
+        // roughly the flame's own upper body approximates the integral over the volume:
+        // the peak comes down, the useful pool widens, and the reference's ratio of
+        // warm-and-bright to warm-at-all (about 1:2, ours was 2:3) falls into place.
+        l.position.set(f.pos.x, f.pos.y + f.size * 0.9 + 0.7, f.pos.z);
+        // Inverse-square with a soft cutoff: a clear warm wash on the marble at two
+        // metres, into the noise floor by six.
+        l.distance = 9.0 + f.size * 3.0;
+        l.intensity = (2.15 + f.size * 4.4) * (0.60 + 0.72 * f.flicker);
       }
     },
 

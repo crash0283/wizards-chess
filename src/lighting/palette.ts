@@ -11,13 +11,13 @@
 /** Cold room. Every one of these is a blue whose R < G < B. */
 export const COLD = {
   /** Hemisphere sky term — the soft cool fill that models everything. */
-  sky: 0x74a2f2,
+  sky: 0x9db4cc,
   /** Hemisphere ground term — cold bounce off the marble, darker and bluer. */
-  ground: 0x101825,
+  ground: 0x3b4048,
   /** Flat ambient floor so nothing in the deep room goes to pure black too early. */
-  ambient: 0x3d5c92,
+  ambient: 0x556880,
   /** The very soft top light that grounds pieces with a contact shadow. */
-  key: 0x82ace8,
+  key: 0xa2c0f0,
   /** Atmospheric veil colour. Distance reads as *this*, not as darkness. */
   haze: 0x22334f,
   /** Unresolved ceiling / beyond-the-arcade void. */
@@ -37,9 +37,9 @@ export const FIRE = {
   /** The body of the flame. */
   mid: 0xffb055,
   /** Cooling outer tongues. */
-  edge: 0xff5f18,
+  edge: 0xff7a24,
   /** The point light a flame casts. Warmer than the core, it has to tint stone. */
-  light: 0xffa552,
+  light: 0xffb877,
   /** Impact flare — a dust burst is lit white-grey, not orange. */
   flare: 0xffe8cf,
 } as const;

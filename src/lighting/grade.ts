@@ -19,23 +19,36 @@ export const GradeShader = {
   name: 'ChamberGrade',
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
-    uExposure: { value: 0.8 },
+    uExposure: { value: 0.80 },
     uAspect: { value: 2.388 },
     uCA: { value: 0.0035 },
+    /** One texel, so the diffusion tap radius is in pixels rather than in UV. */
+    uTexel: { value: new THREE.Vector2(1 / 1920, 1 / 804) },
+    /**
+     * Optical diffusion, mixed in *before* exposure so it behaves like light scattering
+     * in the taking lens rather than like a blur on a finished picture. A spherical lens
+     * on a film camera is never critically sharp at the pixel level and a scan adds its
+     * own MTF rolloff; leaving micro-contrast at full render sharpness is one of the
+     * loudest CG tells there is, and it shows up in the metrics as roughly double the
+     * reference's high-frequency energy.
+     */
+    uDiffusion: { value: 0.30 },
     uVigStrength: { value: 0.84 },
-    uVigInner: { value: 0.3 },
+    uVigInner: { value: 0.30 },
     uVigOuter: { value: 0.95 },
     uVigAspect: { value: 1.25 },
     uLift: { value: 0.94 },
-    uContrast: { value: 1.0 },
+    uContrast: { value: 0.99 },
     /** Saturation in the deep shadows — the film's blacks are close to neutral. */
     uSatShadow: { value: 0.42 },
     /** Saturation from the mid-tones up, where the cold marble has to read blue. */
-    uSaturation: { value: 1.08 },
+    uSaturation: { value: 1.16 },
     uSatRamp: { value: new THREE.Vector2(0.03, 0.28) },
+    /** Cold DI balance. Applied to everything the flames are not already warming. */
+    uCoolBalance: { value: new THREE.Vector3(0.965, 1.015, 1.03) },
     uShadowTint: { value: new THREE.Vector3(0.004, 0.006, 0.011) },
-    uHighlightTint: { value: new THREE.Vector3(0.012, 0.002, -0.014) },
-    uGrain: { value: 0.017 },
+    uHighlightTint: { value: new THREE.Vector3(0.006, 0.004, -0.004) },
+    uGrain: { value: 0.013 },
     uSeed: { value: 0.0 },
     uFlash: { value: 0.0 },
   },
@@ -49,11 +62,12 @@ void main(){
   fragmentShader: /* glsl */ `
 precision highp float;
 uniform sampler2D tDiffuse;
-uniform float uExposure, uAspect, uCA;
+uniform float uExposure, uAspect, uCA, uDiffusion;
+uniform vec2 uTexel;
 uniform float uVigStrength, uVigInner, uVigOuter, uVigAspect;
 uniform float uLift, uContrast, uSaturation, uSatShadow;
 uniform vec2 uSatRamp;
-uniform vec3 uShadowTint, uHighlightTint;
+uniform vec3 uCoolBalance, uShadowTint, uHighlightTint;
 uniform float uGrain, uSeed, uFlash;
 varying vec2 vUv;
 
@@ -84,6 +98,15 @@ void main(){
   col.g = texture2D(tDiffuse, vUv).g;
   col.b = texture2D(tDiffuse, vUv - off).b;
 
+  // Lens diffusion, in linear light: a cross of taps a texel and a half out, mixed back
+  // over the sharp image. Bright detail bleeds into its neighbours the way it does
+  // through real glass, and the grain added at the end stays crisp on top of it.
+  vec3 soft = texture2D(tDiffuse, vUv + vec2(uTexel.x * 1.5, 0.0)).rgb
+            + texture2D(tDiffuse, vUv - vec2(uTexel.x * 1.5, 0.0)).rgb
+            + texture2D(tDiffuse, vUv + vec2(0.0, uTexel.y * 1.5)).rgb
+            + texture2D(tDiffuse, vUv - vec2(0.0, uTexel.y * 1.5)).rgb;
+  col = mix(col, soft * 0.25, uDiffusion);
+
   col *= uExposure * (1.0 + uFlash);
 
   // Optical vignette, applied while still linear so the corners genuinely go black.
@@ -98,10 +121,19 @@ void main(){
   col = pow(max(col, vec3(0.0)), vec3(uLift));
   col = max((col - 0.16) * uContrast + 0.16, 0.0);
 
+  // Cold balance. The room is graded cold; anything already warm — a flame and the
+  // metre or two of stone it is lighting — keeps its own colour and is left alone.
+  float warmth = clamp((col.r - col.b) * 2.6, 0.0, 1.0);
+  col *= mix(uCoolBalance, vec3(1.0), warmth);
+
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
 
-  // Saturation ramp: the deep shadows go near-neutral, the lit stone stays cold blue.
-  float sat = mix(uSatShadow, uSaturation, smoothstep(uSatRamp.x, uSatRamp.y, l));
+  // Saturation ramp: the deep cold shadows go near-neutral, the lit stone stays cold
+  // blue. Firelight is exempt. A flame pool dies away through exactly the luminance band
+  // this ramp neutralises, so applying it uniformly greys out the outer two-thirds of
+  // every warm pool and the fires stop reading as sources — which is the whole gap.
+  float warmSat = mix(uSatShadow, uSaturation, smoothstep(uSatRamp.x, uSatRamp.y, l));
+  float sat = mix(warmSat, uSaturation, warmth);
   col = mix(vec3(l), col, sat);
 
   float sh = 1.0 - smoothstep(0.0, 0.5, l);
@@ -109,8 +141,15 @@ void main(){
   col += uShadowTint * sh;
   col += uHighlightTint * hi;
 
-  // Grain: present everywhere, strongest through the dark mid-tones.
-  float g = hash21(gl_FragCoord.xy + vec2(uSeed, uSeed * 1.7)) - 0.5;
+  // Grain: present everywhere, strongest through the dark mid-tones. Sampled at ~1.8 px
+  // and interpolated rather than one independent value per pixel — real grain is clumped
+  // at this resolution, and per-pixel white noise is both the wrong texture and an
+  // enormous amount of spurious high-frequency energy in the detail metric.
+  vec2 gp = (gl_FragCoord.xy + vec2(uSeed * 3.1, uSeed * 1.7)) / 1.8;
+  vec2 gi = floor(gp), gf = fract(gp);
+  gf = gf * gf * (3.0 - 2.0 * gf);
+  float g = mix(mix(hash21(gi), hash21(gi + vec2(1.0, 0.0)), gf.x),
+                mix(hash21(gi + vec2(0.0, 1.0)), hash21(gi + vec2(1.0, 1.0)), gf.x), gf.y) - 0.5;
   float weight = 0.30 + 1.55 * smoothstep(0.0, 0.10, l) * (1.0 - smoothstep(0.10, 0.62, l));
   col += g * uGrain * weight;
 

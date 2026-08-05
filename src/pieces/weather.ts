@@ -153,7 +153,7 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
     // water sits, so up-facing surfaces and recesses take far more of it.
     let rust = (bl + mo * 0.42 - rustBias) / 0.17;
     rust = rust <= 0 ? 0 : rust >= 1 ? 1 : rust * rust * (3 - 2 * rust);
-    rust *= 0.46 + 0.42 * up + 0.30 * rIn;
+    rust *= 0.62 + 0.40 * up + 0.28 * rIn;
     const kW = rust * spec.blotch;
     // Soot and cold weathering run downward off the ledges.
     const kC = Math.max(0, st) * stainK * (0.5 + 0.5 * Math.max(0, -ny));

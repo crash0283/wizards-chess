@@ -52,7 +52,7 @@ export function createLighting(
   env.apply(world.scene);
 
   // --- the flames ---------------------------------------------------------------------
-  const flames = createFlames(world, { lightCount: high ? 14 : 7 });
+  const flames = createFlames(world, { lightCount: high ? 64 : 10 });
   group.add(flames.group);
 
   // --- impact flares ------------------------------------------------------------------
@@ -73,20 +73,36 @@ export function createLighting(
   let width = size.width || RENDER.width;
   let height = size.height || RENDER.height;
 
-  // The scene target carries a depth texture so the atmosphere pass can rebuild world
-  // position per pixel. RenderPass and UnrealBloomPass both leave needsSwap false, so
-  // this target is exactly what the atmosphere pass reads from.
-  const depthTexture = new THREE.DepthTexture(width, height);
-  depthTexture.format = THREE.DepthFormat;
-  depthTexture.type = THREE.UnsignedIntType;
+  // The atmosphere pass rebuilds world position from depth, so the scene target needs a
+  // depth texture. The composer ping-pongs its two buffers, and the pass that samples
+  // depth writes into the *other* one — so BOTH buffers need their own depth texture, and
+  // each frame the pass is pointed at whichever buffer RenderPass is about to fill. Give
+  // buffer 2 a fresh DepthTexture rather than the composer's clone: Texture.clone()
+  // shares the underlying Source, which means one GL texture, which means a
+  // framebuffer/texture feedback loop and a black frame.
+  const makeDepth = (w: number, h: number) => {
+    const d = new THREE.DepthTexture(w, h);
+    d.format = THREE.DepthFormat;
+    d.type = THREE.UnsignedIntType;
+    return d;
+  };
+  // MSAA on the scene buffer. `antialias: true` on the renderer only ever applied to the
+  // default framebuffer, which this composer bypasses entirely — so every edge in the
+  // room was rendering hard-aliased. That is both an instant "this is a render" tell and
+  // a large chunk of the measured high-frequency energy: the reference frame's detail
+  // total is 0.020 and stair-stepped plinth and arcade edges alone were pushing ours to
+  // twice that. Samples resolve down to the depth texture too, so the atmosphere pass
+  // still gets clean depth.
   const sceneTarget = new THREE.WebGLRenderTarget(width, height, {
     type: THREE.HalfFloatType,
     depthBuffer: true,
-    depthTexture,
+    samples: high ? 4 : 0,
+    depthTexture: makeDepth(width, height),
   });
   sceneTarget.texture.name = 'lighting.scene';
 
   const composer = new EffectComposer(world.renderer, sceneTarget);
+  composer.renderTarget2.depthTexture = makeDepth(width, height);
   composer.setSize(width, height);
 
   const renderPass = new RenderPass(world.scene, world.camera);
@@ -96,15 +112,14 @@ export function createLighting(
   atmoPass.material.depthTest = false;
   atmoPass.material.depthWrite = false;
   const au = atmoPass.uniforms as Record<string, { value: any }>;
-  au.tDepth.value = depthTexture;
   composer.addPass(atmoPass);
 
   // Bloom thresholded well above anything the cold ambient can reach, so it only ever
   // touches flame cores, the specular bloom off the marble and a dust burst.
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(width, height),
-    high ? 0.18 : 0.14,
-    0.28,
+    high ? 0.13 : 0.11,
+    0.22,
     1.0,
   );
   composer.addPass(bloom);
@@ -117,6 +132,7 @@ export function createLighting(
 
   const gu = gradePass.uniforms as Record<string, { value: any }>;
   gu.uAspect.value = width / Math.max(1, height);
+  gu.uTexel.value.set(1 / width, 1 / height);
 
   // Grain has to move frame to frame or it reads as fixed-pattern noise, but it must
   // still be a pure function of scene time.
@@ -152,6 +168,10 @@ export function createLighting(
       // the updaters run, so this is the first point the camera is final for the frame.
       flames.assign(world.camera);
 
+      // RenderPass fills composer.readBuffer, so that is the depth the atmosphere pass
+      // must sample this frame. The buffers swap every frame; this does not.
+      au.tDepth.value = (composer.readBuffer as THREE.WebGLRenderTarget).depthTexture;
+
       const cam = world.camera;
       cam.updateMatrixWorld();
       au.uProjInv.value.copy(cam.projectionMatrixInverse);
@@ -160,19 +180,30 @@ export function createLighting(
 
       gu.uSeed.value = (Math.floor(world.time * 120) % 4096) * 7.13 + grainSeed;
       gu.uFlash.value = flashLevel;
-      composer.render();
+      // Explicit dt: EffectComposer's internal Timer would otherwise read the wall clock.
+      composer.render(world.dt);
     },
 
     setSize(w: number, h: number) {
-      width = Math.max(1, Math.round(w));
-      height = Math.max(1, Math.round(h));
+      const nw = Math.max(1, Math.round(w));
+      const nh = Math.max(1, Math.round(h));
+      const changed = nw !== width || nh !== height;
+      width = nw;
+      height = nh;
       world.renderer.setSize(width, height, false);
       composer.setSize(width, height);
       bloom.setSize(width, height);
-      depthTexture.image.width = width;
-      depthTexture.image.height = height;
-      depthTexture.needsUpdate = true;
+      if (changed) {
+        // RenderTarget.setSize does not resize an attached depth texture, so swap in
+        // fresh ones at the new size and release the old.
+        for (const rt of [composer.renderTarget1, composer.renderTarget2]) {
+          const old = rt.depthTexture;
+          rt.depthTexture = makeDepth(width, height);
+          old?.dispose();
+        }
+      }
       gu.uAspect.value = width / height;
+      gu.uTexel.value.set(1 / width, 1 / height);
     },
 
     flare(pos: THREE.Vector3, intensity: number, decay: number) {
@@ -203,7 +234,6 @@ export function createLighting(
       gradePass.dispose();
       atmoPass.dispose();
       bloom.dispose();
-      depthTexture.dispose();
       renderPass.dispose();
       composer.dispose();
     },

@@ -1,54 +1,317 @@
 /**
  * PIECE: chamber — the stone hall itself.
- * Round 0 placeholder. Owner may rewrite everything under src/chamber/.
+ *
+ * A subterranean chamber roughly 31 x 38 metres on plan with a vault twenty-two metres
+ * over the board: enormous, empty, and made of stone that was cut and laid rather than
+ * poured. Three scales of detail, deliberately:
+ *
+ *   architecture  — stepped plinth, engaged piers, an arcade of deep arched recesses,
+ *                   a band of blind arcading, a moulded string course, a great portal
+ *   masonry       — several thousand individual instanced blocks in courses, each one
+ *                   proud or sunk, tilted, chamfered, some cracked, some fallen out
+ *   surface       — a procedural atlas of pitting, chisel tooling and chipped arrises
+ *
+ * Age is written on top of all three by `weather.ts`: damp running down out of the
+ * string course, salt blooming out of the plinth, scree gathering in the corners, and
+ * the whole room losing itself into unresolved darkness above the arcade.
+ *
+ * Two structural notes:
+ *
+ *  - Walls are hidden when the camera is outside them. `wide-establishing` sits eight
+ *    metres beyond the west wall and `king-surrender` sits beyond the south wall, so a
+ *    solid room would render the back of a wall and nothing else. The test is a plane
+ *    test against the live camera, run from `updateMatrixWorld` so it is always exact
+ *    for the frame being drawn, and it is a pure function of camera position — no
+ *    clocks, no state, the same frame every time.
+ *  - `scene.fog` belongs to the lighting piece. Nothing here touches it.
  */
 import * as THREE from 'three';
 import type { Chamber } from '../core/api';
 import type { World } from '../core/world';
-import { CHAMBER, PALETTE } from '../core/constants';
+import { CHAMBER, BOARD_SIZE } from '../core/constants';
+
+import { buildStoneAtlas } from './textures';
+import {
+  makeBlockGeometry, makeBlindArchGeometry, makeChunkGeometry, makeVaultGeometry,
+} from './geometry';
+import { makeWeather } from './weather';
+import { InstanceSink } from './sink';
+import { buildWall, BACK_Z, STRING_TOP, type WallSpec } from './wall';
+import { buildPortalOrders, buildPortalPassage, portalHalfWidth, type PortalSpec } from './portal';
+import { buildFloor, buildFloorSlab } from './floor';
+import { buildScree, type ScreeLine } from './rubble';
+
+const VARIANTS = 12;
+const CHUNK_VARIANTS = 5;
+
+/** Root that decides, at draw time, which walls the camera is inside of. */
+class ChamberRoot extends THREE.Group {
+  cull: (() => void) | null = null;
+  updateMatrixWorld(force?: boolean) {
+    if (this.cull) this.cull();
+    super.updateMatrixWorld(force);
+  }
+}
+
+interface Panel {
+  /** Everything that belongs to this wall, including the scree heaped against it. */
+  groups: THREE.Object3D[];
+  /** Inward normal, in the xz plane. */
+  nx: number;
+  nz: number;
+  /** nx*x + nz*z + d > 0 means the camera is inside this wall. */
+  d: number;
+}
 
 export function createChamber(world: World): Chamber {
-  const group = new THREE.Group();
+  const hi = world.quality === 'high';
+  const group = new ChamberRoot();
   group.name = 'chamber';
+
+  const geometries: THREE.BufferGeometry[] = [];
+  const materials: THREE.Material[] = [];
   const surfaces: THREE.Object3D[] = [];
 
+  // --- surface -------------------------------------------------------------------------
+  const atlas = buildStoneAtlas(world);
+
   const stone = new THREE.MeshStandardMaterial({
-    color: PALETTE.stoneDark,
-    roughness: 0.95,
+    color: 0xa79489,
+    map: atlas.map,
+    normalMap: atlas.normalMap,
+    roughnessMap: atlas.roughnessMap,
+    roughness: 1.0,
+    metalness: 0.0,
+    normalScale: new THREE.Vector2(0.70, 0.70),
+  });
+  materials.push(stone);
+
+  const voidStone = new THREE.MeshStandardMaterial({
+    color: 0x0b0c11,
+    roughness: 1.0,
     metalness: 0.0,
   });
+  materials.push(voidStone);
 
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(CHAMBER.halfWidth * 2, CHAMBER.halfDepth * 2),
-    stone,
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  group.add(floor);
-  surfaces.push(floor);
+  // --- unit geometries -------------------------------------------------------------------
+  const blockRng = world.rng.fork('chamber-blocks');
+  const blockGeos: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < VARIANTS; i++) {
+    const g = makeBlockGeometry(blockRng, atlas.cell(i, i * 5), hi ? 2 : 1, 0.7 + (i % 4) * 0.28);
+    blockGeos.push(g);
+    geometries.push(g);
+  }
+  const blindGeo = makeBlindArchGeometry(atlas.cell(3, 2), hi ? 9 : 5);
+  geometries.push(blindGeo);
 
-  const wallGeo = new THREE.PlaneGeometry(CHAMBER.halfWidth * 2, CHAMBER.wallHeight);
-  const mk = (x: number, z: number, ry: number) => {
-    const m = new THREE.Mesh(wallGeo, stone);
-    m.position.set(x, CHAMBER.wallHeight / 2, z);
-    m.rotation.y = ry;
-    m.receiveShadow = true;
-    group.add(m);
-    surfaces.push(m);
+  const chunkRng = world.rng.fork('chamber-chunks');
+  const chunkGeos: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < CHUNK_VARIANTS; i++) {
+    const g = makeChunkGeometry(chunkRng, atlas.cell(i + 5, i));
+    chunkGeos.push(g);
+    geometries.push(g);
+  }
+
+  // --- the walls ---------------------------------------------------------------------------
+  const HW = CHAMBER.halfWidth;   // the two long walls stand at +/- this in x
+  const HD = CHAMBER.halfDepth;   // the two end walls stand at +/- this in z
+  const H = CHAMBER.wallHeight;
+
+  const longPiers = [-19, -11.4, -3.8, 3.8, 11.4, 19];
+  const endPiers = [-15.5, -7.75, 0, 7.75, 15.5];
+  const portalPiers = [-15.5, -7.75, 7.75, 15.5];
+
+  const portal: PortalSpec = {
+    centre: 0,
+    half: 2.90,
+    spring: 4.30,
+    bayU0: -7.75 + 0.95,
+    bayU1: 7.75 - 0.95,
+    wallTop: H,
   };
-  mk(0, -CHAMBER.halfDepth, 0);
-  mk(0, CHAMBER.halfDepth, Math.PI);
-  mk(-CHAMBER.halfWidth, 0, Math.PI / 2);
-  mk(CHAMBER.halfWidth, 0, -Math.PI / 2);
 
-  world.scene.fog = new THREE.FogExp2(0x0a0906, 0.012);
+  type Spec = WallSpec & { place: (g: THREE.Group) => void; panel: Omit<Panel, 'groups'> };
+  const specs: Spec[] = [
+    {
+      id: 'east', length: HD * 2, height: H, pierAt: longPiers, pierWidth: 1.9,
+      blindArcade: true, ruin: 0.16,
+      place: (g) => { g.position.set(HW, 0, 0); g.rotation.y = -Math.PI / 2; },
+      panel: { nx: -1, nz: 0, d: HW - 0.9 },
+    },
+    {
+      id: 'west', length: HD * 2, height: H, pierAt: longPiers, pierWidth: 1.9,
+      blindArcade: true, ruin: 0.20,
+      place: (g) => { g.position.set(-HW, 0, 0); g.rotation.y = Math.PI / 2; },
+      panel: { nx: 1, nz: 0, d: HW - 0.9 },
+    },
+    {
+      id: 'north', length: HW * 2, height: H, pierAt: portalPiers, pierWidth: 1.9,
+      blindArcade: true, ruin: 0.13, portalBay: 1,
+      opening: { centre: 0, halfWidthAt: (v: number) => portalHalfWidth(portal, v) },
+      place: (g) => { g.position.set(0, 0, -HD); },
+      panel: { nx: 0, nz: 1, d: HD - 0.9 },
+    },
+    {
+      id: 'south', length: HW * 2, height: H, pierAt: endPiers, pierWidth: 1.9,
+      blindArcade: true, ruin: 0.15,
+      place: (g) => { g.position.set(0, 0, HD); g.rotation.y = Math.PI; },
+      panel: { nx: 0, nz: -1, d: HD - 0.9 },
+    },
+  ];
+
+  const panels: Panel[] = [];
+  const screeLines: { line: ScreeLine; panel: Panel }[] = [];
+
+  for (const spec of specs) {
+    const wallGroup = new THREE.Group();
+    wallGroup.name = `chamber-wall-${spec.id}`;
+    spec.place(wallGroup);
+
+    const rng = world.rng.fork(`chamber-wall-${spec.id}`);
+    const weather = makeWeather(`chamber-weather-${spec.id}`, world.seed, STRING_TOP);
+    const parts = buildWall(spec, rng, weather, VARIANTS, world.quality);
+
+    if (spec.portalBay !== undefined) {
+      buildPortalOrders(parts.sink, rng, weather, portal, hi);
+      const pas = buildPortalPassage(portal, stone, hi);
+      wallGroup.add(pas.object);
+      geometries.push(...pas.geometries);
+      materials.push(...pas.materials);
+    }
+
+    // backing: what a lost block, a deep recess or an open joint actually shows
+    const shape = new THREE.Shape();
+    shape.moveTo(-spec.length / 2, -0.4);
+    shape.lineTo(spec.length / 2, -0.4);
+    shape.lineTo(spec.length / 2, spec.height + 6);
+    shape.lineTo(-spec.length / 2, spec.height + 6);
+    shape.closePath();
+    if (spec.opening) {
+      const hole = new THREE.Path();
+      const c = spec.opening.centre;
+      const r = spec.opening.halfWidthAt(0);
+      hole.moveTo(c - r, -0.4);
+      hole.lineTo(c - r, portal.spring);
+      const segs = 16;
+      for (let i = 0; i <= segs; i++) {
+        const t = Math.PI - (i / segs) * Math.PI;
+        hole.lineTo(c + Math.cos(t) * r, portal.spring + Math.sin(t) * r);
+      }
+      hole.lineTo(c + r, -0.4);
+      hole.closePath();
+      shape.holes.push(hole);
+    }
+    const backGeo = new THREE.ShapeGeometry(shape);
+    geometries.push(backGeo);
+    const back = new THREE.Mesh(backGeo, voidStone);
+    back.position.z = BACK_Z;
+    back.receiveShadow = false;
+    wallGroup.add(back);
+
+    const meshes = parts.sink.bake(wallGroup, blockGeos, stone, `chamber-${spec.id}`, {
+      receiveShadow: true,
+      castShadow: false,
+    });
+    surfaces.push(...meshes);
+
+    if (parts.blind.length) {
+      const im = new THREE.InstancedMesh(blindGeo, stone, parts.blind.length);
+      im.name = `chamber-blind-${spec.id}`;
+      for (let i = 0; i < parts.blind.length; i++) {
+        im.setMatrixAt(i, parts.blind[i]);
+        im.setColorAt(i, parts.blindColor[i]);
+      }
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+      im.receiveShadow = true;
+      im.castShadow = false;
+      wallGroup.add(im);
+    }
+
+    group.add(wallGroup);
+    const panel: Panel = { groups: [wallGroup], ...spec.panel };
+    panels.push(panel);
+
+    // Where this wall has shed blocks, scree gathers under them.
+    const lossU = parts.losses.filter((l) => l.v < 6.5).map((l) => l.u);
+    const uMin = -spec.length / 2;
+    const uMax = spec.length / 2;
+    const front = 0.98;
+    let line: ScreeLine;
+    if (spec.id === 'east') {
+      line = { ax: HW - front, az: uMin, bx: HW - front, bz: uMax, nx: -1, nz: 0, losses: lossU, uMin, uMax };
+    } else if (spec.id === 'west') {
+      line = { ax: -HW + front, az: -uMin, bx: -HW + front, bz: -uMax, nx: 1, nz: 0, losses: lossU, uMin, uMax };
+    } else if (spec.id === 'north') {
+      line = { ax: uMin, az: -HD + front, bx: uMax, bz: -HD + front, nx: 0, nz: 1, losses: lossU, uMin, uMax };
+    } else {
+      line = { ax: -uMin, az: HD - front, bx: -uMax, bz: HD - front, nx: 0, nz: -1, losses: lossU, uMin, uMax };
+    }
+    screeLines.push({ line, panel });
+  }
+
+  // --- floor ---------------------------------------------------------------------------------
+  const slab = buildFloorSlab(HW, HD);
+  geometries.push(slab.geometry);
+  materials.push(slab.material);
+  group.add(slab.mesh);
+  surfaces.push(slab.mesh);
+
+  const floorSink = new InstanceSink(VARIANTS);
+  buildFloor(
+    floorSink,
+    world.rng.fork('chamber-floor'),
+    makeWeather('chamber-weather-floor', world.seed, 1.2),
+    { halfWidth: HW, halfDepth: HD, boardHalf: BOARD_SIZE / 2 + 0.85, hi },
+  );
+  surfaces.push(...floorSink.bake(group, blockGeos, stone, 'chamber-floor', {
+    receiveShadow: true,
+    castShadow: false,
+  }));
+
+  // --- scree -----------------------------------------------------------------------------------
+  // Kept with its wall: when the camera steps outside a wall the wall goes, and so must
+  // the rubble heaped against it, or it is left hanging in mid-air.
+  const screeWeather = makeWeather('chamber-weather-scree', world.seed, 1.0);
+  for (let i = 0; i < screeLines.length; i++) {
+    const { line, panel } = screeLines[i];
+    const sink = new InstanceSink(CHUNK_VARIANTS);
+    buildScree(sink, world.rng.fork(`chamber-scree-${i}`), screeWeather, [line], hi);
+    const sg = new THREE.Group();
+    sg.name = `chamber-scree-${i}`;
+    sink.bake(sg, chunkGeos, stone, `chamber-scree-${i}`, { receiveShadow: true, castShadow: false });
+    group.add(sg);
+    panel.groups.push(sg);
+  }
+
+  // --- vault ---------------------------------------------------------------------------------
+  const vaultGeo = makeVaultGeometry(HW, HD + 1.0, H, 5.5, hi ? 26 : 14, hi ? 10 : 5);
+  geometries.push(vaultGeo);
+  const vault = new THREE.Mesh(vaultGeo, voidStone);
+  vault.name = 'chamber-vault';
+  vault.receiveShadow = false;
+  vault.castShadow = false;
+  group.add(vault);
+
+  // --- which walls is the camera inside of? -----------------------------------------------------
+  const cam = world.camera;
+  const camPos = new THREE.Vector3();
+  group.cull = () => {
+    cam.getWorldPosition(camPos);
+    for (const p of panels) {
+      const inside = p.nx * camPos.x + p.nz * camPos.z + p.d > 0;
+      for (const g of p.groups) g.visible = inside;
+    }
+  };
 
   return {
     group,
     surfaces,
     dispose() {
-      stone.dispose();
-      wallGeo.dispose();
+      for (const g of geometries) g.dispose();
+      for (const m of materials) m.dispose();
+      atlas.dispose();
+      group.cull = null;
     },
   };
 }

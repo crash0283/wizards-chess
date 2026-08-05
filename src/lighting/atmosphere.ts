@@ -19,12 +19,12 @@ export const AtmosphereShader = {
     uViewInv: { value: new THREE.Matrix4() },
     uCamPos: { value: new THREE.Vector3() },
     /** Linear-space colour of the veil. Blue, lifted, low chroma. */
-    uHazeColor: { value: new THREE.Vector3(0.010, 0.021, 0.048) },
+    uHazeColor: { value: new THREE.Vector3(0.0106, 0.0244, 0.0526) },
     uDensity: { value: 0.026 },
-    uStrength: { value: 0.88 },
+    uStrength: { value: 0.92 },
     /** Height (metres) over which the haze thins out toward the vault. */
-    uHazeScale: { value: 6.0 },
-    uHazeFloor: { value: 0.0 },
+    uHazeScale: { value: 4.5 },
+    uHazeFloor: { value: 4.5 },
   },
   vertexShader: /* glsl */ `
 varying vec2 vUv;

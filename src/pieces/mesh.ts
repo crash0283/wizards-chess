@@ -280,7 +280,7 @@ export function subdivide(m: CMesh, maxEdge: number, maxPasses = 7): CMesh {
       if (!marked.has(edgeKey(e[0][0], e[0][1])) &&
           !marked.has(edgeKey(e[1][0], e[1][1])) &&
           !marked.has(edgeKey(e[2][0], e[2][1]))) continue;
-      for (const t of e) if (t[2] > mx * 0.5) marked.add(edgeKey(t[0], t[1]));
+      for (const t of e) if (t[2] > mx * 0.80) marked.add(edgeKey(t[0], t[1]));
     }
 
     const out: CMesh = { pos: pos.slice(), thin: cur.thin.slice(), idx: [], face: [] };

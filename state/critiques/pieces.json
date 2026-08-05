@@ -1,0 +1,19 @@
+{
+  "id": "pieces",
+  "round": 1,
+  "status": "failing",
+  "shot": "knight-looking-up",
+  "render": "refs/renders/knight-looking-up--pieces-r1.png",
+  "verdict": "obviously a render",
+  "confidence": "high",
+  "biggestGap": "The pieces have no figurative geometry at all — every foreground chessman is a featureless tapered low-poly cone with visible flat-shaded facets, where the film frame shows armoured riders on rearing horses with cross-slit conical helms and curved sabres, crouching domed-helm pawns, and a huge draped chainmail cape, each on a hexagonal stepped moulded plinth.",
+  "critiqueDetail": "In the blind pair I identified panel A as the film instantly and with total certainty: A is populated by carved combatants with arms, weapons, mounts, shields and real moulded bases, while our panel B is four dark tapered obelisks with a single small chevron notch standing in for a visor. No horse, no rider, no limb, no readable helm, no separated blade or shield exists anywhere in the render, and the plinths are flat stacked slabs rather than carved hexagonal profiles. The pale army also carries none of the rust/ochre blotching that covers the film's limestone; instead the foreground pieces read warm brown, and metrics confirm the shot is globally wrong-temperature (meanLitHue 20.1 deg vs reference 212 deg, warmFraction 0.243 vs 0.002, meanSaturation 0.389 vs 0.220). Tellingly, detailTotal is HIGHER than the reference (0.0233 vs 0.0135, fine band 0.0310 vs 0.0148) — the render is not short of pixel energy, it is spending all of it on polygon faceting noise instead of carved figuration. Two captures of the same shot at the same t were not byte-identical and differ materially (medianLuminance 0.0745 vs 0.0510, fracDeepShadow 0.324 vs 0.444, warmFraction 0.243 vs 0.182), so flame lighting is not seeded to shot time — an automatic fail on its own.",
+  "metrics": "hue 20.1 deg vs ref 212 (delta -191.9); sat 0.389 vs 0.220; warmFrac 0.243 vs 0.002; coolFrac 0.110 vs 0.385; detailTotal 0.0233 vs 0.0135; fracBlown 0.0098 vs 0; anisotropy 1.40 vs 1.98; NONDETERMINISTIC across two captures",
+  "history": [
+    {
+      "round": 1,
+      "verdict": "obviously a render",
+      "gap": "The pieces have no figurative geometry at all — every foreground chessman is a featureless tapered low-poly cone with visible flat-shaded facets, where the film frame shows armoured riders on rearing horses with cross-slit conical helms and curved sabres, crouching domed-helm pawns, and a huge draped chainmail cape, each on a hexagonal stepped moulded plinth."
+    }
+  ]
+}

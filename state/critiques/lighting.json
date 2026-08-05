@@ -1,0 +1,20 @@
+{
+  "id": "lighting",
+  "round": 1,
+  "status": "failing",
+  "shot": "wide-establishing",
+  "render": "refs/renders/wide-establishing--lighting-r1.png",
+  "reference": "refs/frames/wide-establishing.webp",
+  "verdict": "obviously a render",
+  "confidence": "high",
+  "biggestGap": "The flames emit no light — make each flame a real point light with inverse-square falloff so it burns a warm pool into the kerb and marble beside it and uplights the nearest plinths and armour, instead of being a self-luminous sprite floating in a uniform cold ambient wash.",
+  "critiqueDetail": "I correctly identified the film as panel A with high confidence and took under a second to do it. In A every flame anchors itself to the floor with a warm pool of light on the kerb and marble, warm rim and uplight modelling the nearest pieces, and real falloff into black; in B (our render) there are ~25 flames and not one of them lights anything — the plinth 20cm from a flame is the same cold blue-grey as the far wall, so the flames read as flat glowing cones pasted over the image. The metrics confirm it: despite having far more flames than the reference, our warmFraction is LOWER (0.076 vs 0.104) while coolFraction is 60% higher (0.518 vs 0.324), which is the signature of a single uniform cold ambient doing all the work. That same flat ambient lifts the blacks — fracDeepShadow 0.135 vs 0.331, less than half the reference — so the void ceiling, the piers and the corners never go truly black and the frame has no vignette or depth.",
+  "metrics": "coolFraction 0.518 vs 0.324 (+0.194); fracDeepShadow 0.135 vs 0.331 (-0.197); warmFraction 0.076 vs 0.104 (-0.028); meanSaturation 0.325 vs 0.242 (+0.083); meanLitHueDeg 220.7 vs 223.6 (-2.9, the one thing on target); detailTotal 0.030 vs 0.015 (2x)",
+  "history": [
+    {
+      "round": 1,
+      "verdict": "obviously a render",
+      "gap": "Flames are self-luminous sprites that emit no light — no warm pools, no uplight, no falloff — leaving one uniform cold ambient that also lifts the blacks (fracDeepShadow 0.135 vs 0.331)."
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "board",
+  "round": 1,
+  "status": "failing",
+  "shot": "low-across-board",
+  "render": "refs/renders/low-across-board--board-r1.png",
+  "verdict": "obviously a render",
+  "confidence": "high",
+  "biggestGap": "The marble field has no surface figure at all — light squares are featureless glossy white with a mirror-sharp wet reflection instead of cream stone carrying bold dark branching ink-veins, dust and scuff, so the floor plane is the LOWEST-detail region of the frame when in the film it is the highest.",
+  "critiqueDetail": "Blind pair: panel A is the film, called instantly and without doubt. Zoomed 2x on the board field, the render's light squares are near-uniform white with only a soft low-frequency blotch and a hard specular smear — the reflection is oil-slick/wet-plastic sharp rather than the film's broad, blurred, dust-scuffed polish; the dark squares are flat near-black with no paler veining, and mid-field square joints dissolve into glare behind the flames. The film's equivalent crop shows the single finest detail in the whole frame: a dense inlaid geometric border strip of small repeating alternating elements running between the marble field and the kerb, plus visible grit and wear across the cream stone — the render replaces both with a plain dark band carrying only random orange speckle, and the near apron in the lower-left is a large smooth untextured grey plane. gradientAnisotropy 1.95 vs the film's 2.68 is the number behind this: the render's gradients are blobby and isotropic because there is no veining, no joint inlay and no directional stone grain, while its detailTotal (0.0192) only exceeds the reference's 0.0152 because the reference is 26% pure letterbox bar and because the render's energy sits in polygon facet edges on the pieces and in flame sprites, not on the floor. Secondary, and not the headline since lighting is still a placeholder: meanLitHueDeg 13.7 vs 249.8 and warmFraction 0.31 vs 0.13 mean the room is orange-lit where the film is cold blue-slate.",
+  "metrics": "detailTotal 0.0192 vs ref 0.0152 (ref diluted by 26% letterbox); gradientAnisotropy 1.95 vs 2.68; meanLitHueDeg 13.7 vs 249.8; warmFraction 0.309 vs 0.130; coolFraction 0.193 vs 0.228; meanSaturation 0.311 vs 0.242; medianLuminance 0.141 vs 0.063; histogramEntropy 7.12 vs 5.84; deterministic (two captures byte-identical)",
+  "history": [
+    {
+      "round": 1,
+      "verdict": "obviously a render",
+      "gap": "Marble field carries no figure — no dark branching veins on the light squares, no paler veining on the dark squares, and no inlaid geometric border strip; the floor plane is the lowest-detail region of the frame instead of the highest."
+    }
+  ]
+}

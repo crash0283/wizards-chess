@@ -100,7 +100,7 @@ function chip(
     n.normalize();
     const depth = rng.float(depthLo, depthHi);
     const d = n.dot(p) - depth;
-    if (!planeIsLocal(m, n, d, p, 0.028, 0.42)) continue;
+    if (!planeIsLocal(m, n, d, p, 0.014, 0.26)) continue;
     taken.push(p);
     planes.push({ n, d });
   }
@@ -117,7 +117,7 @@ export function createPieceFactory(world: World): PieceFactory {
     black: createStone(world, 'black'),
   };
   const hi = world.quality === 'high';
-  const detail = hi ? 0.105 : 0.19;
+  const detail = hi ? 0.155 : 0.27;
 
   function carve(type: PieceType, side: Side, id: string) {
     const rng = world.rng.fork(id);
@@ -128,7 +128,7 @@ export function createPieceFactory(world: World): PieceFactory {
       form.body.map((p) => {
         const mm = p.mesh();
         orientOutward(mm);
-        return subdivide(mm, p.detail);
+        return subdivide(mm, Math.max(0.085, p.detail));
       }),
     );
     let arm: CMesh | null = form.arm
@@ -136,7 +136,7 @@ export function createPieceFactory(world: World): PieceFactory {
           form.arm.map((p) => {
             const mm = p.mesh();
             orientOutward(mm);
-            return subdivide(mm, p.detail);
+            return subdivide(mm, Math.max(0.085, p.detail));
           }),
         )
       : null;
@@ -169,15 +169,15 @@ export function createPieceFactory(world: World): PieceFactory {
       n.z += dr.float(-0.20, 0.20);
       n.normalize();
       const p = site.p.clone().multiplyScalar(s);
-      const d = n.dot(p) - site.depth * s * dr.float(0.4, 1.8);
-      if (!planeIsLocal(body, n, d, p, 0.075, 1.05)) continue;
+      const d = n.dot(p) - site.depth * s * dr.float(0.35, 1.35);
+      if (!planeIsLocal(body, n, d, p, 0.045, 0.72)) continue;
       body = clipMesh(body, n, d, 1);
       done++;
     }
 
     // --- chips and broken arrises --------------------------------------------------
-    body = chip(body, dr, hi ? dr.int(6, 11) : 5, 0.30, 0.014, 0.085);
-    if (arm) arm = chip(arm, dr.fork('arm'), 3, 0.22, 0.010, 0.045);
+    body = chip(body, dr, hi ? dr.int(5, 9) : 4, 0.34, 0.010, 0.048);
+    if (arm) arm = chip(arm, dr.fork('arm'), 2, 0.24, 0.008, 0.026);
 
     // Refine the raw break faces, which arrive from the clipper as coarse fans.
     body = subdivide(body, detail * 1.15);

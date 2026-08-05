@@ -54,13 +54,13 @@ export interface StoneSpec {
 
 const SPEC: Record<Side, StoneSpec> = {
   white: {
-    base: new THREE.Color().setHex(0xbcb6a8, THREE.SRGBColorSpace),
+    base: new THREE.Color().setHex(0xa8a294, THREE.SRGBColorSpace),
     // Rust-ochre. Deliberately saturated: it is the only warm pigment in the room.
     warm: new THREE.Color().setHex(0x8a5327, THREE.SRGBColorSpace),
     // Soot / cold shadow grey the stone weathers toward.
     cool: new THREE.Color().setHex(0x6e737a, THREE.SRGBColorSpace),
-    fresh: new THREE.Color().setHex(0xd9d3c4, THREE.SRGBColorSpace),
-    blotch: 0.72,
+    fresh: new THREE.Color().setHex(0xcdc7b8, THREE.SRGBColorSpace),
+    blotch: 0.80,
     stain: 0.26,
     mottle: 0.09,
     bedding: 0.035,

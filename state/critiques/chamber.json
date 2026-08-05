@@ -1,0 +1,20 @@
+{
+  "id": "chamber",
+  "round": 1,
+  "status": "failing",
+  "shot": "wide-establishing",
+  "render": "refs/renders/wide-establishing--chamber-r1.png",
+  "reference": "refs/frames/wide-establishing.webp",
+  "verdict": "obviously a render",
+  "confidence": "high",
+  "biggestGap": "The chamber does not enclose the board — build massive dark piers standing hard against the left and right kerbs, close enough to the camera that they run off the top and bottom of frame and crowd the ranks, instead of leaving the outer thirds as empty tiled floor receding into nothing.",
+  "critiqueDetail": "I called the film as panel A instantly and with total confidence. In A the room IS architecture: colossal piers press in on both sides at the board's edge, fill the frame top to bottom, blow past the top of frame into unresolved void, and the ranks are backed by more stone crowding right behind them — you cannot see where the room ends. In our render (B) the entire chamber is visible at once: a small three-arch wall roughly 20 m back, flat empty tiled floor wrapping the board on all four sides, and nothing whatsoever in the left and right thirds, so the board reads as a lit diorama on a table in an empty warehouse rather than a cathedral-scale hall. The masonry idiom is also the wrong one and the brief flags it explicitly as a discarded claim: we have crude coursed rectangular blocks with heavy dark mortar joints and plain semicircular Romanesque voussoirs, where the film has smooth ordered carved stone — concentric stepped portal mouldings, a geometric relief door, a fine blind arcade — and our block size is so oversized the arch reads as ~4 m against pieces that should dwarf a child. Weathering is essentially absent (no soot, no staining, no rubble heap behind the ranks) and the metrics show the tell: detailTotal 0.031 is 2x the reference 0.015, but that energy is tile-grid and faceted-mesh edge noise, not carved relief, while fracDeepShadow 0.185 vs 0.331 means the room never reaches the true blacks and heavy vignette that hide the film's boundaries. Separately and blocking: the render is nondeterministic — two captures of the same shot at t=3 differ on 85% of pixels with a max channel delta of 92, which is an automatic fail regardless of the geometry.",
+  "metrics": "meanSaturation 0.333 vs 0.242 (+0.091); meanLitHueDeg 273.5 vs 223.6 (+49.9, violet not blue-slate); fracDeepShadow 0.185 vs 0.331 (-0.147); coolFraction 0.406 vs 0.324; warmFraction 0.134 vs 0.104; detailTotal 0.0305 vs 0.0152 (2.0x, wrong character); determinism FAIL 1316316/1543680 px (85.3%) differ, maxChannelDelta 92",
+  "history": [
+    {
+      "round": 1,
+      "verdict": "obviously a render",
+      "gap": "No massive piers enclosing the board — the outer thirds of frame are empty floor and the whole room is visible at once, so it reads as a diorama in a warehouse instead of a cathedral-scale hall. Masonry is crude coursed block with heavy mortar rather than smooth carved Gothic. Render is also nondeterministic (85% of pixels differ between identical captures)."
+    }
+  ]
+}

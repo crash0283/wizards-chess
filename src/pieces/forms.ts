@@ -102,7 +102,9 @@ function foldRing(n: number, r: number, fold: number, back: number): number[][] 
   const out: number[][] = [];
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2 + Math.PI / n;
-    const f = 1 + (i % 2 ? -fold : fold) + (i % 4 === 0 ? fold * 0.45 : 0);
+    // Alternating ridge/valley plus a slower second harmonic, so the drapery reads as
+    // cloth gathering rather than as a regular fluted column.
+    const f = 1 + (i % 2 ? -fold : fold) + Math.sin(i * 1.7 + 0.6) * fold * 0.55;
     const rr = r * f * (1 + back * -Math.cos(a));
     out.push([Math.cos(a) * rr, Math.sin(a) * rr]);
   }
@@ -414,15 +416,16 @@ function pawn(rng: Rng, d: number): FormResult {
     rrect(0.10, 0.11, 0.32),
     rrect(0.10, 0.11, 0.32),
   ], V(0, 1, 0));
-  slab(arm, V(0.22, 1.16, 0.62), V(0.10, 0.09, 0.08), new THREE.Quaternion());
-  slab(arm, V(0.22, 1.24, 0.64), V(0.17, 0.04, 0.05), new THREE.Quaternion());
-  blade(arm, V(0.22, 1.22, 0.66), V(-0.06, 1.14, 1.20), 0.10, 0.032);
+  slab(arm, V(0.24, 1.16, 0.60), V(0.10, 0.09, 0.08), new THREE.Quaternion());
+  slab(arm, V(0.24, 1.26, 0.62), V(0.16, 0.04, 0.05), new THREE.Quaternion());
+  // Held close and upright against the shoulder — a foot-soldier's short blade, not a pike.
+  blade(arm, V(0.24, 1.24, 0.62), V(0.19, 2.06, 0.82), 0.095, 0.030);
 
   return {
     body,
     arm: [arm],
     armPivot: V(0.42, 1.74, 0.10),
-    tip: V(-0.06, 1.14, 1.20),
+    tip: V(0.19, 2.06, 0.82),
     comY: 1.14,
     breaks: [
       { p: V(0, 2.34, 0.42), n: V(0.30, 0.86, 0.42).normalize(), depth: 0.05 },
@@ -623,7 +626,7 @@ function knight(rng: Rng, d: number): FormResult {
   const cape = new Part();
   cape.detail = d * 0.65;
   cape.thinNow = 0.35;
-  stack(cape, foldRing(12, 1, 0.055, 0.10), [
+  stack(cape, foldRing(14, 1, 0.095, 0.10), [
     { y: 2.66, sx: 0.24, sz: 0.24, oz: 0.02 },
     { y: 2.50, sx: 0.33, sz: 0.30, oz: -0.06 },
     { y: 2.10, sx: 0.44, sz: 0.38, oz: -0.16 },
@@ -681,7 +684,7 @@ function bishop(rng: Rng, d: number): FormResult {
 
   const figure = new Part();
   figure.detail = d * 0.8;
-  stack(figure, foldRing(12, 1, 0.05, 0.03), [
+  stack(figure, foldRing(12, 1, 0.075, 0.03), [
     { y: 0.44, sx: 0.48, sz: 0.42 },
     { y: 0.90, sx: 0.45, sz: 0.39, oz: 0.01 },
     { y: 1.60, sx: 0.41, sz: 0.36, oz: 0.02 },
@@ -839,7 +842,7 @@ function royal(rng: Rng, d: number, isKing: boolean): FormResult {
   cape.detail = d * 0.8;
   cape.thinNow = 0.3;
   const top = H - 1.12;
-  stack(cape, foldRing(14, 1, 0.062, 0.07), [
+  stack(cape, foldRing(16, 1, 0.108, 0.075), [
     { y: 0.48, sx: 0.86 * w, sz: 0.74 * w },
     { y: 1.10, sx: 0.83 * w, sz: 0.72 * w, oz: 0.01 },
     { y: 2.05, sx: 0.74 * w, sz: 0.64 * w, oz: 0.02 },
@@ -853,7 +856,7 @@ function royal(rng: Rng, d: number, isKing: boolean): FormResult {
 
   const figure = new Part();
   figure.detail = d * 0.7;
-  stack(figure, foldRing(10, 1, 0.04, 0.0), [
+  stack(figure, foldRing(12, 1, 0.062, 0.0), [
     { y: 0.52, sx: 0.52 * w, sz: 0.44 * w, oz: 0.14 },
     { y: 1.60, sx: 0.47 * w, sz: 0.40 * w, oz: 0.16 },
     { y: 2.70, sx: 0.42 * w, sz: 0.36 * w, oz: 0.18 },
