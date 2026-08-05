@@ -147,17 +147,20 @@ export class Motion {
     let dy = want - this.rig.facing;
     while (dy > Math.PI) dy -= Math.PI * 2;
     while (dy < -Math.PI) dy += Math.PI * 2;
-    const windup = 0.62, swing = 0.26, hold = 0.16, recover = 0.95;
+    // A thrust, not a swing: the reference shows the attacker driving the blade straight
+    // through with the arm fully out and the whole body committed behind it.
+    const windup = 0.58, swing = 0.24, hold = 0.20, recover = 1.00;
     const len = Math.hypot(dx, dz) || 1;
     this.anim = {
       kind: 'strike',
       t0: now,
       yawDelta: dy * 0.78,
       windup, swing, hold, recover,
-      // 0.30 rad of body rotation about the base plus a 10%-of-height lunge puts the
-      // centre of mass ~22% of the piece's height from rest.
-      lean: 0.30,
-      lunge: this.rig.height * 0.10,
+      // 0.32 rad of body rotation about the base plus a 12%-of-height lunge puts the
+      // centre of mass roughly 25% of the piece's height from rest — well past the 15%
+      // the brief demands, and it looks like weight rather than a gesture.
+      lean: 0.32,
+      lunge: this.rig.height * 0.12,
       dirX: dx / len, dirZ: dz / len,
       fired: false,
     };
@@ -265,17 +268,17 @@ export class Motion {
       let lean = 0, yaw = 0, arm = 0, push = 0;
       if (tt < a.windup) {
         const k = smooth(tt / a.windup);
-        lean = -0.115 * k;
+        lean = -0.125 * k;
         yaw = a.yawDelta * k * 0.55;
-        arm = -this.armSwing * k;
-        push = -0.055 * k;
+        arm = -this.armSwing * k;   // blade drawn back past the shoulder
+        push = -0.065 * k;
       } else if (tt < a.windup + a.swing) {
         const p = (tt - a.windup) / a.swing;
         const k = Math.pow(p, 1.75); // accelerating into contact
-        lean = -0.115 + (a.lean + 0.115) * k;
+        lean = -0.125 + (a.lean + 0.125) * k;
         yaw = a.yawDelta * (0.55 + 0.45 * k);
-        arm = -this.armSwing + (this.armSwing + 0.45) * k;
-        push = -0.055 + (a.lunge + 0.055) * k;
+        arm = -this.armSwing + (this.armSwing + 1.15) * k; // arm drives fully out
+        push = -0.065 + (a.lunge + 0.065) * k;
         if (!a.fired && p > 0.999) a.fired = true;
       } else if (tt < a.windup + a.swing + a.hold) {
         const p = (tt - a.windup - a.swing) / a.hold;
@@ -287,17 +290,17 @@ export class Motion {
             z: this.baseZ + a.dirZ * a.lunge,
           });
         }
-        lean = a.lean - 0.045 * smooth(p);
+        lean = a.lean - 0.030 * smooth(p);
         yaw = a.yawDelta;
-        arm = 0.45 + 0.12 * smooth(p);
+        arm = 1.15 + 0.06 * smooth(p);
         push = a.lunge;
       } else {
         const p = (tt - a.windup - a.swing - a.hold) / a.recover;
         const k = smooth(p);
         const shake = Math.exp(-p * 6) * Math.sin(p * 26 + this.ph[1]) * 0.018;
-        lean = (a.lean - 0.045) * (1 - k) + shake;
+        lean = (a.lean - 0.030) * (1 - k) + shake;
         yaw = a.yawDelta * (1 - k);
-        arm = 0.57 * (1 - k);
+        arm = 1.21 * (1 - k);
         push = a.lunge * (1 - k);
       }
       this.apply(a.dirX * push, 0, a.dirZ * push, lean, yaw, 0);

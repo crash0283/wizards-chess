@@ -92,8 +92,10 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
   const ox = rng.float(-90, 90), oy = rng.float(-90, 90), oz = rng.float(-90, 90);
   const sx = rng.float(-70, 70), sy = rng.float(-70, 70), sz = rng.float(-70, 70);
 
-  const fSwell = makeFbm(seedA ^ 0x11, 4, 2.05, 0.52);
-  const fPit = makeFbm(seedA ^ 0x27, 3, 2.13, 0.55);
+  // Two octaves only: displacement must stay well below the triangle Nyquist or the
+  // carving turns into crumpled paper under grazing firelight.
+  const fSwell = makeFbm(seedA ^ 0x11, 2, 2.05, 0.5);
+  const fPit = makeFbm(seedA ^ 0x27, 2, 2.1, 0.5);
   const fBlotch = makeFbm(seedB ^ 0x31, 4, 2.03, 0.55);
   const fStain = makeFbm(seedB ^ 0x4d, 3, 2.09, 0.60);
   const fMottle = makeFbm(seedB ^ 0x63, 3, 2.11, 0.52);
@@ -104,20 +106,22 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
   const erodeK = spec.erode * rng.float(0.7, 1.45);
   const facetPhase = rng.float(0.0, 12.0);
   const stainK = spec.stain * rng.float(0.6, 1.5);
+  // How readily this particular block rusts — some pieces are almost clean, some heavily marked.
+  const rustBias = rng.float(-0.06, 0.11);
   const base = spec.base, warm = spec.warm, cool = spec.cool, fresh = spec.fresh;
 
   const displace: Weather['displace'] = (x, y, z, nx, ny, nz, freshV, arris) => {
-    const swell = fSwell(x * 1.15 + ox, y * 0.95 + oy, z * 1.15 + oz) * spec.swell * wear;
-    const pit = fPit(x * 4.0 + ox, y * 4.0 + oy, z * 4.0 + oz) * spec.pit * wear;
+    const swell = fSwell(x * 0.85 + ox, y * 0.72 + oy, z * 0.85 + oz) * spec.swell * wear;
+    const pit = fPit(x * 2.6 + ox, y * 2.6 + oy, z * 2.6 + oz) * spec.pit * wear;
     const f1 = facets(
       x + facetPhase, y + facetPhase * 0.31, z - facetPhase * 0.7,
       nx, ny, nz,
-      spec.facetLargeCell, 0.040, spec.facetLarge * wear, seedA,
+      spec.facetLargeCell, 0.028, spec.facetLarge * wear, seedA,
     );
     const f2 = facets(
       x - facetPhase * 0.5, y + facetPhase, z + facetPhase * 0.22,
       nx, ny, nz,
-      spec.facetFineCell, 0.055, spec.facetFine * wear, seedB,
+      spec.facetFineCell, 0.036, spec.facetFine * wear, seedB,
     );
     // Break faces are rawer: no chisel work on them. Their relief stays low-frequency so
     // the cut face still reads as one plane, the way a real fracture does.
@@ -130,26 +134,35 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
   };
 
   const shade: Shader = (out, x, y, z, nx, ny, nz, freshV, _thin, recess) => {
-    const bl = fBlotch(x * 0.62 + ox, y * 0.5 + oy, z * 0.62 + oz);
+    const bl = fBlotch(x * 0.78 + ox, y * 0.62 + oy, z * 0.78 + oz);
     const st = fStain(x * 1.05 + sx, y * 0.17 + sy, z * 1.05 + sz);
-    const mo = fMottle(x * 5.2 + oz, y * 5.2 + ox, z * 5.2 + oy);
+    const mo = fMottle(x * 4.4 + oz, y * 4.4 + ox, z * 4.4 + oy);
     const bed = spec.bedding > 0 ? fBed(x * 0.45 + ox, y * 7.5, z * 0.45 + oz) : 0;
 
     const rn = recess / 0.014;
     const rIn = rn > 0 ? (rn > 1 ? 1 : rn) : 0;
     const rOut = rn < 0 ? (rn < -1 ? 1 : -rn) : 0;
 
-    // Dust settles on anything facing up, heaviest near the floor.
+    // Dust and grit settle on anything facing up, heaviest near the floor.
     const up = ny > 0 ? ny * ny : 0;
     const low = y < 0.15 ? 1 : y > 1.7 ? 0 : (1.7 - y) / 1.55;
     const dust = up * low * spec.dust;
 
-    // Blotching mixes toward the warm ochre, staining runs toward the cold grey.
-    const kW = bl > 0 ? bl * spec.blotch : 0;
-    const kC = st > 0 ? st * stainK : 0;
-    let r = base.r * (1 - kW - kC) + warm.r * kW + cool.r * kC;
-    let g = base.g * (1 - kW - kC) + warm.g * kW + cool.g * kC;
-    let b = base.b * (1 - kW - kC) + warm.b * kW + cool.b * kC;
+    // Rust. Irregular PATCHES with definite edges, not a smooth gradient — this is the
+    // most identifiable thing about the pale army. Iron in the stone bleeds out where
+    // water sits, so up-facing surfaces and recesses take far more of it.
+    let rust = (bl + mo * 0.42 - rustBias) / 0.17;
+    rust = rust <= 0 ? 0 : rust >= 1 ? 1 : rust * rust * (3 - 2 * rust);
+    rust *= 0.46 + 0.42 * up + 0.30 * rIn;
+    const kW = rust * spec.blotch;
+    // Soot and cold weathering run downward off the ledges.
+    const kC = Math.max(0, st) * stainK * (0.5 + 0.5 * Math.max(0, -ny));
+    const kk = Math.min(0.92, kW + kC);
+    const fW = kk > 0 ? (kW / (kW + kC || 1)) * kk : 0;
+    const fC = kk > 0 ? (kC / (kW + kC || 1)) * kk : 0;
+    let r = base.r * (1 - kk) + warm.r * fW + cool.r * fC;
+    let g = base.g * (1 - kk) + warm.g * fW + cool.g * fC;
+    let b = base.b * (1 - kk) + warm.b * fW + cool.b * fC;
 
     if (freshV > 0) {
       const k = freshV * (0.55 + 0.45 * spec.freshLift);
@@ -159,12 +172,12 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
     }
 
     let lum =
-      (1 + bl * spec.blotch * 0.35) *
       (1 + mo * spec.mottle) *
       (1 + bed * spec.bedding) *
       (1 - rIn * spec.cavity) *
-      (1 + rOut * 0.07) *
-      (1 + dust);
+      (1 + rOut * 0.05) *
+      (1 + dust) *
+      (1 - rust * 0.14);
     if (lum < 0.12) lum = 0.12;
 
     out.r = r * lum;
@@ -178,7 +191,7 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
       freshV * spec.roughFresh +
       bed * spec.bedding * 0.6 +
       mo * 0.05 -
-      dust * 0.05;
+      dust * 0.04;
     out.rough = rough < 0.34 ? 0.34 : rough > 1 ? 1 : rough;
   };
 

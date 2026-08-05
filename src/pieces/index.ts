@@ -247,7 +247,7 @@ export function createPieceFactory(world: World): PieceFactory {
       },
       armPivot,
       tip,
-      armNode ? 1.85 : 0,
+      armNode ? 1.35 : 0,
     );
     group.position.y = FLOOR_Y;
 

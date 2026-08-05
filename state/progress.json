@@ -1,6 +1,6 @@
 {
-  "updated": "all six reference frames received — bar rewritten, blind A/B live on every shot",
-  "note": "earlier brief was wrong on palette, board finish, piece form, wall treatment and destruction; corrected against frames",
+  "updated": "lighting rebuilt against the frames — room is cold, flames are local",
+  "note": "exposure now matches the film exactly; saturation and flame character are the open gaps",
   "seed": 20250811,
   "totalRounds": 0,
   "pieces": [
@@ -22,13 +22,14 @@
       "label": "Lighting — firelight and air",
       "blurb": "Uplight from low sources, unstable flicker, fast falloff, volumetric haze, filmic tone response.",
       "shot": "wide-establishing",
-      "round": 0,
-      "status": "pending",
-      "render": "refs/renders/r0-wide.png",
+      "round": 1,
+      "status": "building",
+      "render": "refs/renders/wip-light.png",
       "reference": "refs/frames/wide-establishing.webp",
       "verdict": null,
       "biggestGap": null,
-      "history": []
+      "history": [],
+      "metrics": "medianLum 0.086 vs 0.086 (exact) | cool 0.302 vs 0.324 | sat 0.605 vs 0.242 | litHue 22deg vs 224deg"
     },
     {
       "id": "board",
@@ -48,9 +49,9 @@
       "label": "Pieces — carved stone chessmen",
       "blurb": "Six piece types per side as chiselled, weathered, chipped stone. Judged at extreme low angle.",
       "shot": "knight-looking-up",
-      "round": 0,
+      "round": 1,
       "status": "building",
-      "render": null,
+      "render": "refs/renders/wip-knight.png",
       "reference": "refs/frames/knight-looking-up.webp",
       "verdict": null,
       "biggestGap": null,
@@ -87,13 +88,22 @@
       "label": "Chess — rules and engine",
       "blurb": "Full legal chess verified by perft, plus a search that genuinely fights back. Judged on numbers, not looks.",
       "shot": "king-surrender",
-      "round": 0,
-      "status": "building",
+      "round": 1,
+      "status": "passed",
       "render": null,
       "reference": "refs/frames/king-surrender.webp",
-      "verdict": null,
-      "biggestGap": null,
-      "history": []
+      "verdict": "indistinguishable",
+      "biggestGap": "none — perft exact on all five standard positions",
+      "history": [
+        {
+          "round": 1,
+          "verdict": "indistinguishable",
+          "gap": "none — all perft values exact, engine wins 40/40 sparring games"
+        }
+      ],
+      "confidence": "high",
+      "critiqueDetail": "Perft matches published node counts exactly at every depth tested. Search ~542k nodes/sec, finds mate-in-1 and mate-in-2 and scores them as forced mates, returns null on a mated position. Sparring 20-0 vs random mover and 20-0 vs greedy material mover.",
+      "metrics": "startpos d5 4,865,609 | kiwipete d4 4,085,603 | pos3 d5 674,624 | pos4 d4 422,333 | pos5 d4 2,103,487"
     },
     {
       "id": "game",

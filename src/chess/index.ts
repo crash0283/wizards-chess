@@ -475,6 +475,20 @@ export class Engine {
  * the final blow instead of only the mating one.
  */
 const DEMO_LINES: Record<string, { name: string; san: string[] }> = {
+  /**
+   * The one the film wants. 21 plies, NINE captures, the black king never leaves e8, and
+   * the mate is itself a capture — the queen takes the last defender off c8 and the board
+   * is strewn with wreckage by the time the king drops its blade. Found by playing this
+   * engine against a greedy material bot over a seeded sweep and then frozen here, so the
+   * scene replays it without ever running a search.
+   */
+  wreckage: {
+    name: 'Nine captures, mate on e8',
+    san: [
+      'Nf3', 'c5', 'd4', 'cxd4', 'Nxd4', 'a6', 'Nc3', 'd5', 'Bf4', 'b5', 'e4',
+      'dxe4', 'Nxe4', 'Qxd4', 'Qxd4', 'Ra7', 'Qxa7', 'Be6', 'Qxb8+', 'Bc8', 'Qxc8#',
+    ],
+  },
   strike: {
     name: "Scholar's mate, with the pawn grab",
     san: ['e4', 'e5', 'Bc4', 'Nf6', 'Qh5', 'Nxe4', 'Qxf7#'],
@@ -504,10 +518,10 @@ const demoCache = new Map<string, DemoGame>();
  * be checkmate. If any of that ever fails, `verified` comes back false rather than quietly
  * handing the scene a fake mate.
  */
-export function buildDemoGame(line: DemoLineId | string = 'strike'): DemoGame {
+export function buildDemoGame(line: DemoLineId | string = 'wreckage'): DemoGame {
   const cached = demoCache.get(line);
   if (cached) return cached;
-  const spec = DEMO_LINES[line] ?? DEMO_LINES.strike;
+  const spec = DEMO_LINES[line] ?? DEMO_LINES.wreckage;
   const DEMO_SAN = spec.san;
 
   const b = new Board(START_FEN);
@@ -641,6 +655,6 @@ export function buildDemoGame(line: DemoLineId | string = 'strike'): DemoGame {
 }
 
 /** FEN of the checkmate the demo game arrives at — handy for `--fen=` captures. */
-export function demoMateFen(line: DemoLineId | string = 'strike'): string {
+export function demoMateFen(line: DemoLineId | string = 'wreckage'): string {
   return buildDemoGame(line).finalFen;
 }

@@ -683,7 +683,9 @@ export class Board {
     if (this.epHashFile >= 0) { lo ^= Z_EP_LO[this.epHashFile]; hi ^= Z_EP_HI[this.epHashFile]; }
     this.ep = -1;
     this.epHashFile = -1;
-    this.halfmove++;
+    // A null move is a repetition/fifty-move boundary: nothing before it can repeat a
+    // position reached after it, and counting it would let the search hallucinate draws.
+    this.halfmove = 0;
     if (this.turn === BLACK) this.fullmove++;
     this.turn ^= 1;
     lo ^= Z_SIDE_LO; hi ^= Z_SIDE_HI;
