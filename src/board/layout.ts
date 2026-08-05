@@ -24,13 +24,32 @@ import { BOARD_SIZE } from '../core/constants';
 export const HALF = BOARD_SIZE / 2;
 
 /** The mortar bed: the surface you see down inside an open joint. */
-export const BED_Y = 0.004;
+export const BED_Y = 0.0085;
 /** Nominal polished marble surface. Individual slabs vary a few mm either side. */
 export const TOP_Y = 0.018;
 /** Open joint between two slabs, before their chamfers widen it. */
-export const JOINT = 0.036;
+export const JOINT = 0.024;
 /** Chamfer running round the top edge of every slab. */
-export const CHAMFER = 0.030;
+export const CHAMFER = 0.016;
+
+/**
+ * Width of the inlaid tessera band worked into the polished top of every slab, along
+ * each of its four edges — the single finest detail in the reference frame.
+ *
+ * In the film the joint between two squares is not a plain line: a dense band of small
+ * alternating light/dark tesserae runs down both sides of it, so a joint reads as
+ * `marble | inlay | thin dark line | inlay | marble`. The band is worked into the slab's
+ * own polished face rather than laid in a separate strip, which is both how the real
+ * floor is cut and why it costs no extra geometry here: two neighbouring slabs each
+ * contribute half of it and it can never z-fight with anything.
+ *
+ * 45 mm each side plus the 56 mm physical gap gives a 146 mm band across a joint — 6 % of
+ * a 2.35 m square, which is what the reference measures.
+ */
+export const INLAY_W = 0.045;
+
+/** Along-band pitch of one tessera. ~30 elements to a square edge, as in the frame. */
+export const TESS_CELL = 0.0784;
 /** Top of the kerb the fires burn on (lighting puts its kerb flames at y = 0.30). */
 export const KERB_Y = 0.30;
 

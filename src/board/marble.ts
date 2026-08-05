@@ -17,7 +17,7 @@ import { SQUARE } from '../core/constants';
 import { makeFbm, type Rng } from '../core/rng';
 import type { World } from '../core/world';
 import { NOISE_GLSL, REFLECT_GLSL, WEAR_GLSL } from './glsl';
-import { BED_Y, CHAMFER, JOINT, TOP_Y } from './layout';
+import { BED_Y, CHAMFER, INLAY_W, JOINT, TESS_CELL, TOP_Y } from './layout';
 
 /** Half-width of a slab at bed level. */
 const HALF_SLAB = (SQUARE - JOINT) / 2;
@@ -43,7 +43,9 @@ export function buildSlab(file: number, rank: number, rng: Rng, world: World): S
   const fbmSurf = makeFbm(seed, 4);
   const fbmChip = makeFbm(seed ^ 0x77c1, 3);
 
-  const dy = rng.float(-0.0045, 0.0045);
+  // Kept inside the joint depth (TOP_Y - BED_Y): a slab that dropped further than that
+  // would swallow its own joint and the inlaid band worked into its edge.
+  const dy = rng.float(-0.0032, 0.0032);
   const yaw = rng.float(-0.0042, 0.0042);
   const tiltX = rng.float(-0.0013, 0.0013);
   const tiltZ = rng.float(-0.0013, 0.0013);
@@ -51,7 +53,7 @@ export function buildSlab(file: number, rank: number, rng: Rng, world: World): S
   // A shallow worn dish, off-centre, on rather more than half the slabs. This is the
   // thing that stops the field reading as a plane with a texture on it: at a grazing
   // angle the highlight bends over each slab separately.
-  const dishAmp = rng.bool(0.62) ? rng.float(0.0012, 0.0034) : 0;
+  const dishAmp = rng.bool(0.62) ? rng.float(0.0010, 0.0026) : 0;
   const dishX = rng.float(-0.5, 0.5) * HALF_TOP;
   const dishZ = rng.float(-0.5, 0.5) * HALF_TOP;
   const dishR = rng.float(0.55, 1.15) * HALF_TOP;
@@ -212,6 +214,7 @@ const VERT_HEAD = /* glsl */ `
 attribute float aChip;
 varying vec3 vWPos;
 varying vec4 vReflUV;
+varying vec2 vLoc;
 varying float vChip;
 uniform mat4 uReflMatrix;
 `;
@@ -220,12 +223,16 @@ const VERT_BODY = /* glsl */ `
   vec4 bWorld = modelMatrix * vec4(transformed, 1.0);
   vWPos = bWorld.xyz;
   vReflUV = uReflMatrix * bWorld;
+  // Object space, so the inlaid band round the slab's edge sits exactly on the edge
+  // however the slab is yawed and tilted.
+  vLoc = transformed.xz;
   vChip = aChip;
 `;
 
 const FRAG_HEAD = /* glsl */ `
 varying vec3 vWPos;
 varying vec4 vReflUV;
+varying vec2 vLoc;
 varying float vChip;
 
 uniform vec3 uBaseA;
@@ -235,6 +242,10 @@ uniform vec3 uHalo;
 uniform vec3 uFresh;
 uniform vec3 uDust;
 uniform vec3 uSoil;
+uniform vec3 uInlayBed;
+uniform vec3 uInlayPale;
+uniform vec3 uInlayDark;
+uniform vec3 uInlayMean;
 uniform float uVeinScale;
 uniform float uVeinWidth;
 uniform float uVeinWeight;
@@ -244,12 +255,16 @@ uniform float uWornRough;
 uniform float uBump;
 uniform float uSquareTint;
 uniform float uCrack;
+uniform float uDusting;
 
 ${NOISE_GLSL}
 ${WEAR_GLSL}
 ${REFLECT_GLSL}
 
 const float B_SQ = ${SQUARE.toFixed(4)};
+const float B_HALF_TOP = ${HALF_TOP.toFixed(5)};
+const float B_INLAY_W = ${INLAY_W.toFixed(5)};
+const float B_TESS = ${TESS_CELL.toFixed(5)};
 
 /** Per-slab constants: a rotation and an offset into the block the slab was cut from. */
 vec4 bSlabKey(vec2 w){
@@ -264,7 +279,7 @@ vec4 bSlabKey(vec2 w){
  * present a metre from the lens.
  */
 float bMicro(vec2 w, float grit, float px){
-  float h = 0.00120 * bFbm(w * 2.6, 3);
+  float h = 0.00120 * bFbm(w * 2.6, 2);
   h += 0.00042 * bNoise(w * 11.0) * bFade(0.09, px);
   h += 0.00016 * (0.4 + grit) * bNoise(w * 44.0) * bFade(0.023, px);
   return h;
@@ -272,16 +287,15 @@ float bMicro(vec2 w, float grit, float px){
 
 /** Hairline cracks. World space, so they run across joints without noticing them. */
 float bCracks(vec2 w, float px){
-  float a = bTurb(w * 0.23, 4);
-  float c = 1.0 - smoothstep(0.0, 0.0016, abs(a - 0.5));
-  float b = bTurb(w * 0.55 + 37.0, 3);
-  c = max(c, 0.70 * (1.0 - smoothstep(0.0, 0.0011, abs(b - 0.5))));
+  float a = bTurb(w * 0.26, 3);
+  float c = 1.0 - smoothstep(0.0, 0.0018, abs(a - 0.5));
   return c * bFade(0.014, px);
 }
 
 // Filled by the albedo stage and read again by the roughness and normal stages.
 float gRough;
 float gReflMask;
+float gReflJitter;
 vec3 gNormalPert;
 `;
 
@@ -289,8 +303,7 @@ const FRAG_COLOR = /* glsl */ `
   vec2 w = vWPos.xz;
   float px = max(fwidth(w.x), fwidth(w.y));
   vec4 key = bSlabKey(w);
-  vec2 slabCentre = (key.xy - 3.5) * B_SQ;
-  vec2 loc = w - slabCentre;
+  vec2 loc = vLoc;
 
   // Cut every slab from a different part of the same block: rotate and offset the
   // marble field per slab so no two carry the same figure and none of it tiles.
@@ -298,16 +311,22 @@ const FRAG_COLOR = /* glsl */ `
   float ca = cos(ang), sa = sin(ang);
   vec2 mp = mat2(ca, -sa, sa, ca) * loc * uVeinScale + vec2(key.z, key.w) * 137.0;
 
-  // Veining: a domain-warped ridge network — a bold core with a soft halo bleeding off
-  // it, and a finer second network of tributaries running through the same field. The
-  // widths are set against the ~0.095 spread of the turbulence, so the core covers a few
-  // per cent of a slab and reads as drawn rather than as mottling.
-  float t1 = bTurb(mp * 0.62, 5);
+  // --- veining ----------------------------------------------------------------------
+  // The reference's light squares carry bold dark branching ink-veins running right
+  // across a square: not mottling, a drawn graphic. So the network is built as a wide
+  // core with a soft halo bleeding off it, a second generation of tributaries feeding
+  // into the same warped field, and a swathe mask that makes the whole figure gather in
+  // sweeps and leave clear stone between them — which is what stops it reading as noise.
+  float t1 = bTurb(mp * 0.58, 5);
   float core = bVein(t1, uVeinWidth);
-  float halo = bVein(t1, uVeinWidth * 3.4);
-  float t2 = bTurb(mp * 2.1 + 53.0, 4);
-  float hair = bVein(t2, uVeinWidth * 0.42) * bFade(0.05, px);
-  float cloud = 0.5 + 2.2 * (bFbm(mp * 0.85 + 11.0, 4) - 0.5);
+  float halo = bVein(t1, uVeinWidth * 4.2);
+  float t2 = bTurb(mp * 1.75 + 53.0, 4);
+  float sub = bVein(t2, uVeinWidth * 0.62);
+  float hair = bVein(t2, uVeinWidth * 0.22) * bFade(0.045, px);
+  float swathe = 0.34 + 0.92 * smoothstep(0.33, 0.76, bFbm(mp * 0.26 + 7.0, 3));
+  core = clamp((core + sub * 0.78) * swathe, 0.0, 1.0);
+  halo = clamp(halo * swathe, 0.0, 1.0);
+  float cloud = 0.5 + 2.2 * (bFbm(mp * 0.85 + 11.0, 3) - 0.5);
 
   vec4 wear = boardWear(w);
   float dust = wear.x;
@@ -321,7 +340,7 @@ const FRAG_COLOR = /* glsl */ `
   vec3 albedo = mix(uBaseA, uBaseB, clamp(cloud, 0.0, 1.0));
   albedo = mix(albedo, uHalo, halo * uHaloWeight);
   albedo = mix(albedo, uVein, core * uVeinWeight);
-  albedo = mix(albedo, uVein, hair * uVeinWeight * 0.6);
+  albedo = mix(albedo, uVein * 0.88, hair * uVeinWeight * 0.55);
   // Per-slab value shift. Some squares are simply darker stone than their neighbours.
   albedo *= 0.90 + 0.20 * key.w;
   // Polish worn off: the stone goes lighter, chalkier, less saturated.
@@ -330,6 +349,18 @@ const FRAG_COLOR = /* glsl */ `
   albedo = mix(albedo, uSoil, crack * 0.8);
   // Knocked-off corners show raw, unweathered stone.
   albedo = mix(albedo, uFresh, chip * 0.55);
+
+  // --- dust and scuff standing on the polish -----------------------------------------
+  // Everywhere, not only where something has landed. In the reference the reflection is
+  // broken up and dulled across the whole field by a dry film of stone dust and by
+  // traffic scuffing drawn out along the direction of play; without this layer the
+  // marble renders as wet plastic, which is the single loudest tell.
+  float grime = smoothstep(0.38, 0.90, bFbm(w * 0.60 + 3.0, 4));
+  float scuff = smoothstep(0.60, 0.97, bNoise(vec2(w.x * 0.55 + w.y * 0.20, w.y * 6.5 - w.x * 1.1)))
+              * bFade(0.16, px);
+  float film = clamp(grime * 0.78 + scuff * 0.60, 0.0, 1.0) * uDusting;
+  albedo = mix(albedo, uDust, film * 0.26);
+
   // What the game has thrown at it.
   // Deposited dust is cloudy, not a wash: the map carries where it landed, the shader
   // gives it structure at 30 cm and at 3 cm so a fresh fall reads as powder on stone.
@@ -342,28 +373,58 @@ const FRAG_COLOR = /* glsl */ `
   // that carries the frame's peak detail; at the far end of the board it is gone.
   float speckA = smoothstep(0.79, 0.90, bNoise(w * 12.5)) * bFade(0.08, px);
   float speckB = smoothstep(0.84, 0.94, bNoise(w * 34.0)) * bFade(0.029, px);
-  // Grit drifts to the edges of a slab and gathers along the joint, where nothing
-  // sweeps it away — so the joints read as trenches full of dust, not as drawn lines.
   float edge = max(abs(loc.x), abs(loc.y));
-  float toJoint = smoothstep(${(HALF_TOP * 0.72).toFixed(3)}, ${HALF_TOP.toFixed(3)}, edge);
+  float toJoint = smoothstep(B_HALF_TOP * 0.80, B_HALF_TOP, edge);
   float grits = clamp(speckA * 0.55 + speckB, 0.0, 1.0)
-              * (0.16 + 1.2 * dustMask + 0.35 * worn + 0.75 * toJoint);
+              * (0.16 + 1.2 * dustMask + 0.35 * worn + 0.75 * toJoint + 0.5 * film);
   albedo = mix(albedo, uDust * 0.78, clamp(grits, 0.0, 1.0) * 0.30);
-  albedo = mix(albedo, uSoil, toJoint * 0.20);
+
+  // --- the inlaid tessera band round the slab's edge ----------------------------------
+  // Two rows of small alternating light/dark elements worked into the polished face
+  // along every edge, so that a joint reads marble | inlay | dark line | inlay | marble.
+  // This is the finest detail in the reference frame and it runs across the whole floor,
+  // not only round the rim: it is what makes the floor plane the busiest region of the
+  // image and what gives its gradients a hard, directional grid to sit on.
+  float aaT = clamp(px / B_INLAY_W, 0.0008, 0.5);
+  float aaS = clamp(px / B_TESS, 0.0008, 0.5);
+  float bt = clamp((B_HALF_TOP - edge) / B_INLAY_W, 0.0, 1.4);
+  float band = 1.0 - smoothstep(0.96, 1.0 + 3.0 * aaT, bt);
+  // Mitre the two runs at 45°, the way inlay is really laid into a corner.
+  float bs = (abs(loc.x) > abs(loc.y)) ? loc.y : loc.x;
+  vec4 tess = bTess(clamp((bt - 0.20) / 0.62, 0.0, 1.0), bs, B_TESS, 2.0, aaT / 0.62, aaS);
+  float tf = bFade(B_TESS * 0.42, px);
+
+  vec3 bandCol = mix(uInlayBed, uInlayPale, tess.x * 0.96);
+  bandCol = mix(bandCol, uInlayDark, tess.y * 0.88);
+  bandCol = mix(uInlayMean, bandCol, tf);
+  // Fine dark rules bounding the band, and a pale arris catching the light on the very
+  // outer edge where the polished face turns down into the chamfer.
+  bandCol = mix(bandCol, uInlayBed * 0.45, bRule(bt, 0.885, 0.038, aaT));
+  bandCol = mix(bandCol, uInlayPale * 1.06, bRule(bt, 0.055, 0.055, aaT) * 0.75);
+  // Tesserae go missing; where one has, the bed shows through and the surface drops.
+  float lost = step(0.90, bHash21(floor(vec2(bs / B_TESS, bt * 2.0)) + key.zw * 61.0)) * tess.z * tf;
+  bandCol = mix(bandCol, uSoil, lost * 0.85);
+  albedo = mix(albedo, bandCol * (0.86 + 0.28 * bFbm(w * 7.0, 2)), band * 0.94);
+
+  albedo = mix(albedo, uSoil, toJoint * 0.20 * (1.0 - band));
 
   diffuseColor.rgb *= albedo;
 
   // --- roughness ------------------------------------------------------------------------
   // Polished marble is not uniformly polished. The veins are softer stone and take less
-  // of a shine, the worn patches take none, dust kills it outright. This variation is
-  // most of what makes the specular read as stone rather than as plastic.
+  // of a shine, the worn patches take none, dust kills it outright, and the inlay is not
+  // polished at all. This variation is most of what makes the specular read as stone
+  // rather than as plastic — and it is what lets the veining survive the reflection
+  // instead of being washed out by it.
   float rough = uPolish;
-  rough += core * 0.26 + halo * 0.05;
+  rough += core * 0.30 + halo * 0.07;
   rough += worn * uWornRough;
   rough += crack * 0.35;
   rough += chip * 0.62;
   rough += dustMask * 0.62;
   rough += score * 0.35;
+  rough += film * 0.44;
+  rough += band * (0.34 + 0.22 * tess.w) + lost * 0.30;
   rough += (bNoise(w * 3.1) - 0.5) * 0.09;
   rough += clamp(grits, 0.0, 1.0) * 0.40;
   // Polishing swirl: fine directional scratches, laid per slab. They only exist within
@@ -371,8 +432,10 @@ const FRAG_COLOR = /* glsl */ `
   vec2 sd = vec2(ca, sa);
   float scratch = bNoise(vec2(dot(loc, sd) * 62.0, dot(loc, vec2(-sd.y, sd.x)) * 5.0));
   rough += (scratch - 0.5) * 0.16 * bFade(0.032, px);
-  gRough = clamp(rough, 0.035, 1.0);
-  gReflMask = clamp((1.0 - dustMask * 1.25) * (1.0 - worn * 0.7) * (1.0 - score) * (1.0 - chip), 0.0, 1.0);
+  gRough = clamp(rough, 0.045, 1.0);
+  gReflMask = clamp((1.0 - dustMask * 1.25) * (1.0 - worn * 0.7) * (1.0 - score) * (1.0 - chip)
+                    * (1.0 - film * 0.86) * (1.0 - core * 0.78) * (1.0 - band * 0.92), 0.0, 1.0);
+  gReflJitter = (grime - 0.5) * 0.9 + (scuff - 0.5) * 0.5;
 
   // --- micro normal ----------------------------------------------------------------------
   float amp = uBump * (1.0 + worn * 2.2 + dustMask * 3.0 + chip * 4.0);
@@ -385,6 +448,16 @@ const FRAG_COLOR = /* glsl */ `
   gNormalPert += vec3(bNoise(w * 24.0) - 0.5, 0.0, bNoise(w * 24.0 + 7.0) - 0.5) * crack * 0.35;
   gNormalPert += vec3(bNoise(w * 46.0) - 0.5, 0.0, bNoise(w * 46.0 + 3.0) - 0.5)
                * clamp(grits, 0.0, 1.0) * 0.30 * bFade(0.026, px);
+  // Each tessera stands a fraction of a millimetre proud of its bed, so a grazing light
+  // finds every one of them. Across the band this is a hard, regular relief running
+  // parallel to the joint — the strongest directional signal on the whole floor.
+  vec2 bandDir = (abs(loc.x) > abs(loc.y)) ? vec2(0.0, 1.0) : vec2(1.0, 0.0);
+  vec2 acrossDir = (abs(loc.x) > abs(loc.y)) ? vec2(sign(loc.x), 0.0) : vec2(0.0, sign(loc.y));
+  float ridge = (tess.z - 0.5) * 2.0 * tf;
+  gNormalPert += vec3(acrossDir.x, 0.0, acrossDir.y) * band * ridge * 0.30;
+  gNormalPert += vec3(bandDir.x, 0.0, bandDir.y)
+               * band * tf * (fract(bs / B_TESS) - 0.5) * 0.42;
+  gNormalPert -= vec3(acrossDir.x, 0.0, acrossDir.y) * band * lost * 0.5;
 `;
 
 const FRAG_ROUGH = /* glsl */ `
@@ -399,9 +472,9 @@ const FRAG_OUT = /* glsl */ `
   #include <opaque_fragment>
   {
     float ndv = clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0);
-    float fres = 0.10 + 0.90 * pow(1.0 - ndv, 2.2);
+    float fres = 0.06 + 0.94 * pow(1.0 - ndv, 2.6);
     vec3 nWorld = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
-    vec3 refl = boardReflection(vReflUV, nWorld, gRough, gReflMask);
+    vec3 refl = boardReflection(vReflUV, nWorld, gRough, gReflMask, gReflJitter);
     gl_FragColor.rgb += refl * fres * uReflStrength;
   }
 `;
@@ -439,49 +512,72 @@ export interface MarbleSpec {
   squareTint: number;
   crack: number;
   reflect: number;
+  /** How much dry dust and scuffing lies on the polish and breaks the reflection. */
+  dusting: number;
 }
 
 /**
- * Measured off the reference frames. Light squares: cream-white with dramatic ink-dark
- * branching veins — the single most identifiable graphic in the room. Dark squares: deep
- * navy blue-black, its figure paler than the field and far quieter.
+ * Measured off the reference frames, by sampling them.
+ *
+ * A light square in `wide-establishing` means (126,137,157) — a cool grey-white, blue
+ * over red by thirty counts, and nowhere near blown: its brightest pixel is 194. Its
+ * veins are a graphic, mid-dark blue-grey figure branching right across the slab. A dark
+ * square means (36,47,69) — deep navy, roughly a third of the light square's value,
+ * carrying its own paler figure. Neither albedo is warm; a warm one fights the room's
+ * cold key and comes out the colour of firelight, which is the tell the frames punish
+ * hardest.
  */
 export const MARBLE: Record<'light' | 'dark', MarbleSpec> = {
   light: {
-    baseA: 0xa3a19b,
-    baseB: 0x8d8c86,
-    vein: 0x35383a,
-    halo: 0x74736c,
-    fresh: 0xb2afa3,
-    soil: 0x2f2e2a,
-    veinScale: 1.15,
-    veinWidth: 0.0200,
-    veinWeight: 0.94,
-    haloWeight: 0.38,
-    polish: 0.13,
+    baseA: 0xacb0b6,
+    baseB: 0x969ba3,
+    vein: 0x424a55,
+    halo: 0x7b818b,
+    fresh: 0xb6b8bb,
+    soil: 0x2b2d31,
+    veinScale: 1.05,
+    veinWidth: 0.0245,
+    veinWeight: 0.92,
+    haloWeight: 0.42,
+    polish: 0.22,
     wornRough: 0.34,
     squareTint: 0.16,
     crack: 0.85,
-    reflect: 1.55,
+    reflect: 0.62,
+    dusting: 1.0,
   },
   dark: {
-    baseA: 0x28344b,
-    baseB: 0x1d2634,
-    vein: 0x56657c,
-    halo: 0x333e51,
+    baseA: 0x27314a,
+    baseB: 0x1a2131,
+    vein: 0x5d6a84,
+    halo: 0x374357,
     fresh: 0x40495a,
     soil: 0x14171d,
-    veinScale: 0.78,
-    veinWidth: 0.0115,
-    veinWeight: 0.62,
-    haloWeight: 0.34,
-    polish: 0.10,
+    veinScale: 0.80,
+    veinWidth: 0.0150,
+    veinWeight: 0.72,
+    haloWeight: 0.38,
+    polish: 0.14,
     wornRough: 0.28,
     squareTint: 0.14,
     crack: 0.55,
-    reflect: 2.3,
+    reflect: 1.30,
+    dusting: 0.68,
   },
 };
+
+/**
+ * The inlay is the same stone whichever square it borders: a dark slate bed with small
+ * pale limestone and dark serpentine tesserae set into it. `mean` is what the band
+ * settles to once the individual elements drop below a pixel, so the far end of the
+ * board reads as a continuous fine grey rule rather than dissolving to black.
+ */
+const INLAY = {
+  bed: 0x33363c,
+  pale: 0xcdc9bf,
+  dark: 0x3b3e46,
+  mean: 0x6f6f6c,
+} as const;
 
 export interface Marble {
   material: THREE.MeshStandardMaterial;
@@ -509,7 +605,12 @@ export function createMarble(
     uHalo: { value: c(s.halo) },
     uFresh: { value: c(s.fresh) },
     uSoil: { value: c(s.soil) },
-    uDust: { value: c(0x9a9689) },
+    uDust: { value: c(0x9a9c99) },
+    uInlayBed: { value: c(INLAY.bed) },
+    uInlayPale: { value: c(INLAY.pale) },
+    uInlayDark: { value: c(INLAY.dark) },
+    uInlayMean: { value: c(INLAY.mean) },
+    uDusting: { value: s.dusting },
     uVeinScale: { value: s.veinScale },
     uVeinWidth: { value: s.veinWidth },
     uVeinWeight: { value: s.veinWeight },

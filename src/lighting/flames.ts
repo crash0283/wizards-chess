@@ -21,9 +21,22 @@ export interface Flame {
   /** Flame height in metres, base to tip, at rest. */
   size: number;
   phase: number;
+  /**
+   * 0..1 colour temperature. 0 is a guttering deep-orange fire, 1 is a hot pale one.
+   * Real fires in one room are never the same colour as each other.
+   */
+  temp: number;
+  /** Multiplier on this flame's own flicker rate — some race, some breathe. */
+  rate: number;
+  /** Colour of the point light this flame casts, derived from `temp`. */
+  tint: THREE.Color;
   /** 0..1, refreshed every frame. Irregular, not a clean sine. */
   flicker: number;
 }
+
+/** Cold end and hot end of the fire gamut, in sRGB. Every flame lands between them. */
+const TEMP_COOL = new THREE.Color(0xff7a1e);
+const TEMP_HOT = new THREE.Color(0xffd7a8);
 
 export interface FlameSystem {
   group: THREE.Object3D;
@@ -50,20 +63,27 @@ function layout(rng: Rng): Array<{ x: number; y: number; z: number; size: number
 
   // Four kerb runs. These are the flames that read biggest in the wide shot. They are
   // jittered along and across the kerb: evenly spaced fires read as birthday candles.
+  // Sizes are drawn from a wide, skewed range rather than a tight one. Evenly-sized
+  // fires read as a manufactured set; a real kerb carries a couple of big ones and a lot
+  // of small ones, and squaring a uniform draw gives exactly that distribution.
   const j = () => rng.float(-0.62, 0.62);
   const k = () => rng.float(-0.16, 0.16);
+  const pick = (lo: number, hi: number) => {
+    const u = rng.float(0, 1);
+    return lo + (hi - lo) * u * u;
+  };
   for (const a of along) {
-    out.push({ x: -kerb + k(), y: 0.3, z: a + j(), size: rng.float(0.34, 0.66) });
-    out.push({ x: kerb + k(), y: 0.3, z: a + j(), size: rng.float(0.34, 0.66) });
+    out.push({ x: -kerb + k(), y: 0.3, z: a + j(), size: pick(0.24, 0.86) });
+    out.push({ x: kerb + k(), y: 0.3, z: a + j(), size: pick(0.24, 0.78) });
   }
   for (const a of acrossEnds) {
-    out.push({ x: a + j(), y: 0.3, z: -kerb + k(), size: rng.float(0.28, 0.44) });
-    out.push({ x: a + j(), y: 0.3, z: kerb + k(), size: rng.float(0.28, 0.44) });
+    out.push({ x: a + j(), y: 0.3, z: -kerb + k(), size: pick(0.20, 0.58) });
+    out.push({ x: a + j(), y: 0.3, z: kerb + k(), size: pick(0.20, 0.58) });
   }
   // Corners of the kerb.
   for (const sx of [-1, 1]) {
-    for (const sz of [-1, 1]) {
-      out.push({ x: sx * kerb, y: 0.32, z: sz * kerb, size: rng.float(0.5, 0.66) });
+    for (const sk of [-1, 1]) {
+      out.push({ x: sx * kerb, y: 0.32, z: sk * kerb, size: pick(0.38, 0.92) });
     }
   }
   // Burning in the accumulated rubble heaps behind each army.
@@ -73,7 +93,7 @@ function layout(rng: Rng): Array<{ x: number; y: number; z: number; size: number
         x: x + rng.float(-0.6, 0.6),
         y: rng.float(0.45, 1.05),
         z: sz * rng.float(12.0, 13.6),
-        size: rng.float(0.36, 0.62),
+        size: pick(0.28, 0.74),
       });
     }
   }
@@ -84,7 +104,7 @@ function layout(rng: Rng): Array<{ x: number; y: number; z: number; size: number
         x: x + rng.float(-0.4, 0.4),
         y: rng.float(0.55, 0.95),
         z: sz * rng.float(8.6, 10.0),
-        size: rng.float(0.26, 0.4),
+        size: pick(0.18, 0.50),
       });
     }
   }
@@ -122,11 +142,15 @@ const BODY_VERT = /* glsl */ `
 attribute vec2 aCorner;    // x in [-0.5,0.5], y in [0,1]
 attribute vec3 aCentre;
 attribute vec4 aParams;    // phase, size, layer 0..2, lateral offset
+attribute vec4 aVary;      // temp 0..1, profile exponent, aspect, flicker rate
 uniform float uTime;
 varying vec2 vUv;
 varying float vLayer;
 varying float vPhase;
 varying float vFlick;
+varying float vTemp;
+varying float vProf;
+varying float vTip;
 ${NOISE_GLSL}
 void main(){
   vUv = vec2(aCorner.x + 0.5, aCorner.y);
@@ -134,13 +158,20 @@ void main(){
   float size = aParams.y;
   vLayer = aParams.z;
   vPhase = ph;
+  vTemp = aVary.x;
+  vProf = aVary.y;
+  // A wide flame is also a stubby one and a narrow flame licks higher, so the tip rides
+  // off the same number as the width. One knob, two correlated silhouette cues.
+  vTip = 0.78 + (1.0 - aVary.z) * 0.30;
 
-  float fl = flicker(uTime, ph + vLayer * 0.37);
+  // Per-flame rate. Identical flicker rates across a population is the single loudest
+  // "these are instances of one billboard" tell there is — the whole kerb pulses together.
+  float fl = flicker(uTime * aVary.w, ph + vLayer * 0.37);
   vFlick = fl;
 
   float layerScale = 1.0 - vLayer * 0.27;
   float h = size * (1.58 + 0.85 * (fl - 0.5)) * layerScale;
-  float w = size * (1.26 + 0.28 * (fl - 0.5)) * layerScale;
+  float w = size * (1.26 + 0.28 * (fl - 0.5)) * layerScale * aVary.z;
 
   // Lean and lick — grows with height, so the base stays planted.
   float sway = (vnoise1(uTime * 2.9 + ph * 7.0) - 0.5) * 0.55
@@ -164,6 +195,9 @@ varying vec2 vUv;
 varying float vLayer;
 varying float vPhase;
 varying float vFlick;
+varying float vTemp;
+varying float vProf;
+varying float vTip;
 ${NOISE_GLSL}
 void main(){
   float y = clamp(vUv.y, 0.0, 1.0);
@@ -172,9 +206,12 @@ void main(){
   float turb = (vnoise2(vec2(vPhase * 11.0, y * 3.4 - uTime * 2.6)) - 0.5) * 0.34 * y
              + (vnoise2(vec2(vPhase * 23.0 + 5.0, y * 7.9 - uTime * 5.1)) - 0.5) * 0.16 * y;
 
-  // Teardrop: broad and round at the base, tapering to a wandering tip.
-  float tip = 0.82 + 0.20 * vFlick;
-  float prof = pow(max(0.0, 1.0 - y / tip), 0.62) * smoothstep(0.0, 0.10, y);
+  // Teardrop: broad and round at the base, tapering to a wandering tip. Both the taper
+  // exponent and the tip height are per-flame, so the population spans genuinely
+  // different silhouettes — squat guttering blobs through to tall spindly licks —
+  // instead of one teardrop repeated at different scales.
+  float tip = vTip + 0.20 * vFlick;
+  float prof = pow(max(0.0, 1.0 - y / tip), vProf) * smoothstep(0.0, 0.10, y);
   prof *= 0.55 + 0.45 * vnoise2(vec2(vPhase * 3.0, y * 2.1 - uTime * 1.7));
 
   float d = abs(vUv.x - 0.5 - turb) / max(prof * 0.5, 1e-4);
@@ -187,6 +224,11 @@ void main(){
   float coreness = smoothstep(0.55, 0.95, a) * (1.0 - smoothstep(0.22, 0.78, y));
   col = mix(col, uCore, coreness);
 
+  // Per-flame colour temperature. Fires in one room burn at different temperatures
+  // depending on what they are consuming, and matching them all to one ramp is what made
+  // thirty-eight separate fires read as one asset.
+  col *= mix(vec3(1.14, 0.78, 0.46), vec3(0.97, 1.00, 1.06), vTemp);
+
   float energy = uIntensity * (0.62 + 0.90 * (1.0 - y)) * (0.72 + 0.56 * vFlick);
   energy *= 1.0 - vLayer * 0.22;
   gl_FragColor = vec4(col * a * a * energy, 1.0);
@@ -196,18 +238,24 @@ void main(){
 const GLOW_VERT = /* glsl */ `
 attribute vec2 aCorner;    // -0.5..0.5 both axes
 attribute vec3 aCentre;
-attribute vec4 aParams;    // phase, size, unused, unused
+attribute vec4 aParams;    // phase, size, temp 0..1, flicker rate
 uniform float uTime;
 varying vec2 vUv;
 varying float vFlick;
+varying float vTemp;
 ${NOISE_GLSL}
 void main(){
   vUv = aCorner;
   float ph = aParams.x;
   float size = aParams.y;
-  float fl = flicker(uTime, ph);
+  vTemp = aParams.z;
+  float fl = flicker(uTime * aParams.w, ph);
   vFlick = fl;
-  float r = size * (1.90 + 0.45 * (fl - 0.5));
+  // Tighter than it was. These halos are a large part of the frame's bright warm area,
+  // and the reference keeps its warm pixels small: 14.0% of its lit pixels fall in the
+  // 0-30 degree hue bin against our 30.6%, which is what dragged the circular-mean lit
+  // hue round to 256 instead of 224.
+  float r = size * (1.34 + 0.40 * (fl - 0.5));
   vec3 right = normalize(vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]));
   vec3 up = normalize(vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]));
   vec3 wp = aCentre + vec3(0.0, size * 0.55, 0.0) + right * (aCorner.x * r) + up * (aCorner.y * r);
@@ -221,12 +269,14 @@ uniform float uIntensity;
 uniform vec3 uColor;
 varying vec2 vUv;
 varying float vFlick;
+varying float vTemp;
 void main(){
   float d = length(vUv) * 2.0;
   float a = 1.0 - smoothstep(0.0, 1.0, d);
   a = a * a * a * a;
   if (a < 0.004) discard;
-  gl_FragColor = vec4(uColor * a * uIntensity * (0.7 + 0.6 * vFlick), 1.0);
+  vec3 c = uColor * mix(vec3(1.14, 0.78, 0.46), vec3(0.97, 1.00, 1.06), vTemp);
+  gl_FragColor = vec4(c * a * uIntensity * (0.7 + 0.6 * vFlick), 1.0);
 }
 `;
 
@@ -238,13 +288,23 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const specs = layout(rng);
 
   const phaseRng = world.rng.fork('lighting-flame-phase');
-  const flames: Flame[] = specs.map((s, i) => ({
-    index: i,
-    pos: new THREE.Vector3(s.x, s.y, s.z),
-    size: s.size,
-    phase: phaseRng.float(0, 1),
-    flicker: 0.5,
-  }));
+  const flames: Flame[] = specs.map((s, i) => {
+    // Skew the temperature distribution toward the cool end: a few fires burn hot and
+    // pale and the rest are ordinary orange, which is what stops the population reading
+    // as one flame stamped out thirty-eight times.
+    const u = phaseRng.float(0, 1);
+    const temp = u * u * 0.85 + 0.06;
+    return {
+      index: i,
+      pos: new THREE.Vector3(s.x, s.y, s.z),
+      size: s.size,
+      phase: phaseRng.float(0, 1),
+      temp,
+      rate: phaseRng.float(0.72, 1.42),
+      tint: TEMP_COOL.clone().lerp(TEMP_HOT, temp),
+      flicker: 0.5,
+    };
+  });
 
   // --- body geometry: three stacked tongues per flame ---------------------------------
   const LAYERS = world.quality === 'high' ? 3 : 2;
@@ -253,6 +313,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const bCorner = new Float32Array(bodyQuads * 4 * 2);
   const bCentre = new Float32Array(bodyQuads * 4 * 3);
   const bParams = new Float32Array(bodyQuads * 4 * 4);
+  const bVary = new Float32Array(bodyQuads * 4 * 4);
   const bIndex = new Uint16Array(bodyQuads * 6);
 
   const CORNERS: Array<[number, number]> = [
@@ -263,8 +324,16 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   ];
 
   const offRng = world.rng.fork('lighting-flame-offset');
+  const shapeRng = world.rng.fork('lighting-flame-shape');
+  // Silhouette parameters are per flame, not per layer, so a flame's three tongues stay
+  // recognisably the same fire while no two fires look alike.
+  const shape = flames.map(() => ({
+    prof: shapeRng.float(0.40, 0.98),
+    aspect: shapeRng.float(0.74, 1.38),
+  }));
   let q = 0;
   for (const f of flames) {
+    const sh = shape[f.index];
     for (let l = 0; l < LAYERS; l++) {
       const lateral = l === 0 ? 0 : offRng.float(-0.32, 0.32);
       const phase = f.phase + l * 0.19;
@@ -279,6 +348,10 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
         bParams[v * 4 + 1] = f.size;
         bParams[v * 4 + 2] = l;
         bParams[v * 4 + 3] = lateral;
+        bVary[v * 4 + 0] = f.temp;
+        bVary[v * 4 + 1] = sh.prof;
+        bVary[v * 4 + 2] = sh.aspect;
+        bVary[v * 4 + 3] = f.rate;
       }
       const o = q * 4;
       bIndex.set([o, o + 1, o + 2, o, o + 2, o + 3], q * 6);
@@ -291,6 +364,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   bodyGeo.setAttribute('aCorner', new THREE.BufferAttribute(bCorner, 2));
   bodyGeo.setAttribute('aCentre', new THREE.BufferAttribute(bCentre, 3));
   bodyGeo.setAttribute('aParams', new THREE.BufferAttribute(bParams, 4));
+  bodyGeo.setAttribute('aVary', new THREE.BufferAttribute(bVary, 4));
   bodyGeo.setIndex(new THREE.BufferAttribute(bIndex, 1));
 
   const bodyMat = new THREE.ShaderMaterial({
@@ -339,6 +413,8 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
       gCentre[v * 3 + 2] = f.pos.z;
       gParams[v * 4 + 0] = f.phase;
       gParams[v * 4 + 1] = f.size;
+      gParams[v * 4 + 2] = f.temp;
+      gParams[v * 4 + 3] = f.rate;
     }
     const o = i * 4;
     gIndex.set([o, o + 1, o + 2, o, o + 2, o + 3], i * 6);
@@ -354,7 +430,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const glowMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 0.22 },
+      uIntensity: { value: 0.15 },
       uColor: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
     },
     vertexShader: GLOW_VERT,
@@ -390,26 +466,25 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   }
 
   // --- the bounce -----------------------------------------------------------------------
-  // Four very dim, very wide warm sources hanging well above each side of the kerb —
-  // high enough that their own falloff is nearly flat across the board, which is what
-  // makes them read as ambient bounce rather than as four more fires. This is the one
-  // thing a direct-lighting renderer cannot get from the fires themselves:
-  // in the reference, firelight that has bounced once off marble and stone puts a broad
-  // warm cast across the near board that never becomes bright anywhere. Without it the
-  // only warm pixels in frame are the hot cores of the pools, and the ratio of
-  // warm-and-bright to warm-at-all comes out at about 2:3 against the frame's 1:2 — the
-  // render reads as fires punched into a cold plate rather than as fires in a room.
-  // These must stay *dim*: they are a bounce term, not a second key, and the brief is
-  // explicit that the flames do not warm the room.
+  // These used to hang six metres over the middle of each kerb with a 26 m range and a
+  // decay of 1.15 — which is to say they were nearly flat across the whole board, and
+  // they were laying a broad warm cast over the near marble. Measured region by region
+  // that is exactly backwards: in the reference the near board reads COLD (the two centre
+  // cells of the bottom band come out at hue 229 and 235) while the columns at the extreme
+  // frame edges read WARM top to bottom (hue 20 / 17 / 15 down the left-hand column). We
+  // had the inverse — a warm bottom band at hue 16/8/1/16 and a uniformly cold top.
+  //
+  // So they move to where the film's warm light actually is: low against the side walls
+  // in the camera's near half, grazing up the near colonnade, with a range short enough
+  // that the board and the ranks never see them. They are still a bounce term, not a key.
   const bounce: THREE.PointLight[] = [];
-  const kerbR = HALF + 1.05;
   for (const p of [
-    [-kerbR, 6.0, 0],
-    [kerbR, 6.0, 0],
-    [0, 6.0, -kerbR],
-    [0, 6.0, kerbR],
+    [-6.5, 5.8, -14.2],
+    [-6.5, 5.8, 14.2],
+    [2.5, 6.2, -14.2],
+    [2.5, 6.2, 14.2],
   ] as const) {
-    const l = new THREE.PointLight(new THREE.Color(FIRE.bounce), 0, 26, 1.15);
+    const l = new THREE.PointLight(new THREE.Color(FIRE.bounce), 0, 13.0, 2.0);
     l.position.set(p[0], p[1], p[2]);
     l.castShadow = false;
     group.add(l);
@@ -419,10 +494,10 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   // CPU-side flicker uses the same shape as the shader's, but from the seeded noise so
   // the light and its geometry breathe together.
   const noise = makeNoise3(world.rng.fork('lighting-flicker-noise').int(1, 1 << 30));
-  const flick = (t: number, ph: number) =>
-    noise(t * 6.7, ph * 13.0, 0) * 0.54 +
-    noise(t * 15.9, ph * 29.0, 3.7) * 0.29 +
-    noise(t * 2.3, ph * 5.0, 8.1) * 0.17;
+  const flick = (t: number, ph: number, rate: number) =>
+    noise(t * 6.7 * rate, ph * 13.0, 0) * 0.54 +
+    noise(t * 15.9 * rate, ph * 29.0, 3.7) * 0.29 +
+    noise(t * 2.3 * rate, ph * 5.0, 8.1) * 0.17;
 
   const order: number[] = flames.map((_, i) => i);
   const score: number[] = new Array(flames.length).fill(0);
@@ -440,12 +515,12 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
       glowMat.uniforms.uTime.value = t;
       let mean = 0;
       for (const f of flames) {
-        f.flicker = THREE.MathUtils.clamp(flick(t, f.phase) + 0.5, 0, 1);
+        f.flicker = THREE.MathUtils.clamp(flick(t, f.phase, f.rate) + 0.5, 0, 1);
         mean += f.flicker;
       }
       // The bounce breathes with the whole fire population, not with any one flame.
       mean = flames.length ? mean / flames.length : 0.5;
-      for (const l of bounce) l.intensity = 0.5 * (0.78 + 0.44 * mean);
+      for (const l of bounce) l.intensity = 5.2 * (0.78 + 0.44 * mean);
     },
 
     assign(camera: THREE.Camera) {
@@ -478,10 +553,15 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
         // the peak comes down, the useful pool widens, and the reference's ratio of
         // warm-and-bright to warm-at-all (about 1:2, ours was 2:3) falls into place.
         l.position.set(f.pos.x, f.pos.y + f.size * 0.45, f.pos.z);
-        // Inverse-square with a soft cutoff: a clear warm wash on the marble at two
-        // metres, into the noise floor by six.
-        l.distance = 4.9 + f.size * 2.8;
-        l.intensity = (2.45 + f.size * 5.3) * (0.60 + 0.72 * f.flicker);
+        // Range is roughly halved. three's cutoff distance is a window function, not a
+        // clip: contribution is unchanged near the source and forced smoothly to zero at
+        // the cutoff, so shortening it leaves the pool on the stone under each fire
+        // intact while gutting the 2-6 m tail. That tail was the problem — thirty-odd
+        // overlapping tails is a warm ambient by another name, and it was what put the
+        // ranked armies at hue 8-16 when the reference has them cold.
+        l.distance = 2.45 + f.size * 1.9;
+        l.intensity = (1.95 + f.size * 4.3) * (0.60 + 0.72 * f.flicker);
+        l.color.copy(f.tint);
       }
     },
 

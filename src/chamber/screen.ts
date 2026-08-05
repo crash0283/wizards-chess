@@ -165,10 +165,16 @@ function farPath(z: number, x0: number, r: number, top: number): Station[] {
   at(0.54, r * 1.36);
   at(0.72, r * 1.10);
   at(1.00, r * 1.00);
-  at(4.60, r);
-  at(5.28, r * 1.22);
-  at(5.52, r * 1.22);
-  at(6.00, r);
+  at(2.30, r);
+  // Two banded courses. A screen of plain vertical shafts with nothing crossing it
+  // reads as hanging cloth however well it is lit; the bands are what make it masonry.
+  at(2.44, r * 1.30);
+  at(2.68, r * 1.30);
+  at(2.84, r);
+  at(5.28, r);
+  at(5.44, r * 1.42);
+  at(5.74, r * 1.42);
+  at(5.92, r);
   at(top, r * 0.94);
   return st;
 }

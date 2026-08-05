@@ -22,10 +22,17 @@ export const COLD = {
   haze: 0x22334f,
   /** Unresolved ceiling / beyond-the-arcade void. */
   voidColor: 0x05070c,
-  /** Env gradient stops, top -> horizon -> floor. */
-  envTop: 0x080c14,
-  envHorizon: 0x35486a,
-  envFloor: 0x141c28,
+  /**
+   * Env gradient stops, top -> horizon -> floor. The energy sits OVERHEAD, not at the
+   * horizon where it used to. An IBL whose bright band is at eye level pours light into
+   * every vertical surface in the room — the piers, the side walls, the backs of the
+   * pieces — which is the same uniform-graze problem as a hemisphere light wearing a
+   * different hat. Overhead, it reflects off the polished marble into a camera looking
+   * down at it and barely touches a wall.
+   */
+  envTop: 0x384b68,
+  envHorizon: 0x161e2c,
+  envFloor: 0x0a0e15,
   /** A whisper of fire bounced into the low env so undersides are not dead blue. */
   envFireBounce: 0x3a2314,
 } as const;

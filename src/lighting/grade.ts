@@ -33,23 +33,38 @@ export const GradeShader = {
      * reference's high-frequency energy.
      */
     uDiffusion: { value: 0.30 },
-    uVigStrength: { value: 0.77 },
-    uVigInner: { value: 0.34 },
+    /**
+     * Eased off hard. Measured on the reference's picture area the top corners sit at a
+     * deep-shadow fraction of 0.219 and 0.280; ours were at 0.488 and 0.782. Almost all
+     * of our black was manufactured by this vignette rather than by anything in the room,
+     * which is the tell: a dark ring around a frame that is otherwise uniformly legible
+     * reads as a filter, where the reference's black is unlit architecture and lands in
+     * irregular patches wherever no fire reaches.
+     */
+    uVigStrength: { value: 0.44 },
+    uVigInner: { value: 0.44 },
     uVigOuter: { value: 0.95 },
     uVigAspect: { value: 1.25 },
     uLift: { value: 0.94 },
     uContrast: { value: 0.99 },
-    /** Saturation in the deep shadows — the film's blacks are close to neutral. */
-    uSatShadow: { value: 0.36 },
+    /**
+     * Saturation in the deep shadows. Less neutral than we had it: the reference's own
+     * blacks still carry colour. Its per-region saturation never drops below 0.229 and
+     * runs to 0.425, and its picture-area mean is 0.323 against our 0.294 — we were
+     * reading as *under*-saturated once the letterbox bars (which are 25.4% of the
+     * reference's pixels, at zero saturation, and drag its whole-frame figure down to
+     * 0.242) are taken out of the comparison.
+     */
+    uSatShadow: { value: 0.40 },
     /** Saturation from the mid-tones up, where the cold marble has to read blue. */
-    uSaturation: { value: 1.06 },
+    uSaturation: { value: 1.08 },
     uSatRamp: { value: new THREE.Vector2(0.03, 0.28) },
     /** Cold DI balance. Applied to everything the flames are not already warming. */
     uCoolBalance: { value: new THREE.Vector3(0.968, 1.013, 1.027) },
     uShadowTint: { value: new THREE.Vector3(0.004, 0.006, 0.011) },
     uHighlightTint: { value: new THREE.Vector3(0.006, 0.004, -0.004) },
     /** Print black: the picture's floor, which is never literal zero. */
-    uToe: { value: 0.017 },
+    uToe: { value: 0.013 },
     uGrain: { value: 0.013 },
     uSeed: { value: 0.0 },
     uFlash: { value: 0.0 },

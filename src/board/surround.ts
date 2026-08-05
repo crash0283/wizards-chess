@@ -46,6 +46,7 @@ ${REFLECT_GLSL}
 uniform vec3 uDust;
 float gRough;
 float gReflMask;
+float gReflJitter;
 vec3 gNormalPert;
 `;
 
@@ -59,9 +60,10 @@ const FRAG_OUT = /* glsl */ `
   #include <opaque_fragment>
   {
     float ndv = clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0);
-    float fres = 0.10 + 0.90 * pow(1.0 - ndv, 2.2);
+    float fres = 0.06 + 0.94 * pow(1.0 - ndv, 2.6);
     vec3 nWorld = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
-    gl_FragColor.rgb += boardReflection(vReflUV, nWorld, gRough, gReflMask) * fres * uReflStrength;
+    gl_FragColor.rgb += boardReflection(vReflUV, nWorld, gRough, gReflMask, gReflJitter)
+                      * fres * uReflStrength;
   }
 `;
 
@@ -151,6 +153,7 @@ const BED_FRAG = /* glsl */ `
   diffuseColor.rgb *= albedo;
   gRough = clamp(0.86 + 0.10 * grain - chips * 0.12, 0.3, 1.0);
   gReflMask = 0.0;
+  gReflJitter = 0.0;
 
   const float ee = 0.008;
   float h0 = bNoise(w * 46.0) + 0.5 * bNoise(w * 130.0);
@@ -167,63 +170,58 @@ const BORDER_HEAD = /* glsl */ `
 uniform vec3 uField;
 uniform vec3 uTessDark;
 uniform vec3 uTessPale;
+uniform vec3 uTessMean;
 uniform vec3 uLine;
 uniform vec3 uGrime;
 uniform float uCell;
 uniform float uBandHalf;
 `;
 
+/**
+ * The perimeter strip. Same inlay language as the joint bands, three rows deep and laid
+ * on a wider bed: a dark rule, a pale fillet, a dark rule, then a dense chequer of small
+ * alternating tesserae, then the same three rules mirrored on the kerb side.
+ *
+ * In the reference this strip is the single finest detail in the frame — a dense run of
+ * small repeating elements, not a dark band with speckle on it — so every element here
+ * is drawn at real size and antialiased against the pixel footprint, and the whole band
+ * settles to its own mean tone rather than to noise once the elements go sub-pixel.
+ */
 const BORDER_FRAG = /* glsl */ `
   vec2 w = vWPos.xz;
   float px = max(fwidth(w.x), fwidth(w.y));
   vec4 wear = boardWear(w);
 
-  // uv.x runs across the band (0..1), uv.y along it in metres from the side's centre.
-  float a = (vBUv.x - 0.5) * uBandHalf * 2.0;   // metres across
-  float along = vBUv.y;
-  float cell = floor(along / uCell);
-  float b = along - (cell + 0.5) * uCell;
-  float ax = abs(a);
+  // uv.x runs across the band (0..1). The along-band coordinate is taken from world
+  // space, not from uv.y: the ring's inner and outer edges are different lengths, so a
+  // uv-based run would fan the columns out across the width of the strip.
+  float t = vBUv.x;
+  vec2 aw0 = abs(w);
+  float s = (aw0.x > aw0.y) ? w.y : w.x;
+  float width = uBandHalf * 2.0;
+  float aaT = clamp(px / width, 0.0008, 0.5);
+  float aaS = clamp(px / uCell, 0.0008, 0.5);
+  float tf = bFade(uCell * 0.42, px);
 
-  // Every edge in the inlay is anti-aliased against the pixel footprint: at this size
-  // the elements are only a few pixels across at the far end of the board, and a hard
-  // step there would crawl.
-  float aa = px * 0.8 + 0.0015;
+  // Three rows of tesserae down the middle sixty per cent of the band.
+  vec4 tess = bTess(clamp((t - 0.20) / 0.60, 0.0, 1.0), s, uCell, 3.0, aaT / 0.60, aaS);
 
-  vec3 albedo = uField;
-  float rough = 0.40;
-  float inlay = 0.0;
-  float relief = 0.0;
+  vec3 albedo = mix(uField, uTessPale, tess.x * 0.94);
+  albedo = mix(albedo, uTessDark, tess.y * 0.90);
+  albedo = mix(uTessMean, albedo, tf);
 
-  // Two fine dark fillets bounding the strip.
-  float f1 = smoothstep(uBandHalf * 0.60 - aa, uBandHalf * 0.60 + aa, ax)
-           * (1.0 - smoothstep(uBandHalf * 0.68 - aa, uBandHalf * 0.68 + aa, ax));
-  float f2 = smoothstep(uBandHalf * 0.86 - aa, uBandHalf * 0.86 + aa, ax)
-           * (1.0 - smoothstep(uBandHalf * 0.93 - aa, uBandHalf * 0.93 + aa, ax));
-  float fillet = clamp(f1 + f2, 0.0, 1.0);
-  albedo = mix(albedo, uLine, fillet);
-  inlay = max(inlay, fillet);
-  relief = max(relief, fillet);
+  // The rules bounding the chequer: dark / pale / dark, mirrored either side.
+  float dark = bRule(t, 0.035, 0.035, aaT) + bRule(t, 0.185, 0.028, aaT)
+             + bRule(t, 0.815, 0.028, aaT) + bRule(t, 0.965, 0.035, aaT);
+  float pale = bRule(t, 0.110, 0.036, aaT) + bRule(t, 0.890, 0.036, aaT);
+  albedo = mix(albedo, uLine, clamp(dark, 0.0, 1.0));
+  albedo = mix(albedo, uTessPale * 1.04, clamp(pale, 0.0, 1.0) * 0.85);
+  float rules = clamp(dark + pale, 0.0, 1.0);
+  float inlay = clamp(tess.z + rules, 0.0, 1.0);
 
-  // The repeating element: a diamond flanked by two small bars, alternating value cell
-  // to cell — small, regular, and unmistakably deliberate against the weathering.
-  float dEdge = ax / (uBandHalf * 0.46) + abs(b) / (uCell * 0.38);
-  float dAA = aa / (uBandHalf * 0.46) + aa / (uCell * 0.38);
-  float diamond = (1.0 - smoothstep(1.0 - dAA, 1.0 + dAA, dEdge))
-                * (1.0 - smoothstep(uBandHalf * 0.56 - aa, uBandHalf * 0.56 + aa, ax));
-  float bar = (1.0 - smoothstep(uCell * 0.075 - aa, uCell * 0.075 + aa, abs(abs(b) - uCell * 0.5)))
-            * (1.0 - smoothstep(uBandHalf * 0.34 - aa, uBandHalf * 0.34 + aa, ax));
-  float alt = mod(cell, 2.0);
-  vec3 tess = mix(uTessDark, uTessPale, alt);
-  albedo = mix(albedo, tess, diamond);
-  albedo = mix(albedo, mix(uTessPale, uTessDark, alt), bar);
-  inlay = max(inlay, max(diamond, bar));
-
-  // Tesserae go missing. Where one has, the mortar under it shows and the surface drops.
-  float gone = step(0.88, bHash21(vec2(cell, floor(ax * 5.0)) + 5.7));
-  float lost = gone * max(diamond, bar);
+  // Tesserae go missing. Where one has, the bed shows and the surface drops.
+  float lost = step(0.90, bHash21(floor(vec2(s / uCell, t * 3.0)) + 5.7)) * tess.z * tf;
   albedo = mix(albedo, uGrime, lost * 0.9);
-  rough = mix(rough, 0.94, lost);
 
   float grain = bFbm(w * 9.0, 3);
   float fine = mix(0.5, bNoise(w * 33.0), bFade(0.03, px));
@@ -234,17 +232,24 @@ const BORDER_FRAG = /* glsl */ `
   albedo = mix(albedo, uDust, dust * 0.85);
 
   diffuseColor.rgb *= albedo;
-  gRough = clamp(rough + wear.z * 0.30 + dust * 0.55 + (grain - 0.5) * 0.14, 0.06, 1.0);
-  gReflMask = clamp((1.0 - dust * 1.4) * (1.0 - lost) * (0.55 + 0.45 * (1.0 - inlay)), 0.0, 1.0);
+  gRough = clamp(0.44 + tess.w * 0.22 + lost * 0.40
+                 + wear.z * 0.30 + dust * 0.55 + (grain - 0.5) * 0.14, 0.06, 1.0);
+  gReflMask = clamp((1.0 - dust * 1.4) * (1.0 - lost) * (0.30 + 0.35 * (1.0 - inlay)), 0.0, 1.0);
+  gReflJitter = grain - 0.5;
 
   float ee = max(0.005, px * 0.7);
   float h0 = bFbm(w * 11.0, 2) * 0.0016;
   float hx = bFbm((w + vec2(ee, 0.0)) * 11.0, 2) * 0.0016;
   float hz = bFbm((w + vec2(0.0, ee)) * 11.0, 2) * 0.0016;
   gNormalPert = vec3(-(hx - h0) / ee, 0.0, -(hz - h0) / ee);
-  // Inlay sits a hair proud of its bed; a lost tessera is a real hole.
-  gNormalPert += vec3(bNoise(w * 40.0) - 0.5, 0.0, bNoise(w * 40.0 + 3.0) - 0.5)
-               * (relief * 0.20 + lost * 0.75) * bFade(0.02, px);
+  // Every tessera stands a fraction proud of its bed and every rule is a cut line, so a
+  // grazing flame finds the whole grid. This is the strip's real signature.
+  vec2 aw = abs(w);
+  vec2 acrossDir = (aw.x > aw.y) ? vec2(sign(w.x), 0.0) : vec2(0.0, sign(w.y));
+  vec2 alongDir = vec2(-acrossDir.y, acrossDir.x);
+  float ridge = (tess.z - 0.5) * 2.0 * tf;
+  gNormalPert += vec3(acrossDir.x, 0.0, acrossDir.y) * (ridge * 0.26 - rules * 0.30 - lost * 0.55);
+  gNormalPert += vec3(alongDir.x, 0.0, alongDir.y) * tf * (fract(s / uCell) - 0.5) * 0.40;
 `;
 
 // ---------------------------------------------------------------------------------------
@@ -312,6 +317,7 @@ const KERB_FRAG = /* glsl */ `
   diffuseColor.rgb *= albedo;
   gRough = clamp(0.78 + 0.12 * grain + joint * 0.12 + dust * 0.15 + pit * 0.10 - scorch * 0.06, 0.3, 1.0);
   gReflMask = 0.0;
+  gReflJitter = 0.0;
 
   // Relief, in metres: block faces, tooling, grit — then the joint recess on top.
   float ee = max(0.006, px * 0.7);
@@ -391,12 +397,15 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
     BORDER_HEAD,
     BORDER_FRAG,
     {
-      uField: { value: c(0xa4a29a) },
-      uTessDark: { value: c(0x1b2028) },
-      uTessPale: { value: c(0xc3bdae) },
-      uLine: { value: c(0x20252c) },
+      uField: { value: c(0x33363c) },
+      uTessDark: { value: c(0x3b3e46) },
+      uTessPale: { value: c(0xcdc9bf) },
+      uTessMean: { value: c(0x6f6f6c) },
+      uLine: { value: c(0x22262c) },
       uGrime: { value: c(0x3a3831) },
-      uCell: { value: (2 * R.filletIn) / Math.round((2 * R.filletIn) / 0.235) },
+      // Square tesserae: three rows across the middle 60 % of the band, and a whole
+      // number of columns to the side so the pattern closes cleanly at every mitre.
+      uCell: { value: (2 * R.filletIn) / Math.round((2 * R.filletIn) / ((bandHalf * 2 * 0.6) / 3)) },
       uBandHalf: { value: bandHalf },
     },
     shared,

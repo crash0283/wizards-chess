@@ -68,6 +68,44 @@ float bVein(float t, float w){
 float bFade(float featureSize, float px){
   return smoothstep(px * 0.55, px * 1.9, featureSize);
 }
+
+/**
+ * Two rows of small alternating tesserae — the inlaid geometric band that runs down both
+ * sides of every joint and right round the field. This is the finest detail in the
+ * reference frame and the reason its floor plane reads as the highest-detail region of
+ * the image rather than the lowest.
+ *
+ *   t     0..1 across the band
+ *   s     metres along the band
+ *   cell  along-band pitch of one tessera, metres
+ *   rows  number of tessera rows across the band
+ *   aaT   antialias width in t units, aaS the same in cell units
+ *
+ * Returns  x = pale tessera, y = dark tessera, z = any tessera, w = the mortar between.
+ * The parity of (row + column) is what makes it alternate, so the band never reads as a
+ * dashed line: it is a chequer, exactly like the film's.
+ */
+vec4 bTess(float t, float s, float cell, float rows, float aaT, float aaS){
+  float rowf = t * rows;
+  float row = floor(rowf);
+  float rt = rowf - row;
+  float cf = s / cell;
+  float col = floor(cf);
+  float ct = cf - col;
+  // The mortar between tesserae. Widened by the antialias width so that once the
+  // elements fall below a pixel the band settles to its mean tone instead of crawling.
+  float gT = 0.15 + aaT * 1.4;
+  float gS = 0.15 + aaS * 1.4;
+  float body = smoothstep(gT - aaT, gT + aaT, min(rt, 1.0 - rt) * 2.0)
+             * smoothstep(gS - aaS, gS + aaS, min(ct, 1.0 - ct) * 2.0);
+  float parity = mod(col + row, 2.0);
+  return vec4(body * parity, body * (1.0 - parity), body, 1.0 - body);
+}
+
+/** A hard-edged line across a band, centred at \`at\` with half-width \`hw\` in t units. */
+float bRule(float t, float at, float hw, float aa){
+  return 1.0 - smoothstep(hw - aa, hw + aa, abs(t - at));
+}
 `;
 
 /**
@@ -98,15 +136,28 @@ uniform float uReflStrength;
 uniform float uReflLod;
 uniform vec3 uReflTint;
 
-vec3 boardReflection(vec4 projected, vec3 nWorld, float rough, float mask){
+/**
+ * The film's floor is reflective but it is not a mirror: the reflected ranks are broad,
+ * soft-edged smears, dulled and broken up by the dust and scuffing lying on the polish.
+ * So the sample is pushed a long way up the mip chain even where the stone is at its
+ * cleanest (the 0.34 floor below), ripples with the surface normal, and dies wherever
+ * the marble is dusty, veined or worn.
+ */
+vec3 boardReflection(vec4 projected, vec3 nWorld, float rough, float mask, float jitter){
   if (uReflStrength <= 0.0 || projected.w <= 0.0) return vec3(0.0);
   vec2 uv = projected.xy / projected.w;
   // Ripple the sample by the surface normal so the reflection breaks up over the
   // slab's undulation instead of sliding across it like a mirror.
-  uv += nWorld.xz * 0.030;
-  if (uv.x < -0.05 || uv.x > 1.05 || uv.y < -0.05 || uv.y > 1.05) return vec3(0.0);
-  float lod = uReflLod * clamp((rough - 0.06) * 2.2, 0.0, 1.0);
+  uv += nWorld.xz * 0.055 + vec2(jitter, jitter * 0.6) * 0.02;
+  // Soft fade off the edge of the mirror rather than a hard cut.
+  vec2 e = min(uv, 1.0 - uv);
+  float inside = smoothstep(-0.03, 0.045, min(e.x, e.y));
+  if (inside <= 0.0) return vec3(0.0);
+  // Blurred, but never blurred flat: past the top of a mip chain a reflection stops
+  // being an image and becomes a uniform pale wash laid over the whole floor, which
+  // erases the light/dark chequer far more thoroughly than a sharp mirror ever would.
+  float lod = uReflLod * clamp(0.22 + (rough - 0.05) * 1.8, 0.0, 1.0);
   vec3 c = textureLod(uRefl, clamp(uv, vec2(0.0), vec2(1.0)), lod).rgb;
-  return c * uReflTint * mask;
+  return c * uReflTint * mask * inside;
 }
 `;

@@ -167,7 +167,7 @@ export function createPlanarReflection(world: World, planeY: number): PlanarRefl
     textureMatrix,
     // Cap the blur: the reference reflections are broad but still legible as pieces,
     // and the top of a mip chain is a flat colour, not a reflection.
-    maxLod: 4.0,
+    maxLod: high ? 2.8 : 2.0,
     driver,
     exclude,
     dispose() {

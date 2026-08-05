@@ -20,8 +20,15 @@ export const AtmosphereShader = {
     uCamPos: { value: new THREE.Vector3() },
     /** Linear-space colour of the veil. Blue, lifted, low chroma. */
     uHazeColor: { value: new THREE.Vector3(0.0122, 0.0281, 0.0605) },
-    uDensity: { value: 0.026 },
-    uStrength: { value: 0.92 },
+    /**
+     * Thinned. The veil is a mix TOWARD a fixed lifted blue, so it is a floor as much as
+     * a fade: as the room's own light came down, the haze stopped reading as depth and
+     * started reading as a flat plate laid over everything past the near kerb. It had
+     * erased the marble's veining and most of the checker over the far half of the board,
+     * which the reference carries in full contrast right up to the far kerb.
+     */
+    uDensity: { value: 0.018 },
+    uStrength: { value: 0.80 },
     /** Height (metres) over which the haze thins out toward the vault. */
     uHazeScale: { value: 4.5 },
     uHazeFloor: { value: 4.5 },

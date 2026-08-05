@@ -1,28 +1,37 @@
 /**
  * PIECE: chamber — the stone hall itself.
  *
- * A subterranean chamber roughly 31 x 38 metres on plan with a vault twenty-two metres
- * over the board: enormous, empty, and made of stone that was cut and laid rather than
- * poured. Three scales of detail, deliberately:
+ * The room has one job and it is not to be a room. It is to ENCLOSE the board, so that
+ * the board reads as the floor of a cathedral-scale hall and not as a lit diorama on a
+ * table in an empty warehouse. Everything below follows from that:
  *
- *   architecture  — stepped plinth, engaged piers, an arcade of deep arched recesses,
- *                   a band of blind arcading, a moulded string course, a great portal
- *   masonry       — several thousand individual instanced blocks in courses, each one
- *                   proud or sunk, tilted, chamfered, some cracked, some fallen out
- *   surface       — a procedural atlas of pitting, chisel tooling and chipped arrises
+ *   screens  — `screen.ts`. Colossal screens of smooth round shafts standing hard
+ *              against both long kerbs, leaning inward as they rise so they leave the
+ *              top of frame, with a third screen closing the far end. These are the
+ *              architecture. They are what fills the outer thirds with stone instead of
+ *              tiled floor receding into nothing, and what stops the eye finding a
+ *              corner or a ceiling.
+ *   walls    — `wall.ts`. Large ordered ashlar with fine joints, a stepped plinth, a
+ *              blind arcade, a moulded string course and the great portal, standing
+ *              behind the screens and seen past them.
+ *   floor    — `floor.ts`. Flags, laid to broken joints, everywhere the board is not.
+ *   scree    — `rubble.ts`. What has come off the walls, banked against the foot of
+ *              everything vertical.
  *
- * Age is written on top of all three by `weather.ts`: damp running down out of the
- * string course, salt blooming out of the plinth, scree gathering in the corners, and
- * the whole room losing itself into unresolved darkness above the arcade.
+ * The idiom is carved, not laid. Age shows as staining and soot rather than as crumbling
+ * — architecture is the story, erosion is not — so the shafts carry no joints at all and
+ * the masonry behind them is cut large and set close.
  *
- * Two structural notes:
+ * Three structural notes:
  *
- *  - Walls are hidden when the camera is outside them. `wide-establishing` sits eight
- *    metres beyond the west wall and `king-surrender` sits beyond the south wall, so a
- *    solid room would render the back of a wall and nothing else. The test is a plane
- *    test against the live camera, run from `updateMatrixWorld` so it is always exact
- *    for the frame being drawn, and it is a pure function of camera position — no
- *    clocks, no state, the same frame every time.
+ *  - Walls AND screens are hidden when the camera is outside them. `wide-establishing`
+ *    sits eight metres beyond the west wall and `king-surrender` sits beyond both the
+ *    south wall and the south screen, so a solid room would render the back of one and
+ *    nothing else. The test is a plane test against the live camera, run from
+ *    `updateMatrixWorld` so it is always exact for the frame being drawn, and it is a
+ *    pure function of camera position — no clocks, no state, the same frame every time.
+ *  - The screens occlude most of the wall masonry from most cameras, which is why the
+ *    room got cheaper to draw when they went in rather than dearer.
  *  - `scene.fog` belongs to the lighting piece. Nothing here touches it.
  */
 import * as THREE from 'three';
@@ -41,7 +50,7 @@ import { buildPortalOrders, buildPortalPassage, portalHalfWidth, type PortalSpec
 import { buildFloor, buildFloorSlab } from './floor';
 import { buildScree, type ScreeLine } from './rubble';
 import {
-  buildSideScreen, buildFarScreen, buildBackRow, makeCarvedTone, SIDE_Z, PORTAL_X,
+  buildSideScreen, buildFarScreen, buildBackRow, makeCarvedTone, SIDE_Z, FAR_X, PORTAL_X,
 } from './screen';
 import { makeGrainNormal } from './carved';
 import { hashString } from '../core/rng';
@@ -371,15 +380,37 @@ export function createChamber(world: World): Chamber {
 
   // The end wall behind the heap, in the same idiom, so the far end of the room is stone
   // and not a receding plane of blocks.
+  const fg = new THREE.Group();
+  fg.name = 'chamber-screen-far';
   const far = buildFarScreen(hi, carvedTone);
   geometries.push(far.geometry);
   const farMesh = new THREE.Mesh(far.geometry, carvedStone);
-  farMesh.name = 'chamber-screen-far';
+  farMesh.name = 'chamber-screen-far-shafts';
   farMesh.receiveShadow = true;
   farMesh.castShadow = false;
-  group.add(farMesh);
+  fg.add(farMesh);
   surfaces.push(farMesh);
-  panels.push({ groups: [farMesh], nx: -1, nz: 0, d: HW - 0.9 });
+
+  // A bank of accumulated debris along the foot of the far screen. In the reference the
+  // far end of the room is a heap with fires burning in it, not a clean line of shafts
+  // meeting a clean floor — and without it the screen reads as a hanging curtain.
+  const farScreeSink = new InstanceSink(CHUNK_VARIANTS);
+  buildScree(
+    farScreeSink,
+    world.rng.fork('chamber-far-scree'),
+    screeWeather,
+    [{
+      ax: FAR_X - 1.05, az: -14.6, bx: FAR_X - 1.05, bz: 14.6,
+      nx: -1, nz: 0, losses: [], uMin: -14.6, uMax: 14.6,
+    }],
+    hi,
+  );
+  farScreeSink.bake(fg, chunkGeos, stone, 'chamber-far-scree', {
+    receiveShadow: true, castShadow: false,
+  });
+
+  group.add(fg);
+  panels.push({ groups: [fg], nx: -1, nz: 0, d: HW - 0.9 });
   screenTris += far.triangles;
   void screenTris;
 
