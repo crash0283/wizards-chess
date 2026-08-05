@@ -64,19 +64,43 @@ export interface FractureOptions {
 }
 
 /**
- * Brightness of a fresh break relative to the weathered skin it is exposed under.
- * Raw stone reads pale and raw against a stained outer face — but a break is stone, not
- * chalk: push this past about 1.6 and the wreckage blows out white and stops belonging
- * to the statue it came from.
+ * A fragment is not a lit statue. It is a chunk of the statue's *shell* tumbling through
+ * a cloud, seen mostly against that cloud — in both reference frames the flying pieces
+ * read as DARK angular silhouettes punching out through pale dust, not as bright stone.
+ * Handing the fragments the intact figure's own albedo is what drove 5.5 % of the frame
+ * to pure white, and once everything clips no break face can be brighter than any skin.
+ * So the weathered skin comes down, and the break comes up from there.
  */
-const FRESH_GAIN = 1.22;
+const SKIN_GAIN = 0.62;
+/**
+ * And a hard ceiling on it. Scaling alone is not enough: the pale army's albedo is close
+ * to 1, so a proportional knock-down still leaves its shards near the top of the range,
+ * where they clip — and a clipped skin cannot be darker than a clipped break, which is
+ * exactly why "fresh break faces brighter than outer surfaces" kept failing.
+ */
+const SKIN_CEIL = 0.34;
+/**
+ * Brightness of a fresh break relative to the weathered skin it is exposed under. The
+ * ratio is what the eye reads, and the ceiling is what keeps it out of the clip.
+ */
+const FRESH_GAIN = 1.95;
 const FRESH_FLOOR = 0.030;
+const FRESH_CEIL = 0.60;
+
+/** Weather the outer shell down, in place, before anything is cut out of it. */
+function weather(soup: Soup): void {
+  for (let i = 0; i < soup.v.length; i += CH) {
+    soup.v[i + 6] = Math.min(SKIN_CEIL, soup.v[i + 6] * SKIN_GAIN);
+    soup.v[i + 7] = Math.min(SKIN_CEIL, soup.v[i + 7] * SKIN_GAIN);
+    soup.v[i + 8] = Math.min(SKIN_CEIL * 1.06, soup.v[i + 8] * SKIN_GAIN * 1.04);
+  }
+}
 
 export function freshColourFor(soup: Soup): [number, number, number] {
   const [r, g, b] = meanColour(soup);
   // Raw stone is lighter, rawer and less stained than any weathered face. Push toward
   // a slightly warm neutral as well as up, so a break face never reads as a grey decal.
-  const lift = (c: number, k: number) => Math.min(0.92, c * FRESH_GAIN * k + FRESH_FLOOR);
+  const lift = (c: number, k: number) => Math.min(FRESH_CEIL, c * FRESH_GAIN * k + FRESH_FLOOR);
   return [lift(r, 1.02), lift(g, 1.0), lift(b, 0.95)];
 }
 
@@ -86,6 +110,7 @@ export function freshColourFor(soup: Soup): [number, number, number] {
  */
 export function fracture(soup: Soup, opts: FractureOptions): Fragment[] {
   const { rng } = opts;
+  weather(soup);
   const bounds = soupBounds(soup);
   const size = bounds.getSize(new THREE.Vector3());
   const mid = bounds.getCenter(new THREE.Vector3());
@@ -267,7 +292,7 @@ function finish(cell: Soup, fresh: [number, number, number]): Fragment | null {
   // as debris from something else entirely.
   const thin = Math.min(bs.x, bs.y, bs.z);
   const wide = Math.max(bs.x, bs.y, bs.z);
-  if (thin < 0.025 && wide > 0.28) return null;
+  if (thin < 0.040 && wide > 0.24) return null;
   recentre(cell, cx, cy, cz);
 
   let radius = 0;

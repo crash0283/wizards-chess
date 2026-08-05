@@ -17,7 +17,7 @@ import { SQUARE } from '../core/constants';
 import { makeFbm, type Rng } from '../core/rng';
 import type { World } from '../core/world';
 import { NOISE_GLSL, REFLECT_GLSL, WEAR_GLSL } from './glsl';
-import { BED_Y, CHAMFER, INLAY_W, JOINT, TESS_CELL, TOP_Y } from './layout';
+import { BED_Y, CHAMFER, JOINT, JOINT_W, TOP_Y } from './layout';
 
 /** Half-width of a slab at bed level. */
 const HALF_SLAB = (SQUARE - JOINT) / 2;
@@ -242,14 +242,14 @@ uniform vec3 uHalo;
 uniform vec3 uFresh;
 uniform vec3 uDust;
 uniform vec3 uSoil;
-uniform vec3 uInlayBed;
-uniform vec3 uInlayPale;
-uniform vec3 uInlayDark;
-uniform vec3 uInlayMean;
+uniform vec3 uJointBed;
+uniform vec3 uJointPale;
+uniform vec3 uJointSeam;
 uniform vec3 uFigure;
 uniform float uFigureWeight;
 uniform float uVeinScale;
 uniform float uVeinWidth;
+uniform float uHairWeight;
 uniform float uVeinWeight;
 uniform float uHaloWeight;
 uniform float uPolish;
@@ -266,8 +266,7 @@ ${REFLECT_GLSL}
 
 const float B_SQ = ${SQUARE.toFixed(4)};
 const float B_HALF_TOP = ${HALF_TOP.toFixed(5)};
-const float B_INLAY_W = ${INLAY_W.toFixed(5)};
-const float B_TESS = ${TESS_CELL.toFixed(5)};
+const float B_JOINT_W = ${JOINT_W.toFixed(5)};
 
 /** Per-slab constants: a rotation and an offset into the block the slab was cut from. */
 vec4 bSlabKey(vec2 w){
@@ -321,9 +320,11 @@ const FRAG_COLOR = /* glsl */ `
 
   // --- the figure ---------------------------------------------------------------------
   // The reference's light squares carry bold dark branching ink-veins running right
-  // across a square: not mottling, a drawn graphic, tens of centimetres wide. See
-  // bMarbleFigure in glsl.ts for why the leading generation is so coarse.
-  vec4 fig = bMarbleFigure(mp, uVeinWidth, px);
+  // across a square: not mottling, a drawn graphic, twenty centimetres wide, forking,
+  // with hairline tributaries hanging off it. See bMarbleFigure in glsl.ts — and note
+  // that the previous build's leading generation ran at one crossing per EIGHT metres,
+  // which is why this used to come out as an airbrushed smear rather than as figure.
+  vec4 fig = bMarbleFigure(mp, uVeinWidth, px, uHairWeight);
   float core = fig.x;
   float halo = fig.y;
   float cloud = fig.z;
@@ -361,7 +362,13 @@ const FRAG_COLOR = /* glsl */ `
   float scuff = smoothstep(0.48, 0.92, bNoise(vec2(w.x * 0.55 + w.y * 0.20, w.y * 6.5 - w.x * 1.1)))
               * bFade(0.16, px);
   float film = clamp(grime * 0.78 + scuff * 0.60, 0.0, 1.0) * uDusting;
-  albedo = mix(albedo, uDust, film * 0.26);
+  // This one mix was the second-largest error on the navy squares, after the joint band.
+  // uDust is a mid grey — a hundred and thirty times the linear value of the navy's own
+  // albedo — so mixing a quarter of it in took a dark square from the film's (28,27,34)
+  // to about (128,...) on its own, before the mirror had added anything. A polished floor
+  // between the flames is CLEAN; the dust that matters is the dust the game throws, which
+  // arrives through the wear map below. This layer is now a whisper.
+  albedo = mix(albedo, uDust, film * 0.16);
 
   // What the game has thrown at it.
   // Deposited dust is cloudy, not a wash: the map carries where it landed, the shader
@@ -379,36 +386,48 @@ const FRAG_COLOR = /* glsl */ `
   float toJoint = smoothstep(B_HALF_TOP * 0.80, B_HALF_TOP, edge);
   float grits = clamp(speckA * 0.55 + speckB, 0.0, 1.0)
               * (0.16 + 1.2 * dustMask + 0.35 * worn + 0.75 * toJoint + 0.5 * film);
-  albedo = mix(albedo, uDust * 0.78, clamp(grits, 0.0, 1.0) * 0.30);
+  albedo = mix(albedo, uDust * 0.78, clamp(grits, 0.0, 1.0) * 0.20);
 
-  // --- the inlaid tessera band round the slab's edge ----------------------------------
-  // Two rows of small alternating light/dark elements worked into the polished face
-  // along every edge, so that a joint reads marble | inlay | dark line | inlay | marble.
-  // This is the finest detail in the reference frame and it runs across the whole floor,
-  // not only round the rim: it is what makes the floor plane the busiest region of the
-  // image and what gives its gradients a hard, directional grid to sit on.
-  float aaT = clamp(px / B_INLAY_W, 0.0008, 0.5);
-  float aaS = clamp(px / B_TESS, 0.0008, 0.5);
-  float bt = clamp((B_HALF_TOP - edge) / B_INLAY_W, 0.0, 1.4);
-  float band = 1.0 - smoothstep(0.96, 1.0 + 3.0 * aaT, bt);
-  // Mitre the two runs at 45°, the way inlay is really laid into a corner.
-  float bs = (abs(loc.x) > abs(loc.y)) ? loc.y : loc.x;
-  vec4 tess = bTess(clamp((bt - 0.20) / 0.62, 0.0, 1.0), bs, B_TESS, 2.0, aaT / 0.62, aaS);
-  float tf = bFade(B_TESS * 0.42, px);
+  // --- the joint ------------------------------------------------------------------------
+  // A joint, and nothing more. The previous build ran a two-row inlaid tessera chequer
+  // down all 112 internal joints of the field; at the distance this shot is judged from
+  // that resolves to a dashed line — a flat marching-ants marquee round every square,
+  // with no relief and no counterpart in the film. In the reference the inlaid work is
+  // ONE carved band between the field and the kerb (see surround.ts) and the joints
+  // between squares are a narrow run of pale grit with a dark seam down the middle.
+  //
+  // THE ARITHMETIC HERE WAS THE WHOLE PROBLEM, and it had been for several rounds. The
+  // band coordinate was clamped at 1.4 while its outer edge was antialiased with
+  // smoothstep(0.96, 1.0 + 3 * aa, bt), and aa saturated at 0.5 as soon as a pixel got
+  // as wide as the band. That smoothstep then ran from 0.96 to 2.5 — past the clamp — so
+  // in the MIDDLE of every slab it evaluated to only 0.25, leaving the joint material
+  // covering three quarters of the square. Every slab in the mid-field was being painted
+  // with grey mortar. That is the "matte painted concrete", that is why the cream and the
+  // navy had collapsed to the same mid blue-grey, and that is why no amount of veining
+  // showed: it was all underneath a wash.
+  //
+  // Written properly: bt is not clamped, and the edge is a single antialiased step at
+  // bt = 1 whose width is the pixel footprint. Once the joint goes sub-pixel the step
+  // becomes a partial coverage blend, which is exactly right — the joint greys out
+  // towards the far end of the board instead of flooding the field.
+  // Written properly, and written as the exact box-filter COVERAGE rather than as a
+  // smoothstep. bt is the distance in from the slab's arris in units of the joint's own
+  // width, so this slab's half of the joint is exactly bt in [0, 1]. A pixel centred at
+  // bt with footprint aaT covers the overlap of [bt - aaT, bt + aaT] with that interval,
+  // and the fraction of the pixel that overlap occupies IS how much joint the pixel is
+  // looking at. Once the joint goes sub-pixel at the far end of the board that fraction
+  // falls off as 1/aaT and the joint correctly fades to a thin grey line — where a
+  // smoothstep, whose centre is always full strength however wide its shoulders, instead
+  // draws a fat bright bead chain right to the vanishing point.
+  float aaT = max(px / B_JOINT_W, 0.02);
+  float bt = (B_HALF_TOP - edge) / B_JOINT_W;
+  float band = max(min(1.0, bt + aaT) - max(0.0, bt - aaT), 0.0) / (2.0 * aaT);
+  vec3 jt = bJoint(bt, w, px);
+  vec3 jointCol = mix(uJointBed, uJointPale, jt.x);
+  jointCol = mix(jointCol, uJointSeam, jt.y * 0.85);
+  albedo = mix(albedo, jointCol, band * 0.95);
 
-  vec3 bandCol = mix(uInlayBed, uInlayPale, tess.x * 0.96);
-  bandCol = mix(bandCol, uInlayDark, tess.y * 0.88);
-  bandCol = mix(uInlayMean, bandCol, tf);
-  // Fine dark rules bounding the band, and a pale arris catching the light on the very
-  // outer edge where the polished face turns down into the chamfer.
-  bandCol = mix(bandCol, uInlayBed * 0.40, bRule(bt, 0.885, 0.055, aaT));
-  bandCol = mix(bandCol, uInlayPale * 1.06, bRule(bt, 0.055, 0.055, aaT) * 0.75);
-  // Tesserae go missing; where one has, the bed shows through and the surface drops.
-  float lost = step(0.90, bHash21(floor(vec2(bs / B_TESS, bt * 2.0)) + key.zw * 61.0)) * tess.z * tf;
-  bandCol = mix(bandCol, uSoil, lost * 0.85);
-  albedo = mix(albedo, bandCol * (0.86 + 0.28 * bFbm(w * 7.0, 2)), band * 0.94);
-
-  albedo = mix(albedo, uSoil, toJoint * 0.20 * (1.0 - band));
+  albedo = mix(albedo, uSoil, toJoint * 0.16 * (1.0 - band));
 
   diffuseColor.rgb *= albedo;
 
@@ -428,12 +447,15 @@ const FRAG_COLOR = /* glsl */ `
   // so one expression serves both armies' stone.
   float figure = clamp(core + hair * 0.45, 0.0, 1.0);
   gFigure = mix(vec3(1.0), uFigure, figure * uFigureWeight);
-  // Broad value structure across the slab, well below vein scale. This is the layer that
-  // keeps the far half of the board from flattening into a single tone.
-  gFigure *= 0.82 + 0.34 * cloud + 0.10 * halo;
+  // Broad value structure across the slab, WELL below vein scale — and kept small. At
+  // 0.82 + 0.34 * cloud this term swung a slab's value by forty per cent over a metre and
+  // a half, which is precisely the "soft airbrushed low-frequency smear" that was
+  // standing in for figure. The veins carry the graphic; this only keeps the far half of
+  // the board off a single flat tone.
+  gFigure *= 0.955 + 0.09 * cloud;
   // Dust and scuffing stand ON the polish, so they lift the surface rather than tint it.
   gFigure *= 1.0 + film * 0.10 + clamp(grits, 0.0, 1.0) * 0.12;
-  // The inlay is its own stone: leave it out of the marble's figure entirely.
+  // The joint is its own material: leave it out of the marble's figure entirely.
   gFigure = mix(gFigure, vec3(1.0), band);
 
   // --- roughness ------------------------------------------------------------------------
@@ -450,7 +472,8 @@ const FRAG_COLOR = /* glsl */ `
   rough += dustMask * 0.62;
   rough += score * 0.35;
   rough += film * 0.58;
-  rough += band * (0.34 + 0.22 * tess.w) + lost * 0.30;
+  // Grit and mortar take no polish at all.
+  rough += band * (0.50 + 0.18 * jt.x);
   rough += (bNoise(w * 3.1) - 0.5) * 0.09;
   rough += clamp(grits, 0.0, 1.0) * 0.40;
   // Polishing swirl: fine directional scratches, laid per slab. They only exist within
@@ -460,7 +483,7 @@ const FRAG_COLOR = /* glsl */ `
   rough += (scratch - 0.5) * 0.16 * bFade(0.032, px);
   gRough = clamp(rough, 0.045, 1.0);
   gReflMask = clamp((1.0 - dustMask * 1.25) * (1.0 - worn * 0.7) * (1.0 - score) * (1.0 - chip)
-                    * (1.0 - film * 0.86) * (1.0 - core * 0.78) * (1.0 - band * 0.92), 0.0, 1.0);
+                    * (1.0 - film * 0.86) * (1.0 - core * 0.78) * (1.0 - band * 0.96), 0.0, 1.0);
   gReflJitter = (grime - 0.5) * 0.9 + (scuff - 0.5) * 0.5;
 
   // --- how much specular this stone is allowed --------------------------------------
@@ -488,16 +511,12 @@ const FRAG_COLOR = /* glsl */ `
   gNormalPert += vec3(bNoise(w * 24.0) - 0.5, 0.0, bNoise(w * 24.0 + 7.0) - 0.5) * crack * 0.35;
   gNormalPert += vec3(bNoise(w * 46.0) - 0.5, 0.0, bNoise(w * 46.0 + 3.0) - 0.5)
                * clamp(grits, 0.0, 1.0) * 0.30 * bFade(0.026, px);
-  // Each tessera stands a fraction of a millimetre proud of its bed, so a grazing light
-  // finds every one of them. Across the band this is a hard, regular relief running
-  // parallel to the joint — the strongest directional signal on the whole floor.
-  vec2 bandDir = (abs(loc.x) > abs(loc.y)) ? vec2(0.0, 1.0) : vec2(1.0, 0.0);
+  // The joint is grit standing in a groove: irregular relief across its width, and the
+  // surface turning down into the seam where the two stones meet.
   vec2 acrossDir = (abs(loc.x) > abs(loc.y)) ? vec2(sign(loc.x), 0.0) : vec2(0.0, sign(loc.y));
-  float ridge = (tess.z - 0.5) * 2.0 * tf;
-  gNormalPert += vec3(acrossDir.x, 0.0, acrossDir.y) * band * ridge * 0.30;
-  gNormalPert += vec3(bandDir.x, 0.0, bandDir.y)
-               * band * tf * (fract(bs / B_TESS) - 0.5) * 0.42;
-  gNormalPert -= vec3(acrossDir.x, 0.0, acrossDir.y) * band * lost * 0.5;
+  gNormalPert += vec3(acrossDir.x, 0.0, acrossDir.y) * band * jt.z * 0.30;
+  gNormalPert += vec3(bNoise(w * 60.0) - 0.5, 0.0, bNoise(w * 60.0 + 11.0) - 0.5)
+               * band * 0.55 * bFade(0.016, px);
 `;
 
 const FRAG_ROUGH = /* glsl */ `
@@ -554,6 +573,8 @@ export interface MarbleSpec {
   veinScale: number;
   veinWidth: number;
   veinWeight: number;
+  /** How much of the finest tributary net this stone carries. */
+  hairWeight: number;
   haloWeight: number;
   polish: number;
   wornRough: number;
@@ -564,6 +585,13 @@ export interface MarbleSpec {
   dusting: number;
   /** Ceiling on the microfacet lobe. See FRAG_LIGHTS_END — this is the wet-plastic dial. */
   specular: number;
+  /**
+   * Luminance knee for the mirror, per stone. The navy squares need a far harder one
+   * than the cream: their own albedo is near-black, so ANY reflected ambient is the
+   * whole of what you see on them, whereas on the cream marble it is a minority of a
+   * bright surface. See boardReflection.
+   */
+  reflKnee: number;
   /**
    * Per-channel gain applied to the FINAL colour on the figure, after the reflection has
    * been added: below 1 for the light marble's ink veins, above 1 for the dark marble's
@@ -586,93 +614,114 @@ export interface MarbleSpec {
  */
 export const MARBLE: Record<'light' | 'dark', MarbleSpec> = {
   light: {
-    // Probed off the render, a light square was landing at (140,165,215): far too bright
-    // and blue over red by seventy counts where the reference frame's light squares
-    // measure (126,137,157) — cool, but nowhere near that cool, and nowhere near that
-    // bright. The room's key supplies all the blue this stone needs; a blue albedo on
-    // top of it doubles the bias, and a pale one blows out under the grazing reflection.
-    baseA: 0xb9bcc3,
-    baseB: 0x9ba0ab,
-    vein: 0x363c48,
-    halo: 0x737985,
-    fresh: 0xb5b8bf,
-    soil: 0x2b2d31,
-    // Together with bMarbleFigure's 0.13 cycles/m leading generation this puts one or
-    // two bold sweeps across a slab, ten to thirty centimetres wide, over about an
-    // eighth of its area: measured off the reference, where a light square's figure is a
-    // drawn graphic that reads from the back of the room, not a hairline.
+    // Probed against the frame, square for square: the film's light squares sit at
+    // (162,168,189) with their darkest vein cores around (104,113,126). This build was
+    // rendering (150,190,241) — the right VALUE but blue over red by ninety counts where
+    // the film is only twenty-seven. That excess blue was not albedo, it was the mirror
+    // and the environment lobe adding the cold room on top of the stone; with those two
+    // cut back the albedo has to carry more of the value itself, and it is warm
+    // off-white limestone, not a blue-grey, so the cold key lands it where the film is.
+    // Levelled against the frame with everything else already right: the film's light
+    // squares are (162,168,189), this build was rendering (210,241,254) — half a stop
+    // hot and cyan with it. The room's key on this floor is much stronger than a
+    // near-white albedo can absorb, so the stone itself has to be a mid warm limestone
+    // for the RENDERED square to come out the cream the film shows. Reading the albedo
+    // hex and expecting the pixel is the mistake; these are chosen from the pixel back.
+    baseA: 0x847d70,
+    baseB: 0x716b60,
+    vein: 0x30343c,
+    halo: 0x66635c,
+    fresh: 0x96918a,
+    soil: 0x24262a,
+    // Half-width of the trunk generation, in field units. With bMarbleFigure's new 0.75
+    // cycles/m leading generation this lays two to four bold strokes across a 2.35 m
+    // slab, swelling into pools and tapering out, over roughly a fifth of its area —
+    // measured off the reference at 4x.
     veinScale: 1.00,
-    veinWidth: 0.046,
+    veinWidth: 0.048,
     veinWeight: 0.96,
-    haloWeight: 0.56,
+    hairWeight: 1.0,
+    haloWeight: 0.30,
     // Polished, not lacquered. Under 0.3 the specular lobe is tight enough that the
     // environment returns a hard sheen on every square and the stone stops reading.
-    polish: 0.44,
+    polish: 0.42,
     wornRough: 0.34,
-    squareTint: 0.16,
+    squareTint: 0.14,
     crack: 0.85,
-    reflect: 0.34,
-    dusting: 1.0,
-    specular: 0.42,
-    figure: [0.40, 0.42, 0.47],
-    figureWeight: 0.92,
+    // The mirror is now put through a luminance knee (see boardReflection), so this
+    // number buys reflected FLAMES AND PLINTHS rather than a reflected ambient wash. It
+    // can therefore be higher than before and still leave the chequer standing.
+    reflect: 0.16,
+    dusting: 0.55,
+    specular: 0.14,
+    reflKnee: 0.60,
+    figure: [0.56, 0.58, 0.62],
+    figureWeight: 1.0,
   },
   dark: {
-    // Scanned across the reference frame's board, a dark square reads about (25,35,55)
-    // and its light neighbour about (150,163,182) — a five to one step, and the single
-    // largest source of gradient energy anywhere in that frame: eight of those edges
-    // stack up the floor plane, all of them near-horizontal, all of them hard.
+    // The number that matters most on this whole piece. Probed square by square against
+    // the frame, the film's dark squares have a MEDIAN of (28,27,34) — near-black, barely
+    // blue at all in the body of the stone — with occasional bright smears up to about
+    // (96,107,124) where a flame or a lit plinth is reflected in them. Their light
+    // neighbours sit at (162,168,189). That is a chequer of nearly six to one, and eight
+    // rows of those edges stacked up the floor plane are the largest single source of
+    // gradient energy in the frame.
     //
-    // This build was rendering (105,122,162) against (155,168,209): a ratio of 1.4. The
-    // chequer had essentially stopped existing, which is why the floor came out as the
-    // flattest region of the image however much figure was drawn on it. Nothing else in
-    // the board is worth as much as getting this one number right, so the navy is taken
-    // right down and its share of the mirror cut with it.
-    baseA: 0x0e1528,
-    baseB: 0x080c1a,
-    vein: 0x59668a,
-    halo: 0x2a3348,
-    fresh: 0x2b3346,
-    soil: 0x0a0c11,
-    veinScale: 0.72,
-    veinWidth: 0.038,
-    veinWeight: 0.80,
-    haloWeight: 0.46,
-    // Was 0.17 — SHINIER than the light marble, so the navy squares took the biggest
-    // share of the environment wash and lost the most contrast. They are the same
-    // polish as their neighbours.
-    polish: 0.42,
+    // This build was rendering the navy at (90,114,134) against (150,190,241): barely
+    // two to one, so the chequer had all but stopped existing and the field read as one
+    // sheet of mid blue-grey. The albedo was not the problem — it was already near-black
+    // — the additive mirror and specular were, which is why the fix lives mostly in
+    // boardReflection's luminance knee and in these two ceilings.
+    // Blue, not merely dark. The film's navy measures (28,27,34) in the body of a near
+    // square and (22,32,52) out at the far end where the air lifts it — barely saturated
+    // up close but unmistakably BLUE stone, which is what separates it from black slate.
+    baseA: 0x070c1e,
+    baseB: 0x040713,
+    // The navy's own figure is PALER than its ground, so every one of these knobs is a
+    // brightening one and every one of them is a chance to turn a dark square into
+    // granite. The film's dark squares are very nearly plain: a quiet cloudy wisp, no
+    // hairlines at all at this distance. Hence hairWeight a quarter and the vein itself
+    // a muted slate rather than the near-white it was.
+    vein: 0x36426a,
+    halo: 0x1a2237,
+    fresh: 0x1e2432,
+    soil: 0x070809,
+    veinScale: 0.80,
+    veinWidth: 0.036,
+    veinWeight: 0.55,
+    hairWeight: 0.25,
+    haloWeight: 0.24,
+    polish: 0.46,
     wornRough: 0.28,
-    squareTint: 0.14,
+    squareTint: 0.12,
     crack: 0.55,
-    // Was 1.30, then 0.60. The reference's navy squares do carry the reflected ranks —
-    // as isolated bright smears inside a near-black field, not as a wash over it — so
-    // the strength goes low while the mask stays free to spike where the room is bright.
-    reflect: 0.20,
-    dusting: 0.85,
-    specular: 0.11,
-    figure: [2.30, 2.20, 2.00],
-    figureWeight: 0.78,
+    // The navy squares do carry the reflected ranks and flames — as isolated bright
+    // smears inside a near-black field, never as a wash over it. The knee is what makes
+    // that distinction possible; this is only how much of the surviving highlight lands.
+    // Measured: the film's navy sits at (28,27,34) and this build was at (86,111,138).
+    // Every count of that gap was the mirror — the stone's own albedo cannot reach 108 —
+    // so the strength comes down and, far more importantly, the knee goes up until only
+    // the flames and the lit plinth faces survive it. What is left is what the film
+    // shows: a near-black square with a few bright smears lying down it.
+    reflect: 0.065,
+    dusting: 0.25,
+    specular: 0.014,
+    reflKnee: 2.8,
+    figure: [1.42, 1.40, 1.32],
+    figureWeight: 0.55,
   },
 };
 
 /**
- * The inlay is the same stone whichever square it borders: a dark slate bed with small
- * pale limestone and dark serpentine tesserae set into it. `mean` is what the band
- * settles to once the individual elements drop below a pixel, so the far end of the
- * board reads as a continuous fine grey rule rather than dissolving to black.
+ * The joint, not an inlay. Lime mortar with a coarse pale aggregate ground flush with
+ * the marble, and a dark seam where the two stones actually meet. Measured off the
+ * frame, a joint reads a little BELOW the light square beside it and well above the
+ * navy one — a continuous pale grey rule with a granular texture, one line per joint.
  */
-const INLAY = {
-  // A dark mortar between the beads. The joint has to read as light-dark-light across
-  // its width, not as a bright stitch laid on pale stone: that triple is repeated eight
-  // times down the field, nearly horizontally, and it is most of the floor's structure.
-  bed: 0x1f2228,
-  // In the reference the bead run sits at about the marble's own value, not above it:
-  // pushed brighter it stops being inlaid stone and becomes a string of blown dots
-  // stitched along the joint.
-  pale: 0xb9b4a7,
-  dark: 0x33363e,
-  mean: 0x67675f,
+const JOINT_STONE = {
+  bed: 0x555149,
+  pale: 0x8b857a,
+  seam: 0x1e2023,
 } as const;
 
 export interface Marble {
@@ -701,17 +750,19 @@ export function createMarble(
     uHalo: { value: c(s.halo) },
     uFresh: { value: c(s.fresh) },
     uSoil: { value: c(s.soil) },
-    uDust: { value: c(0x9a9c99) },
-    uInlayBed: { value: c(INLAY.bed) },
-    uInlayPale: { value: c(INLAY.pale) },
-    uInlayDark: { value: c(INLAY.dark) },
-    uInlayMean: { value: c(INLAY.mean) },
+    // Stone powder, not chalk. See the film mix in FRAG_COLOR for why its VALUE matters
+    // far more here than its hue.
+    uDust: { value: c(0x74736d) },
+    uJointBed: { value: c(JOINT_STONE.bed) },
+    uJointPale: { value: c(JOINT_STONE.pale) },
+    uJointSeam: { value: c(JOINT_STONE.seam) },
     uFigure: { value: new THREE.Vector3(s.figure[0], s.figure[1], s.figure[2]) },
     uFigureWeight: { value: s.figureWeight },
     uDusting: { value: s.dusting },
     uSpecular: { value: s.specular },
     uVeinScale: { value: s.veinScale },
     uVeinWidth: { value: s.veinWidth },
+    uHairWeight: { value: s.hairWeight },
     uVeinWeight: { value: s.veinWeight },
     uHaloWeight: { value: s.haloWeight },
     uPolish: { value: s.polish },
@@ -725,7 +776,11 @@ export function createMarble(
     uReflMatrix: { value: shared.reflMatrix },
     uReflLod: { value: shared.reflLod },
     uReflStrength: { value: shared.refl ? s.reflect : 0 },
-    uReflTint: { value: new THREE.Color(0.98, 0.99, 1.0) },
+    uReflTint: { value: new THREE.Color(0.99, 0.99, 1.0) },
+    // Luminance knee for the mirror. Everything in the mirrored room dimmer than this is
+    // suppressed quadratically; flames and lit stone come back at nearly full strength.
+    // See boardReflection — this is what stops the reflection being an ambient wash.
+    uReflKnee: { value: s.reflKnee },
   };
 
   const material = new THREE.MeshStandardMaterial({
@@ -745,7 +800,7 @@ export function createMarble(
   //
   // The board carries its OWN mirror (see reflection.ts), so the environment specular is
   // duplicating work here as well as destroying contrast. Kept low.
-  material.envMapIntensity = 0.28;
+  material.envMapIntensity = 0.20;
   (material as any).userData.marbleUniforms = uniforms;
   material.onBeforeCompile = marbleOnBeforeCompile;
   material.customProgramCacheKey = () => `board-marble-${world.quality}`;

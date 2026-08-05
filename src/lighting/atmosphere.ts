@@ -19,16 +19,25 @@ export const AtmosphereShader = {
     uViewInv: { value: new THREE.Matrix4() },
     uCamPos: { value: new THREE.Vector3() },
     /** Linear-space colour of the veil. Blue, lifted, low chroma. */
-    uHazeColor: { value: new THREE.Vector3(0.0122, 0.0281, 0.0605) },
+    uHazeColor: { value: new THREE.Vector3(0.0180, 0.0392, 0.0806) },
     /**
-     * Thinned. The veil is a mix TOWARD a fixed lifted blue, so it is a floor as much as
-     * a fade: as the room's own light came down, the haze stopped reading as depth and
-     * started reading as a flat plate laid over everything past the near kerb. It had
-     * erased the marble's veining and most of the checker over the far half of the board,
-     * which the reference carries in full contrast right up to the far kerb.
+     * Thinned twice now. The veil is a mix TOWARD a fixed lifted blue, so it is a floor as
+     * much as a fade: as the room's own light came down, the haze stopped reading as depth
+     * and started reading as a flat plate laid over everything past the near kerb, erasing
+     * the marble's veining and most of the chequer over the far half of the board — which
+     * the reference carries in full contrast right up to the far kerb.
+     *
+     * Thinner again, and the veil colour above is brighter. The two go together. This is a
+     * mix TOWARD a fixed colour, so whether haze reads as depth or as damage depends
+     * entirely on whether that colour sits above or below what it is veiling. At 0.0122 /
+     * 0.0281 / 0.0605 linear the veil was DARKER than lit marble, so the far half of the
+     * board was being mixed downward: measured in boxes, the film's board runs 0.357 near
+     * to 0.393 far — it gets brighter as it recedes — while ours ran 0.227 down to 0.184.
+     * Half of that collapse was here. A real veil scatters light INTO the ray; it lifts and
+     * de-saturates what is behind it and it never darkens it. Brighter colour, less of it.
      */
-    uDensity: { value: 0.017 },
-    uStrength: { value: 0.80 },
+    uDensity: { value: 0.0138 },
+    uStrength: { value: 0.74 },
     /** Height (metres) over which the haze thins out toward the vault. */
     uHazeScale: { value: 4.5 },
     uHazeFloor: { value: 4.5 },

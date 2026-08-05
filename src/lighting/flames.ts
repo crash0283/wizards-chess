@@ -32,6 +32,8 @@ export interface Flame {
   tint: THREE.Color;
   /** 0..1, refreshed every frame. Irregular, not a clean sine. */
   flicker: number;
+  /** Standing on flat polished stone, so it burns a pool and casts a reflection. */
+  ground: boolean;
 }
 
 /** Cold end and hot end of the fire gamut, in sRGB. Every flame lands between them. */
@@ -52,9 +54,17 @@ export interface FlameSystem {
 
 const HALF = BOARD_SIZE / 2; // 9.4 m
 
-/** Deterministic layout: the kerb ring, plus rubble and plinth flames behind the ranks. */
-function layout(rng: Rng): Array<{ x: number; y: number; z: number; size: number }> {
-  const out: Array<{ x: number; y: number; z: number; size: number }> = [];
+/**
+ * Deterministic layout: the kerb ring, plus rubble and plinth flames behind the ranks.
+ *
+ * `ground` marks a fire that is standing on a flat polished surface — the kerb tread —
+ * and therefore gets a contact pool and a reflection. Fires sitting in a rubble heap or
+ * up on a plinth have nothing flat under them and would show a pool floating in mid air.
+ */
+function layout(
+  rng: Rng,
+): Array<{ x: number; y: number; z: number; size: number; ground: boolean }> {
+  const out: Array<{ x: number; y: number; z: number; size: number; ground: boolean }> = [];
   const kerb = HALF + 0.78;
   const along = [-7.85, -4.72, -1.58, 1.58, 4.72, 7.85];
   // The two ends the armies stand behind carry fewer fires than the long sides — in the
@@ -68,22 +78,28 @@ function layout(rng: Rng): Array<{ x: number; y: number; z: number; size: number
   // of small ones, and squaring a uniform draw gives exactly that distribution.
   const j = () => rng.float(-0.62, 0.62);
   const k = () => rng.float(-0.16, 0.16);
+  // The exponent, not the range, is what makes a population of fires read as a set of
+  // individuals. u*u pushes nearly everything to the bottom of the range, which gave a
+  // kerb of near-identical small fires with the occasional outlier — birthday candles with
+  // one exception. u^1.35 over a wider span gives what a real kerb carries: a scatter of
+  // little ones, a working majority at mid size, and two or three genuinely big fires that
+  // dominate their stretch of stone.
   const pick = (lo: number, hi: number) => {
     const u = rng.float(0, 1);
-    return lo + (hi - lo) * u * u;
+    return lo + (hi - lo) * Math.pow(u, 1.35);
   };
   for (const a of along) {
-    out.push({ x: -kerb + k(), y: 0.3, z: a + j(), size: pick(0.24, 0.86) });
-    out.push({ x: kerb + k(), y: 0.3, z: a + j(), size: pick(0.24, 0.78) });
+    out.push({ x: -kerb + k(), y: 0.3, z: a + j(), size: pick(0.20, 0.92), ground: true });
+    out.push({ x: kerb + k(), y: 0.3, z: a + j(), size: pick(0.20, 0.94), ground: true });
   }
   for (const a of acrossEnds) {
-    out.push({ x: a + j(), y: 0.3, z: -kerb + k(), size: pick(0.20, 0.58) });
-    out.push({ x: a + j(), y: 0.3, z: kerb + k(), size: pick(0.20, 0.58) });
+    out.push({ x: a + j(), y: 0.3, z: -kerb + k(), size: pick(0.18, 0.66), ground: true });
+    out.push({ x: a + j(), y: 0.3, z: kerb + k(), size: pick(0.18, 0.66), ground: true });
   }
   // Corners of the kerb.
   for (const sx of [-1, 1]) {
     for (const sk of [-1, 1]) {
-      out.push({ x: sx * kerb, y: 0.32, z: sk * kerb, size: pick(0.38, 0.92) });
+      out.push({ x: sx * kerb, y: 0.32, z: sk * kerb, size: pick(0.30, 0.86), ground: true });
     }
   }
   // Burning in the accumulated rubble heaps behind each army.
@@ -93,7 +109,8 @@ function layout(rng: Rng): Array<{ x: number; y: number; z: number; size: number
         x: x + rng.float(-0.6, 0.6),
         y: rng.float(0.45, 1.05),
         z: sz * rng.float(12.0, 13.6),
-        size: pick(0.28, 0.74),
+        size: pick(0.26, 0.86),
+        ground: false,
       });
     }
   }
@@ -104,9 +121,29 @@ function layout(rng: Rng): Array<{ x: number; y: number; z: number; size: number
         x: x + rng.float(-0.4, 0.4),
         y: rng.float(0.55, 0.95),
         z: sz * rng.float(8.6, 10.0),
-        size: pick(0.18, 0.50),
+        size: pick(0.16, 0.56),
+        ground: false,
       });
     }
+  }
+  // The heap at the FAR END of the room — the bank of accumulated debris along the foot of
+  // the end screen, at x ~ 13.5. Appended last on purpose: the rng is drawn in sequence, so
+  // adding a group anywhere earlier would reshuffle every fire that follows it.
+  //
+  // This is the one place the layout was simply missing fires. `wide-establishing` looks
+  // straight down the long axis, so this heap sits at the top-centre of frame directly
+  // behind the far kerb — and in the film that is a lit, burning bank with several fires
+  // standing in it, one of the few genuinely bright things in the upper half of the
+  // picture. Ours was a dark strip, which cost the far end of the board its backing and
+  // left the top band of the frame with nothing in it to model.
+  for (const z of [-6.4, -2.6, 1.2, 5.1]) {
+    out.push({
+      x: rng.float(11.9, 13.6),
+      y: rng.float(0.34, 1.15),
+      z: z + rng.float(-0.9, 0.9),
+      size: pick(0.28, 0.94),
+      ground: false,
+    });
   }
   return out;
 }
@@ -289,6 +326,95 @@ void main(){
 }
 `;
 
+/**
+ * The pool a fire burns into the stone it stands on, plus its reflection in the polish.
+ *
+ * A flame that emits light but leaves no mark on the surface under it is a decal, and
+ * that has been the standing note on this piece for three rounds. Two things are missing
+ * from a point light alone. First the CONTACT POOL: right at the foot of a fire the stone
+ * is receiving light from a source a few centimetres away and is blown out — a hard
+ * inverse-square term that no light with a sane falloff will ever produce without also
+ * flooding everything within three metres. Second the REFLECTION: the kerb tread and the
+ * marble are polished, so each fire lays a soft vertical smear in them, and in a horizontal
+ * mirror that smear always runs from the object's foot TOWARD the viewer. Both live on the
+ * ground plane, so both are one flat quad per fire.
+ *
+ * The quad is built in the vertex shader from the horizontal direction to the camera, so
+ * the streak re-aims every frame with no CPU work and stays correct in the board's planar
+ * reflection pass too (that pass renders with its own camera, and `cameraPosition` follows
+ * it). Additive, no depth write.
+ */
+const POOL_VERT = /* glsl */ `
+attribute vec2 aCorner;    // x across the streak, y along it: -0.35 .. 1
+attribute vec3 aCentre;
+attribute vec4 aParams;    // phase, size, temp, flicker rate
+uniform float uTime;
+varying vec2 vUv;
+varying float vFlick;
+varying float vTemp;
+${NOISE_GLSL}
+void main(){
+  vUv = aCorner;
+  float ph = aParams.x;
+  float size = aParams.y;
+  vTemp = aParams.z;
+  float fl = flicker(uTime * aParams.w, ph + 0.61);
+  vFlick = fl;
+
+  // Horizontal direction from the fire to the eye. The reflection stretches along it.
+  vec3 toEye = cameraPosition - aCentre;
+  vec2 f = toEye.xz;
+  float fl2 = length(f);
+  vec2 fwd = fl2 > 1e-4 ? f / fl2 : vec2(1.0, 0.0);
+  vec2 side = vec2(-fwd.y, fwd.x);
+
+  // A grazing view stretches the reflection out; a steep one keeps it short and round.
+  float graze = clamp(fl2 / max(0.5, length(toEye)), 0.0, 1.0);
+  float len = size * (2.1 + 5.6 * graze * graze) * (0.86 + 0.28 * fl);
+  float wid = size * (1.24 + 0.30 * fl);
+
+  vec2 p = fwd * (aCorner.y * len) + side * (aCorner.x * wid);
+  vec3 wp = aCentre + vec3(p.x, 0.0, p.y);
+  gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+}
+`;
+
+const POOL_FRAG = /* glsl */ `
+precision highp float;
+uniform float uIntensity;
+uniform vec3 uColor;
+uniform float uTime;
+varying vec2 vUv;
+varying float vFlick;
+varying float vTemp;
+${NOISE_GLSL}
+void main(){
+  float s = vUv.x / 0.5;          // -1..1 across
+  float t = vUv.y;                // -0.35 behind the fire .. 1 toward the eye
+
+  // The contact pool: a tight radial burn centred on the fire's foot, in the quad's own
+  // squashed coordinates so it stays circular however far the streak is stretched.
+  float rad = length(vec2(s, t * 2.6));
+  float pool = exp(-rad * rad * 4.6);
+
+  // The reflection: a soft tongue running toward the eye, narrowing and fading as it goes,
+  // with the fire's own flicker broken into it so it lives rather than sitting there.
+  float along = smoothstep(-0.30, 0.02, t) * (1.0 - smoothstep(0.10, 1.0, t));
+  float w = 0.42 + 0.62 * t;
+  float across = exp(-(s * s) / (w * w));
+  float ripple = 0.62 + 0.38 * vnoise2(vec2(t * 3.4 - uTime * 0.9, vFlick * 2.0));
+  float streak = along * across * ripple * 0.62;
+
+  float a = pool + streak;
+  if (a < 0.004) discard;
+
+  vec3 c = uColor * mix(vec3(1.16, 0.74, 0.40), vec3(0.98, 1.00, 1.04), vTemp);
+  // The core of the pool burns toward white; the tail stays orange.
+  c = mix(c, vec3(1.0, 0.93, 0.82), smoothstep(0.55, 1.30, pool));
+  gl_FragColor = vec4(c * a * uIntensity * (0.68 + 0.64 * vFlick), 1.0);
+}
+`;
+
 export function createFlames(world: World, opts: { lightCount: number }): FlameSystem {
   const group = new THREE.Group();
   group.name = 'lighting-flames';
@@ -307,6 +433,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
     const hot = phaseRng.float(0, 1) < 0.28;
     const temp = hot ? 0.62 + u * 0.36 : u * u * 0.34 + 0.03;
     return {
+      ground: s.ground,
       index: i,
       pos: new THREE.Vector3(s.x, s.y, s.z),
       size: s.size,
@@ -405,7 +532,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const bodyMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 7.2 },
+      uIntensity: { value: 4.6 },
       uCore: { value: new THREE.Color(FIRE.core).convertSRGBToLinear() },
       uMid: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
       uEdge: { value: new THREE.Color(FIRE.edge).convertSRGBToLinear() },
@@ -486,6 +613,74 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   glowMesh.renderOrder = 19;
   group.add(glowMesh);
 
+  // --- contact pools and reflections ---------------------------------------------------
+  // One flat quad per ground-standing fire, lying a centimetre above the stone. See
+  // POOL_VERT / POOL_FRAG above for what it draws and why.
+  const ground = flames.filter((f) => f.ground);
+  const pPos = new Float32Array(ground.length * 4 * 3);
+  const pCorner = new Float32Array(ground.length * 4 * 2);
+  const pCentre = new Float32Array(ground.length * 4 * 3);
+  const pParams = new Float32Array(ground.length * 4 * 4);
+  const pIndex = new Uint16Array(ground.length * 6);
+  // Along the streak the quad runs from a little behind the fire to well in front of it,
+  // so the pool is never clipped by its own leading edge.
+  const PCORNERS: Array<[number, number]> = [
+    [-0.5, -0.35],
+    [0.5, -0.35],
+    [0.5, 1.0],
+    [-0.5, 1.0],
+  ];
+  ground.forEach((f, i) => {
+    for (let c = 0; c < 4; c++) {
+      const v = i * 4 + c;
+      pCorner[v * 2 + 0] = PCORNERS[c][0];
+      pCorner[v * 2 + 1] = PCORNERS[c][1];
+      pCentre[v * 3 + 0] = f.pos.x;
+      pCentre[v * 3 + 1] = f.pos.y + 0.012;
+      pCentre[v * 3 + 2] = f.pos.z;
+      pParams[v * 4 + 0] = f.phase;
+      pParams[v * 4 + 1] = f.size;
+      pParams[v * 4 + 2] = f.temp;
+      pParams[v * 4 + 3] = f.rate;
+    }
+    const o = i * 4;
+    pIndex.set([o, o + 1, o + 2, o, o + 2, o + 3], i * 6);
+  });
+
+  const poolGeo = new THREE.BufferGeometry();
+  poolGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+  poolGeo.setAttribute('aCorner', new THREE.BufferAttribute(pCorner, 2));
+  poolGeo.setAttribute('aCentre', new THREE.BufferAttribute(pCentre, 3));
+  poolGeo.setAttribute('aParams', new THREE.BufferAttribute(pParams, 4));
+  poolGeo.setIndex(new THREE.BufferAttribute(pIndex, 1));
+
+  const poolMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      // Deliberately quiet. A contact pool has to be legible, not a second light source:
+      // thirty of them at any real strength put the whole kerb in the warm bin and drove
+      // the frame's warm fraction to 0.197 against the film's 0.139.
+      // Tighter and brighter rather than broad and faint: the pool has to be a legible hot
+      // spot on the stone at the fire's foot, and area is what costs warm pixels, not peak.
+      uIntensity: { value: 0.46 },
+      uColor: { value: new THREE.Color(FIRE.light).convertSRGBToLinear() },
+    },
+    vertexShader: POOL_VERT,
+    fragmentShader: POOL_FRAG,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: true,
+    side: THREE.DoubleSide,
+    fog: false,
+    toneMapped: false,
+  });
+  const poolMesh = new THREE.Mesh(poolGeo, poolMat);
+  poolMesh.frustumCulled = false;
+  // Under the flame bodies and haloes, over everything solid.
+  poolMesh.renderOrder = 12;
+  group.add(poolMesh);
+
   // --- the real light pool ------------------------------------------------------------
   // Each of these is a genuine inverse-square source sitting inside its flame's lower
   // body. That is the whole point: a flame has to burn a warm pool into the stone it
@@ -559,6 +754,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
     tick(t: number) {
       bodyMat.uniforms.uTime.value = t;
       glowMat.uniforms.uTime.value = t;
+      poolMat.uniforms.uTime.value = t;
       let mean = 0;
       for (const f of flames) {
         f.flicker = THREE.MathUtils.clamp(flick(t, f.phase, f.rate) + 0.5, 0, 1);
@@ -566,7 +762,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
       }
       // The bounce breathes with the whole fire population, not with any one flame.
       mean = flames.length ? mean / flames.length : 0.5;
-      for (const l of bounce) l.intensity = 1.15 * (0.78 + 0.44 * mean);
+      for (const l of bounce) l.intensity = 0.82 * (0.78 + 0.44 * mean);
     },
 
     assign(camera: THREE.Camera) {
@@ -616,6 +812,8 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
       bodyMat.dispose();
       glowGeo.dispose();
       glowMat.dispose();
+      poolGeo.dispose();
+      poolMat.dispose();
       for (const l of lights) l.dispose();
       for (const l of bounce) l.dispose();
     },

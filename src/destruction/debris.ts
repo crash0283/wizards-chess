@@ -43,13 +43,22 @@ export interface Body {
   /** Total time spent touching anything — a body cannot roll for ever. */
   touching: number;
   age: number;
+  /**
+   * A body may not go to sleep before this age, whatever the contact solver thinks. The
+   * sleep tests are tuned to stop a fragment creeping across the marble for the rest of
+   * the game, and against a live burst they were firing within about 0.4 s of the blade
+   * landing: the whole debris field was static well before the aftermath camera rolled,
+   * which is what made the shot read as a frozen heap. A live burst sets this so the
+   * wreckage is guaranteed to be in flight for the part of the shot the audience sees.
+   */
+  minAge: number;
+  /** Hard stop, so `settled()` always resolves. */
+  maxAge: number;
 }
 
 const G = 9.81;
 /** Stone density, kg/m³ — a limestone chessman fragment really is this heavy. */
 const DENSITY = 2400;
-/** Nothing is allowed to keep moving past this, so `settled()` always resolves. */
-const MAX_AGE = 3.0;
 
 export interface Ground {
   /** Height of the rest surface (board or existing rubble) under a point. */
@@ -60,8 +69,14 @@ export interface Ground {
   stamp(x: number, z: number, radius: number, top: number): void;
 }
 
-/** Tallest a heap of rubble is allowed to get, metres above the marble. */
-const PILE_CAP = 0.75;
+/**
+ * Tallest a heap of rubble is allowed to get, metres above the marble. Thirty fragments
+ * all coming to rest inside one square ratchet this field up to its ceiling and then
+ * park on top of it, which put the wreckage on an invisible shelf three-quarters of a
+ * metre in the air. The reference has debris lying ON the marble with a low mound at the
+ * point of the break, so the ceiling is a shin, not a knee.
+ */
+const PILE_CAP = 0.26;
 
 /** A coarse height field over the whole board, in world XZ. */
 export function createGround(topY: number): Ground {
@@ -108,7 +123,7 @@ export function createGround(topY: number): Ground {
           if (d > r) continue;
           // Domed, so a pile grows a shape rather than a plateau.
           const k = Math.sqrt(Math.max(0, 1 - (d / r) * (d / r)));
-          const want = (top - topY) * 0.72 * (0.30 + 0.70 * k);
+          const want = (top - topY) * 0.45 * (0.30 + 0.70 * k);
           if (want > h[idx(ix, iz)]) h[idx(ix, iz)] = want;
         }
       }
@@ -136,6 +151,8 @@ export function makeBody(opts: {
   radius: number;
   volume: number;
   phase: number;
+  minAge?: number;
+  maxAge?: number;
 }): Body {
   const stone = opts.kind === 'stone';
   const mass = stone
@@ -152,17 +169,22 @@ export function makeBody(opts: {
     radius: opts.radius,
     mass,
     invI: 1 / Math.max(1e-4, 0.42 * mass * opts.radius * opts.radius),
-    restitution: stone ? 0.13 : 0.02,
-    friction: stone ? 0.85 : 0.95,
+    // Enough to bounce once and skitter, not enough to look rubbery. A block of stone
+    // dropped on polished marble does kick, and that first kick is most of what sells
+    // the weight — the previous 0.13 with a 0.7 m/s cut-off swallowed every impact.
+    restitution: stone ? 0.30 : 0.04,
+    friction: stone ? 0.72 : 0.95,
     // Stone this size does not care about air. Cloth cares about nothing else.
-    drag: stone ? 0.06 : 2.35,
-    angDrag: stone ? 0.30 : 2.10,
+    drag: stone ? 0.06 : 1.55,
+    angDrag: stone ? 0.30 : 1.35,
     flutter: stone ? 0 : 1,
     phase: opts.phase,
     sleeping: false,
     contact: 0,
     touching: 0,
     age: 0,
+    minAge: opts.minAge ?? 0,
+    maxAge: opts.maxAge ?? 3.0,
   };
 }
 
@@ -172,12 +194,18 @@ export function stepBody(b: Body, dt: number, ground: Ground): void {
   b.age += dt;
 
   if (b.kind === 'fabric') {
-    // Cloth sails: a slow swim across the fall, plus a wobble about its own plane.
+    // Cloth sails, and it does it unevenly: a swim across the fall, a stall as the sheet
+    // presents its face, then a slip as it spills the air and drops. Straight linear drag
+    // on its own gives a slab travelling at a constant unweighted glide with no
+    // gravitational acceleration anywhere in it, which is precisely how this read.
     const a = b.age * 3.1 + b.phase;
-    b.vel.x += Math.sin(a) * 1.9 * dt * b.flutter;
-    b.vel.z += Math.cos(a * 0.83 + 1.7) * 1.9 * dt * b.flutter;
-    b.omega.x += Math.sin(a * 1.7 + b.phase) * 2.2 * dt;
-    b.omega.z += Math.cos(a * 1.3) * 2.2 * dt;
+    b.vel.x += Math.sin(a) * 4.6 * dt * b.flutter;
+    b.vel.z += Math.cos(a * 0.83 + 1.7) * 4.6 * dt * b.flutter;
+    // Lift pulses with the tumble: face-on it stalls, edge-on it falls out of the sky.
+    b.vel.y += (0.55 + 0.45 * Math.sin(a * 1.9 + b.phase * 1.7)) * 3.6 * dt * b.flutter;
+    b.omega.x += Math.sin(a * 1.7 + b.phase) * 5.5 * dt;
+    b.omega.y += Math.cos(a * 0.9 + b.phase * 0.5) * 3.0 * dt;
+    b.omega.z += Math.cos(a * 1.3) * 5.5 * dt;
   }
 
   b.vel.y -= G * dt;
@@ -232,7 +260,7 @@ export function stepBody(b: Body, dt: number, ground: Ground): void {
     if (vn < 0) {
       const rxn = _imp.copy(_rn).cross(_n);
       const denom = 1 / b.mass + rxn.lengthSq() * b.invI;
-      const e = Math.abs(vn) < 0.7 ? 0 : b.restitution;
+      const e = Math.abs(vn) < 0.25 ? 0 : b.restitution;
       const j = (-(1 + e) * vn) / denom;
       b.vel.addScaledVector(_n, j / b.mass);
       b.omega.addScaledVector(_imp.copy(_rn).cross(_tan.copy(_n).multiplyScalar(j)), b.invI);
@@ -286,7 +314,9 @@ export function stepBody(b: Body, dt: number, ground: Ground): void {
 
   // Down and still, or down and out of momentum: either way it is finished. The second
   // test is what stops a fragment creeping across the marble for the rest of the game.
-  if ((touched && b.contact > 0.22) || b.touching > 0.85 || b.age > MAX_AGE) {
+  // Neither may fire before `minAge`: a live burst has to be seen to move.
+  if (b.age < b.minAge) return;
+  if ((touched && b.contact > 0.30) || b.touching > 1.1 || b.age > b.maxAge) {
     sleep(b, ground);
   }
 }

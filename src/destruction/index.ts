@@ -139,14 +139,22 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
       // The ceiling matters — stone thrown at ten metres a second lands three squares
       // away and is still in the air a second and a half later, and the reference has
       // the wreckage down and still, in a heap, around the piece that was struck.
-      const light = Math.min(1.8, 0.42 / (0.14 + f.radius));
-      const speed = force * vrng.float(1.2, 2.8) * light * spread;
+      //
+      // So the energy goes UP rather than out. Lift is what buys the shot its motion:
+      // a fragment thrown at 2.5 m/s vertically off a 1.2 m break is airborne for the
+      // better part of a second and lands about a square away, which is a real arc the
+      // camera can watch, while the same energy spent sideways would put it off the
+      // board. The previous split gave everything roughly a 0.3 s hop and left the field
+      // static for the whole of the aftermath.
+      const light = Math.min(1.6, 0.44 / (0.13 + f.radius));
+      const speed = force * vrng.float(1.5, 3.0) * light * spread;
+      const lift = force * vrng.float(2.6, 4.6) * Math.min(1.35, light) * spread;
       const vel = new THREE.Vector3(
-        away.x * speed + dir.x * speed * 0.45 + vrng.gauss() * 0.32,
-        Math.abs(away.y) * speed * 0.40 + vrng.float(0.8, 2.6) * Math.min(1.4, light) * spread,
-        away.z * speed + dir.z * speed * 0.45 + vrng.gauss() * 0.32,
+        away.x * speed + dir.x * speed * 0.45 + vrng.gauss() * 0.40,
+        Math.abs(away.y) * speed * 0.35 + lift,
+        away.z * speed + dir.z * speed * 0.45 + vrng.gauss() * 0.40,
       );
-      const spin = Math.min(17, 5.5 * light + 2.5);
+      const spin = Math.min(17, 6.5 * light + 3.0);
       const body = makeBody({
         kind: 'stone',
         object,
@@ -158,6 +166,9 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
         radius: f.radius,
         volume: f.volume,
         phase: vrng.float(0, 6.283),
+        // Staged wreckage is meant to bake to rest instantly; a live burst is the shot.
+        minAge: staged ? 0 : 0.55,
+        maxAge: staged ? 3.0 : 2.3,
       });
       fresh.push(body);
       if (!staged) {
@@ -197,6 +208,8 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
         radius: shred.radius,
         volume: shred.volume,
         phase: frng.float(0, 6.283),
+        minAge: staged ? 0 : 1.05,
+        maxAge: staged ? 3.0 : 3.2,
       }));
       if (!staged) {
         group.add(object);

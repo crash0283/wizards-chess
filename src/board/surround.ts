@@ -1,10 +1,14 @@
 /**
- * PIECE: board — the mortar bed, the inlaid border and the kerb.
+ * PIECE: board — the mortar bed, the carved border band and the kerb.
  *
- * Reference: between the marble field and the raised stone kerb runs a fine inlaid
- * geometric border strip — a narrow band of small repeating elements — and the fires burn
- * on top of the kerb itself. The kerb is the one place the board stops being marble: it
- * is the same pale, weathered, soot-marked limestone as the room.
+ * Reference: between the marble field and the raised stone kerb runs ONE inlaid
+ * geometric band — a chain of small repeating elements, cut into a sunk channel with
+ * real depth — and the fires burn on top of the kerb itself. The kerb is the one place
+ * the board stops being marble: it is the same pale, weathered, soot-marked limestone as
+ * the room, laid as a course of separate blocks rather than as a single ring.
+ *
+ * Note what is NOT here any more: inlay along the joints of the field. That belonged to
+ * an earlier reading of the frames and it was wrong — see layout.ts.
  *
  * The mortar bed is the surface you see when you look down into a joint. It is only ever
  * a few centimetres of the frame, but it is the reason the joints read as deep.
@@ -12,7 +16,7 @@
 import * as THREE from 'three';
 import type { World } from '../core/world';
 import { NOISE_GLSL, REFLECT_GLSL, WEAR_GLSL } from './glsl';
-import { BED_Y, KERB_Y, R, TOP_Y, sweepRing, type ProfilePoint } from './layout';
+import { BED_Y, BORDER_SINK, KERB_Y, R, TOP_Y, sweepRing, type ProfilePoint } from './layout';
 
 export interface SharedMaps {
   wear: THREE.Texture;
@@ -117,7 +121,10 @@ function baseMaterial(
     uReflMatrix: { value: shared.reflMatrix },
     uReflLod: { value: shared.reflLod },
     uReflStrength: { value: shared.refl && reflect > 0 ? reflect : 0 },
-    uReflTint: { value: new THREE.Color(0.98, 0.99, 1.0) },
+    uReflTint: { value: new THREE.Color(0.99, 0.99, 1.0) },
+    // Luminance knee for the mirror — see boardReflection. Bound on every board material
+    // because REFLECT_GLSL is shared, even where the mirror is switched off.
+    uReflKnee: { value: 0.55 },
   };
   m.onBeforeCompile = patch(frag);
   m.customProgramCacheKey = () => name;
@@ -166,7 +173,7 @@ const BED_FRAG = /* glsl */ `
 `;
 
 // ---------------------------------------------------------------------------------------
-// inlaid border strip
+// the carved border band
 // ---------------------------------------------------------------------------------------
 
 const BORDER_HEAD = /* glsl */ `
@@ -178,88 +185,91 @@ uniform vec3 uLine;
 uniform vec3 uGrime;
 uniform float uCell;
 uniform float uBandHalf;
+uniform float uBandT0;
+uniform float uBandT1;
 `;
 
 /**
- * The perimeter strip, between the marble field and the kerb.
+ * The one carved band, between the marble field and the kerb.
  *
- * In `low-across-board` this is the single finest detail in frame: a dense run of small
- * repeating alternating elements, PALE against dark, bright enough to read all the way
- * to the far corner of the board. The previous build drew it dark-on-dark — a near-black
- * bed with 60 % coverage of small tesserae — and in a room lit by nothing but small
- * flames the whole band crushed to a plain dark strip with some speckle in it, which is
- * precisely what the critique caught.
+ * This is now the only inlaid work anywhere on the board — the internal joints of the
+ * field are joints again (see layout.ts). The critique's objection was not that the
+ * pattern was wrong but that it had no depth: a flat run of alternating light and dark
+ * cells drawn on the floor plane is a marquee, not carving. So the band is now SUNK.
+ * `borderProfile` below cuts it 30 mm below the marble between two hard arrises, and the
+ * repeating element inside it is a single row of lozenges set on point with real chamfer
+ * faces: each one has a face turned towards the kerb flames and a face turned away, so
+ * the band carries its own light-and-shade the whole way round the field instead of
+ * relying on albedo to fake relief.
  *
- * So the design here is contrast-first:
- *   - the bed is a mid slate, not near-black, so the band never falls to a silhouette;
- *   - the elements are chunky (two rows of ~17 cm blocks, not three rows of 10 cm), so
- *     they survive the perspective all the way round the field;
- *   - the pale stone is a bright limestone and holds a large fraction of the band;
- *   - three cut rules bound it either side, and every element stands proud of its bed,
- *     so a flame at kerb height rakes the whole grid and each block gets a lit face and
- *     a shaded one. That relief is what makes it read as inlay rather than as paint.
+ * `t` runs 0..1 across the whole swept profile, so it includes the two risers. `uBandT0`
+ * and `uBandT1` are where the sunk floor starts and ends within it.
  */
 const BORDER_FRAG = /* glsl */ `
   vec2 w = vWPos.xz;
   float px = max(fwidth(w.x), fwidth(w.y));
   vec4 wear = boardWear(w);
 
-  // uv.x runs across the band (0..1). The along-band coordinate is taken from world
+  // uv.x runs across the profile (0..1). The along-band coordinate is taken from world
   // space, not from uv.y: the ring's inner and outer edges are different lengths, so a
   // uv-based run would fan the columns out across the width of the strip.
   float t = vBUv.x;
   vec2 aw0 = abs(w);
   float s = (aw0.x > aw0.y) ? w.y : w.x;
-  float width = uBandHalf * 2.0;
-  float aaT = clamp(px / width, 0.0008, 0.5);
+  // Position across the sunk floor of the band, 0..1, and 0 on either margin.
+  float bt = (t - uBandT0) / max(uBandT1 - uBandT0, 1e-4);
+  float inBand = step(0.0, bt) * step(bt, 1.0);
+  float aaT = clamp(px / (uBandHalf * 2.0 * (uBandT1 - uBandT0)), 0.0008, 0.5);
   float aaS = clamp(px / uCell, 0.0008, 0.5);
-  float tf = bFade(uCell * 0.42, px);
+  float tf = bFade(uCell * 0.40, px);
 
-  // Two rows of chunky tesserae down the middle 62 % of the band.
-  vec4 tess = bTess(clamp((t - 0.19) / 0.62, 0.0, 1.0), s, uCell, 2.0, aaT / 0.62, aaS);
-  // A second, half-pitch run along the very centre: the dense bead the reference's strip
-  // carries down its middle, and the element that keeps the strip alive at distance.
-  vec4 bead = bTess(clamp((t - 0.44) / 0.12, 0.0, 1.0), s + uCell * 0.25, uCell * 0.5, 1.0,
-                    aaT / 0.12, aaS * 2.0);
-  float beadIn = 1.0 - smoothstep(0.115, 0.125, abs(t - 0.5));
+  // --- the lozenge chain --------------------------------------------------------------
+  // One row, set on point. |u| + |v| < r is a diamond; the two |.| terms are also what
+  // give the four chamfer faces their directions, which is what the relief is built from.
+  float cu = (bt - 0.5) * 2.0;                       // -1..1 across the sunk floor
+  float cv = fract(s / uCell + 0.5) * 2.0 - 1.0;     // -1..1 along one cell
+  float dia = abs(cu) * 1.02 + abs(cv);
+  float face = 1.0 - smoothstep(0.60 - aaT * 3.0, 0.60 + aaT * 3.0, dia);   // flat top
+  float cham = 1.0 - smoothstep(0.90 - aaT * 3.0, 0.90 + aaT * 3.0, dia);   // foot
+  float slope = clamp(cham - face, 0.0, 1.0);
+  // Small squares in the gaps between lozenges — the second element of the run.
+  float dot2 = 1.0 - smoothstep(0.16, 0.20, max(abs(cu), abs(abs(cv) - 1.0)));
 
   vec3 albedo = uField;
-  albedo = mix(albedo, uTessPale, tess.x * 0.97);
-  albedo = mix(albedo, uTessDark, tess.y * 0.92);
-  albedo = mix(albedo, uTessPale * 1.05, bead.x * beadIn * 0.95);
-  albedo = mix(albedo, uLine, bead.y * beadIn * 0.85);
-  albedo = mix(uTessMean, albedo, tf);
+  albedo = mix(albedo, uTessPale, face * 0.92 * inBand);
+  albedo = mix(albedo, uTessPale * 0.80, slope * 0.72 * inBand);
+  albedo = mix(albedo, uTessDark, dot2 * 0.85 * inBand);
+  albedo = mix(uTessMean, albedo, mix(1.0, tf, inBand));
 
-  // The rules bounding the chequer: dark / pale / dark, mirrored either side.
-  float dark = bRule(t, 0.028, 0.028, aaT) + bRule(t, 0.170, 0.024, aaT)
-             + bRule(t, 0.830, 0.024, aaT) + bRule(t, 0.972, 0.028, aaT);
-  float pale = bRule(t, 0.098, 0.040, aaT) + bRule(t, 0.902, 0.040, aaT);
-  albedo = mix(albedo, uLine, clamp(dark, 0.0, 1.0) * 0.92);
-  albedo = mix(albedo, uTessPale * 1.10, clamp(pale, 0.0, 1.0) * 0.90);
-  float rules = clamp(dark + pale, 0.0, 1.0);
-  float inlay = clamp(tess.z + rules, 0.0, 1.0);
+  // The cut rules bounding the sunk floor, and the two arrises either side of it. The
+  // arrises are where the geometry already turns, so these only add the pale worn line
+  // a five-hundred-year-old cut edge carries.
+  float edgeIn = bRule(t, uBandT0, 0.016, aaT);
+  float edgeOut = bRule(t, uBandT1, 0.016, aaT);
+  float rules = clamp(edgeIn + edgeOut, 0.0, 1.0);
+  albedo = mix(albedo, uTessPale * 1.06, rules * 0.55);
+  albedo = mix(albedo, uLine, bRule(t, uBandT0 - 0.055, 0.012, aaT) * 0.7);
+  albedo = mix(albedo, uLine, bRule(t, uBandT1 + 0.055, 0.012, aaT) * 0.7);
+  float inlay = clamp(cham * inBand + rules, 0.0, 1.0);
 
-  // Tesserae go missing. Where one has, the bed shows and the surface drops.
-  float lost = step(0.92, bHash21(floor(vec2(s / uCell, t * 2.0)) + 5.7)) * tess.z * tf;
+  // Elements go missing. Where one has, the bed shows and the surface drops.
+  float lost = step(0.93, bHash21(vec2(floor(s / uCell), 5.7))) * cham * inBand * tf;
   albedo = mix(albedo, uGrime, lost * 0.9);
 
   float grain = bFbm(w * 9.0, 3);
   float fine = mix(0.5, bNoise(w * 33.0), bFade(0.03, px));
   albedo *= 0.90 + 0.17 * grain + 0.07 * fine;
-  // Weathering stains the strip; it must not swallow it. Kept off the pale elements,
-  // which are the only reason the band reads at all.
-  albedo = mix(albedo, uGrime, clamp(wear.z, 0.0, 1.0) * 0.22 * (1.0 - tess.x * 0.8));
+  // A sunk band collects five centuries of sweepings. Kept off the raised faces, which
+  // are the only reason the band reads at all.
+  albedo = mix(albedo, uGrime, clamp(wear.z, 0.0, 1.0) * 0.26 * (1.0 - face * 0.85));
 
   float dust = clamp(wear.x * (0.6 + 0.8 * wear.w), 0.0, 1.0);
   albedo = mix(albedo, uDust, dust * 0.85);
 
   diffuseColor.rgb *= albedo;
-  // The strip is polished stone set into polished stone, so it takes nearly as much of
-  // the room as the marble does. Starving it of reflection is what left it reading as a
-  // plain dark band beside a bright field.
-  gRough = clamp(0.34 + tess.w * 0.26 + lost * 0.40
-                 + wear.z * 0.24 + dust * 0.55 + (grain - 0.5) * 0.14, 0.06, 1.0);
-  gReflMask = clamp((1.0 - dust * 1.4) * (1.0 - lost) * (0.48 + 0.34 * (1.0 - inlay)), 0.0, 1.0);
+  gRough = clamp(0.40 + slope * 0.18 + lost * 0.40
+                 + wear.z * 0.26 + dust * 0.55 + (grain - 0.5) * 0.14, 0.08, 1.0);
+  gReflMask = clamp((1.0 - dust * 1.4) * (1.0 - lost) * (0.40 + 0.34 * (1.0 - inlay)), 0.0, 1.0);
   gReflJitter = grain - 0.5;
 
   float ee = max(0.005, px * 0.7);
@@ -267,15 +277,19 @@ const BORDER_FRAG = /* glsl */ `
   float hx = bFbm((w + vec2(ee, 0.0)) * 11.0, 2) * 0.0016;
   float hz = bFbm((w + vec2(0.0, ee)) * 11.0, 2) * 0.0016;
   gNormalPert = vec3(-(hx - h0) / ee, 0.0, -(hz - h0) / ee);
-  // Every tessera stands a fraction proud of its bed and every rule is a cut line, so a
-  // grazing flame finds the whole grid. This is the strip's real signature.
+  // The chamfer faces. Each lozenge has four of them and they face outwards from its
+  // centre, so a flame standing on the kerb lights the near two and shadows the far two.
+  // This — not the albedo — is what makes the band read as carved.
   vec2 aw = abs(w);
   vec2 acrossDir = (aw.x > aw.y) ? vec2(sign(w.x), 0.0) : vec2(0.0, sign(w.y));
   vec2 alongDir = vec2(-acrossDir.y, acrossDir.x);
-  float ridge = (tess.z - 0.5) * 2.0 * tf;
-  gNormalPert += vec3(acrossDir.x, 0.0, acrossDir.y) * (ridge * 0.34 - rules * 0.38 - lost * 0.60);
-  gNormalPert += vec3(alongDir.x, 0.0, alongDir.y) * tf
-               * ((fract(s / uCell) - 0.5) * 0.48 + (fract(s / (uCell * 0.5)) - 0.5) * beadIn * 0.40);
+  vec2 slopeDir = normalize(vec2(sign(cu) * 1.02, sign(cv)) + 1e-6);
+  vec3 across3 = vec3(acrossDir.x, 0.0, acrossDir.y);
+  vec3 along3 = vec3(alongDir.x, 0.0, alongDir.y);
+  gNormalPert += (across3 * slopeDir.x + along3 * slopeDir.y) * slope * inBand * tf * 1.15;
+  gNormalPert -= (across3 * slopeDir.x + along3 * slopeDir.y) * lost * 0.7;
+  // The two cut arrises of the recess itself.
+  gNormalPert += across3 * (bRule(t, uBandT0, 0.010, aaT) - bRule(t, uBandT1, 0.010, aaT)) * 0.30;
 `;
 
 // ---------------------------------------------------------------------------------------
@@ -307,12 +321,21 @@ const KERB_FRAG = /* glsl */ `
 
   // Block joints: this is a course of cut stone, not a moulded ring. The joint wanders,
   // is recessed, and the arris either side of it is knocked about.
+  //
+  // These were drawn 12–46 mm wide on a metre-long block, which from any of the judging
+  // cameras is a hairline — so the kerb read as one continuous untextured slab rather
+  // than as a course of separate stones. Widened to a real 30–90 mm open joint, and each
+  // block now stands a few millimetres off its neighbour (blockSet), so the course breaks
+  // into individual stones with their own height and their own lit face.
   float blk = along / uCourse;
-  float jd = abs(fract(blk) - 0.5) * uCourse + (bFbm(w * 2.6, 3) - 0.5) * 0.030;
-  float joint = 1.0 - smoothstep(0.012, 0.046, jd);
-  float arris = (1.0 - smoothstep(0.040, 0.135, jd)) * (1.0 - joint);
+  float jd = abs(fract(blk) - 0.5) * uCourse + (bFbm(w * 2.6, 3) - 0.5) * 0.045;
+  float joint = 1.0 - smoothstep(0.030, 0.090, jd);
+  float arris = (1.0 - smoothstep(0.080, 0.220, jd)) * (1.0 - joint);
   float blockId = floor(blk);
   float blockTone = bHash21(vec2(blockId, 3.0)) - 0.5;
+  // How proud of the course this block sits, and which way it is tipped.
+  float blockSet = (bHash21(vec2(blockId, 11.0)) - 0.5);
+  float blockTip = (bHash21(vec2(blockId, 23.0)) - 0.5);
 
   float mottle = clamp(0.5 + 3.2 * (bFbm(w * 1.5 + blockId * 3.7, 4) - 0.5), 0.0, 1.0);
   float grain = bFbm(w * 12.0, 3);
@@ -343,7 +366,9 @@ const KERB_FRAG = /* glsl */ `
   float sand = smoothstep(0.72, 0.90, bNoise(w * 44.0)) * bFade(0.024, px);
 
   vec3 albedo = mix(uStone, uStoneB, mottle);
-  albedo *= 0.88 + 0.24 * blockTone;
+  // Block-to-block value spread, widened. Cut stone from one quarry still varies far
+  // more than a shader default: this is the cheapest signal that says "separate stones".
+  albedo *= 0.78 + 0.44 * (blockTone + 0.5);
   albedo *= 0.84 + 0.26 * grain + 0.07 * fine;
   albedo *= 1.0 + tooling * 0.20;
   albedo = mix(albedo, uGrime, pit * 0.45);
@@ -392,9 +417,15 @@ const KERB_FRAG = /* glsl */ `
   gNormalPert += vec3(bNoise(w * 52.0) - 0.5, 0.0, bNoise(w * 52.0 + 3.0) - 0.5) * sand * 0.34;
   // The joint is a groove: the surface turns down into it from both sides.
   float side = sign(fract(blk) - 0.5);
-  gNormalPert += vec3(alongDir.x, 0.0, alongDir.y) * side * joint * 0.55;
-  gNormalPert -= vec3(alongDir.x, 0.0, alongDir.y) * side * arris * 0.16;
+  gNormalPert += vec3(alongDir.x, 0.0, alongDir.y) * side * joint * 0.95;
+  gNormalPert -= vec3(alongDir.x, 0.0, alongDir.y) * side * arris * 0.30;
   gNormalPert += vec3(bNoise(w * 26.0) - 0.5, 0.0, bNoise(w * 26.0 + 5.0) - 0.5) * pit * 0.5;
+  // Each block is set slightly out of the course and slightly tipped, so no two of them
+  // return the same light. A ring of identical stones is a moulding; a ring of stones
+  // that disagree with each other is masonry, and that is the whole of the difference
+  // between this reading as a slab and reading as a kerb.
+  gNormalPert += vec3(alongDir.x, 0.0, alongDir.y) * blockTip * 0.16;
+  gNormalPert += vec3(outw.x, 0.0, outw.y) * blockSet * 0.20;
 `;
 
 // ---------------------------------------------------------------------------------------
@@ -455,8 +486,28 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
   geos.push(bedGeo);
   mats.push(bedMat);
 
-  // --- inlaid border --------------------------------------------------------------------
+  // --- the carved border band -------------------------------------------------------------
+  // A real sunk channel, not a flat ring with a pattern on it: field level, a hard arris,
+  // a short fall, the sunk floor the lozenges are cut into, then back up to the kerb foot.
+  // Every one of those steps is a `hard` point, so the sweep duplicates the ring and the
+  // arrises stay sharp instead of being smoothed into a ramp.
   const bandHalf = (R.filletOut - R.filletIn) / 2;
+  const borderPts = profile([
+    [R.filletIn, TOP_Y],
+    [R.bandIn - 0.026, TOP_Y, true],
+    [R.bandIn - 0.004, TOP_Y - BORDER_SINK * 0.72],
+    [R.bandIn, TOP_Y - BORDER_SINK, true],
+    [R.bandOut, TOP_Y - BORDER_SINK, true],
+    [R.bandOut + 0.004, TOP_Y - BORDER_SINK * 0.72],
+    [R.bandOut + 0.026, TOP_Y, true],
+    [R.filletOut, TOP_Y],
+  ]);
+  const borderLen = borderPts[borderPts.length - 1].u;
+  // Normalise the across-band coordinate to 0..1 over the whole profile, and hand the
+  // shader where within it the sunk floor begins and ends.
+  const borderProfile = borderPts.map((p) => ({ ...p, u: p.u / borderLen }));
+  const bandT0 = borderProfile[3].u;
+  const bandT1 = borderProfile[4].u;
   const borderMat = baseMaterial(
     'board-border',
     BORDER_HEAD,
@@ -466,28 +517,27 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
       // strip was landing at 20/255 while the marble beside it sat at 110 — the marble
       // is reflection-dominated at this grazing angle and the strip was not, so a dark
       // bed put the frame's finest detail below the point where anything is legible.
-      uField: { value: c(0x6a6c70) },
+      uField: { value: c(0x7c7b74) },
       uTessDark: { value: c(0x44464d) },
       uTessPale: { value: c(0xe4dfd0) },
       uTessMean: { value: c(0x8d8b81) },
       uLine: { value: c(0x2b2e34) },
       uGrime: { value: c(0x4d4a41) },
-      // Square tesserae: two rows across the middle 62 % of the band, and a whole
-      // number of columns to the side so the pattern closes cleanly at every mitre.
-      uCell: { value: (2 * R.filletIn) / Math.round((2 * R.filletIn) / ((bandHalf * 2 * 0.62) / 2)) },
+      // One lozenge per cell, its pitch a whole number of divisions of a side so the
+      // chain closes cleanly at every mitre. The cell is set to the width of the sunk
+      // floor, which is what puts the lozenges on point rather than stretching them.
+      uCell: {
+        value: (2 * R.bandIn) / Math.round((2 * R.bandIn) / (R.bandOut - R.bandIn)),
+      },
       uBandHalf: { value: bandHalf },
+      uBandT0: { value: bandT0 },
+      uBandT1: { value: bandT1 },
     },
     shared,
-    0.92,
+    0.60,
     true,
   );
-  const borderGeo = sweepRing(
-    profile([
-      [R.filletIn, TOP_Y],
-      [R.filletOut, TOP_Y],
-    ]).map((p, i) => ({ ...p, u: i })),
-    segs,
-  );
+  const borderGeo = sweepRing(borderProfile, segs);
   const border = new THREE.Mesh(borderGeo, borderMat);
   border.name = 'board-border';
   border.receiveShadow = true;

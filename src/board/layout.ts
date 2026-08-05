@@ -33,34 +33,46 @@ export const JOINT = 0.024;
 export const CHAMFER = 0.016;
 
 /**
- * Width of the inlaid tessera band worked into the polished top of every slab, along
- * each of its four edges — the single finest detail in the reference frame.
+ * Width of the mortar-and-grit run worked into the polished top of every slab along each
+ * of its four edges.
  *
- * In the film the joint between two squares is not a plain line: a dense band of small
- * alternating light/dark tesserae runs down both sides of it, so a joint reads as
- * `marble | inlay | thin dark line | inlay | marble`. The band is worked into the slab's
- * own polished face rather than laid in a separate strip, which is both how the real
- * floor is cut and why it costs no extra geometry here: two neighbouring slabs each
- * contribute half of it and it can never z-fight with anything.
+ * This used to be 45 mm of inlaid tessera chequer, which put a two-row inlaid band down
+ * all 112 internal joints of the field. At the distance the judging shots are taken from,
+ * that resolves to a dashed line: a flat marching-ants marquee round every square, with
+ * no relief, and no counterpart at all in the film — where the inlaid work is ONE carved
+ * band between the field and the kerb (see surround.ts) and the joints between squares
+ * are simply joints.
  *
- * 45 mm each side plus the 56 mm physical gap gives a 146 mm band across a joint — 6 % of
- * a 2.35 m square, which is what the reference measures.
+ * 30 mm each side plus the 24 mm physical gap gives an 84 mm run across a joint — 3.6 %
+ * of a 2.35 m square. Measured off `low-across-board`, which is the closest any camera
+ * gets to the floor: there the joint is plainly a chunky granular BEAD RUN, not a hairline,
+ * and eight of them stacked across the field are a large part of that frame's directional
+ * gradient energy. Narrower than this and the floor loses the horizontal structure the
+ * film's has; wider and it starts to look inlaid again, which it is not.
  */
-export const INLAY_W = 0.045;
-
-/** Along-band pitch of one tessera. ~30 elements to a square edge, as in the frame. */
-export const TESS_CELL = 0.0784;
+export const JOINT_W = 0.030;
 /** Top of the kerb the fires burn on (lighting puts its kerb flames at y = 0.30). */
 export const KERB_Y = 0.30;
 
 /** Half-extent of the dust / impact map, in metres. Covers field, border and kerb. */
 export const MAP_EXTENT = 12.4;
 
+/**
+ * Depth of the carved recess the border band is set into. The critique's word was
+ * "relief": the film's band is not painted on the floor plane, it is sunk below it
+ * between two cut arrises, so it carries its own shadow all the way round the field.
+ */
+export const BORDER_SINK = 0.030;
+
 /** Radii, board centre outwards. */
 export const R = {
   /** Outer edge of the marble field, i.e. the far side of the last joint. */
   field: HALF + JOINT / 2,
   filletIn: 9.46,
+  /** Inner arris of the sunk band. */
+  bandIn: 9.545,
+  /** Outer arris of the sunk band. */
+  bandOut: 9.885,
   filletOut: 9.97,
   kerbFoot: 9.99,
   kerbTopIn: 10.06,

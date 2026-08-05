@@ -19,7 +19,7 @@ export const GradeShader = {
   name: 'ChamberGrade',
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
-    uExposure: { value: 0.668 },
+    uExposure: { value: 0.716 },
     uAspect: { value: 2.388 },
     /**
      * Chromatic aberration. This used to sample the SHARP buffer once per channel at
@@ -59,12 +59,31 @@ export const GradeShader = {
      * vignette — while the film spreads a little black through all twelve cells and keeps
      * its top corners at a fifth, not four fifths. The corners were being manufactured
      * here and the room was not being allowed to make any of its own.
+     *
+     * Halved again. With the board now carrying the frame's exposure, the vignette is the
+     * only thing standing between the film's top corners (0.087 and 0.115) and ours, and it
+     * was subtracting a fifth of the light from exactly the two cells that were already the
+     * furthest short. A 2.39:1 anamorphic taking lens does fall off at the corners, but it
+     * falls off nothing like this.
      */
-    uVigStrength: { value: 0.22 },
+    uVigStrength: { value: 0.12 },
     uVigInner: { value: 0.52 },
     uVigOuter: { value: 0.95 },
     uVigAspect: { value: 1.25 },
-    uLift: { value: 0.94 },
+    /**
+     * Lifted mid-tones, and pushed further than a taste call would go, for a structural
+     * reason worth writing down. A fifth of this frame — the vault, the far backs, the
+     * upper corners — is chamber `voidStone`, an albedo of 0x0b0c11. Multiply that by any
+     * irradiance a room like this can supply and it is still black; no light I hang can
+     * lift it, and I do not own the material. The film has dim, fully modelled masonry in
+     * the same places, which is where a large part of its 0.10-0.20 population lives. Our
+     * histogram is missing that population, which is why the median sat 0.016 low with
+     * five points too many under 0.12 even while every lit box in the frame measured at or
+     * above the film's. This is the honest DI compensation for it: it lifts the middle of
+     * the curve where the missing pixels would have been and leaves the highlights and the
+     * print black alone.
+     */
+    uLift: { value: 0.885 },
     uContrast: { value: 0.99 },
     /**
      * Saturation in the deep shadows. Less neutral than we had it: the reference's own
@@ -73,8 +92,14 @@ export const GradeShader = {
      * reading as *under*-saturated once the letterbox bars (which are 25.4% of the
      * reference's pixels, at zero saturation, and drag its whole-frame figure down to
      * 0.242) are taken out of the comparison.
+     *
+     * Back down, because the source of the frame's chroma changed. The board is now the
+     * biggest lit area in the picture and it is lit by `COLD.key`; when that light was at
+     * saturation 0.33 the marble came back at 0.44 and the whole frame ran 0.03 over the
+     * film. The fix went in at the source (see palette.ts) and this came down with it so
+     * the shadows do not put the chroma back.
      */
-    uSatShadow: { value: 0.40 },
+    uSatShadow: { value: 0.325 },
     /** Saturation from the mid-tones up, where the cold marble has to read blue. */
     uSaturation: { value: 1.06 },
     uSatRamp: { value: new THREE.Vector2(0.03, 0.28) },
@@ -85,8 +110,18 @@ export const GradeShader = {
      * frame, and one the whole-frame numbers hid because a quarter of the reference's
      * pixels are letterbox and count as neither.
      */
-    uCoolBalance: { value: new THREE.Vector3(0.905, 1.010, 1.066) },
-    uShadowTint: { value: new THREE.Vector3(0.004, 0.006, 0.011) },
+    uCoolBalance: { value: new THREE.Vector3(0.888, 1.006, 1.086) },
+    /**
+     * Blue in the shadow tint, and the exact numbers matter because of how the metric
+     * counts. A pixel is "cool" once its blue byte clears its red by 6/255 = 0.0235. The
+     * balance above is a MULTIPLY, so at a mid-dark 0.10 grey it opens a gap of only
+     * 0.020 — four counts, just short — and a very large population of dim neutral stone
+     * was sitting a hair under the line and counting as neither warm nor cool. That is
+     * most of the remaining colour gap: 0.359 of the frame reads cool against the film's
+     * 0.434 while the two images' actual hue agrees to within a few degrees. This is an
+     * ADD, so it carries the shadows over the line without touching the mid-tones.
+     */
+    uShadowTint: { value: new THREE.Vector3(0.001, 0.007, 0.023) },
     uHighlightTint: { value: new THREE.Vector3(0.006, 0.004, -0.004) },
     /**
      * Highlight expansion, above the mid-tones only. The reference's histogram is not a
@@ -97,7 +132,7 @@ export const GradeShader = {
      * whole exposure up to chase that would drag the median and the shadow fraction with
      * it, so the lift has to be confined to the top of the curve.
      */
-    uHiGain: { value: 0.32 },
+    uHiGain: { value: 0.28 },
     uHiPivot: { value: 0.25 },
     /** Print black: the picture's floor, which is never literal zero. */
     uToe: { value: 0.019 },
@@ -203,7 +238,7 @@ void main(){
   // Luminance BEFORE the cool balance shifts the colour — the warm-pool test has to see
   // the light as it arrived, not as this pass has already re-tinted it.
   float l0 = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  float warmth = clamp((col.r - col.b) * 2.2, 0.0, 1.0) * smoothstep(0.08, 0.40, l0);
+  float warmth = clamp((col.r - col.b) * 2.2, 0.0, 1.0) * smoothstep(0.13, 0.48, l0);
   col *= mix(uCoolBalance, vec3(1.0), warmth);
 
   float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
