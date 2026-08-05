@@ -264,7 +264,7 @@ void main(){
   // and the reference keeps its warm pixels small: 14.0% of its lit pixels fall in the
   // 0-30 degree hue bin against our 30.6%, which is what dragged the circular-mean lit
   // hue round to 256 instead of 224.
-  float r = size * (1.34 + 0.40 * (fl - 0.5)) * aRad;
+  float r = size * (1.05 + 0.34 * (fl - 0.5)) * aRad;
   vec3 right = normalize(vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]));
   vec3 up = normalize(vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]));
   vec3 wp = aCentre + vec3(0.0, size * 0.55, 0.0) + right * (aCorner.x * r) + up * (aCorner.y * r);
@@ -405,7 +405,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const bodyMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 9.2 },
+      uIntensity: { value: 7.8 },
       uCore: { value: new THREE.Color(FIRE.core).convertSRGBToLinear() },
       uMid: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
       uEdge: { value: new THREE.Color(FIRE.edge).convertSRGBToLinear() },
@@ -468,7 +468,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const glowMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 0.085 },
+      uIntensity: { value: 0.045 },
       uColor: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
     },
     vertexShader: GLOW_VERT,

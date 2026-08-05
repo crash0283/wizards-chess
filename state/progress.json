@@ -1,6 +1,6 @@
 {
-  "updated": "game flow built and verified — real checkmate on the board with an accumulated debris field",
-  "note": "builder/critic loop halted: the account monthly spend limit was reached. Destruction and camera remain round-0 placeholders.",
+  "updated": "round 3: destruction and lighting rebuilt; a shader break found and fixed",
+  "note": "camera still queued behind the 2-slot concurrency cap; round-3 critics have not yet reported",
   "seed": 20250811,
   "totalRounds": 0,
   "pieces": [
@@ -30,12 +30,12 @@
       "label": "Lighting — firelight and air",
       "blurb": "Uplight from low sources, unstable flicker, fast falloff, volumetric haze, filmic tone response.",
       "shot": "wide-establishing",
-      "round": 2,
-      "status": "failing",
-      "render": "refs/renders/r2-wide.png",
+      "round": 3,
+      "status": "improving",
+      "render": "refs/renders/r3-wide.png",
       "reference": "refs/frames/wide-establishing.webp",
       "verdict": "obviously a render",
-      "biggestGap": "Nothing reaches black — fracDeepShadow 0.19 vs the film 0.33; the global ambient still grazes every surface evenly.",
+      "biggestGap": "Blacks still short: fracDeepShadow 0.110 vs the film 0.331 — the deep-shadow gap has not closed and the render is now slightly brighter overall.",
       "history": [
         {
           "round": 1,
@@ -48,9 +48,9 @@
           "gap": "nothing in the frame goes to black"
         }
       ],
-      "metrics": "medianLum +0.008 | litHue -5.1deg | coolFrac -0.011 | fracBlown -0.001 | fracDeepShadow -0.142 | sat +0.090",
+      "metrics": "medianLum +0.039 | fracDeepShadow -0.221 | sat +0.070 | litHue -5.4deg | coolFrac +0.053 | anisotropy -0.081",
       "confidence": "high",
-      "critiqueDetail": "Two blind rounds run, critic correctly identified the film both times. Round 1 fixed the palette, round 2 made flames emit real light (warmFraction 0.076 to 0.149). Blacks remain the open gap; rounds 3-4 were dispatched but did not run."
+      "critiqueDetail": "Round 3 build landed but its critic has not run yet. A GLSL compile error in the grade shader (luminance used before declaration, plus a duplicate identifier) had left the app unrenderable; caught by tools/play-test.mjs and fixed, since tsc cannot see shader source."
     },
     {
       "id": "board",
@@ -99,13 +99,22 @@
       "label": "Destruction — stone breaking stone",
       "blurb": "Angular fracture, bright fresh interior faces, debris that settles, dust lit through.",
       "shot": "aftermath-rubble",
-      "round": 0,
-      "status": "pending",
-      "render": null,
+      "round": 3,
+      "status": "improving",
+      "render": "refs/renders/r3-aftermath.png",
       "reference": "refs/frames/aftermath-rubble.webp",
-      "verdict": null,
-      "biggestGap": null,
-      "history": []
+      "verdict": "obviously a render",
+      "biggestGap": "Massive overshoot — the frame is choked with debris that is too large, too bright and too numerous, and the dust plume is buried behind it.",
+      "history": [
+        {
+          "round": 3,
+          "verdict": "obviously a render",
+          "gap": "debris overshoot buries the dust plume"
+        }
+      ],
+      "confidence": "high",
+      "critiqueDetail": "First real build: 1,979 lines. Fragments are cut from the victim own mesh keeping weathered skin outside and raw pale stone on break faces; torn dark-red fabric; full-gravity debris that sleeps and stays. Machinery correct, parameters far off.",
+      "metrics": "medianLum 0.326 vs 0.098 (3.3x) | detailTotal 0.047 vs 0.006 (7x) | fracBlown 0.024 vs 0.0002 (100x)"
     },
     {
       "id": "camera",
@@ -161,7 +170,7 @@
         }
       ],
       "confidence": "high",
-      "critiqueDetail": "Turn loop drives the verified engine. Captures trigger strike, shatter, light flare, camera shake and marble scarring; wreckage stays on the board for the rest of the game. Checkmate ends it with the king releasing its blade. Interactive click-to-move works against the engine. Replay is a pure function of world.time so captures stay deterministic.",
+      "critiqueDetail": "Turn loop drives the verified engine. Captures trigger strike, shatter, flare, camera shake and marble scarring; wreckage persists. Checkmate ends it with the king releasing its blade. tools/play-test.mjs confirms a human click-move IS accepted (e2-e4 lands with the en-passant square set); the engine reply could not be confirmed because the page context died during the wait — continuous interactive rendering is unstable under software GL, while single-frame capture is reliable.",
       "metrics": "wreckage line: 21 plies, 9 captures, replayLegal=true, fenMatch=true, inCheck=true, legalReplies=0, CHECKMATE=true"
     }
   ]
