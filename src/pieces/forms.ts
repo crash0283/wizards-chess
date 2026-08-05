@@ -498,7 +498,7 @@ function rook(rng: Rng, d: number): FormResult {
     const t = i / courses;
     const y = 0.18 + t * 2.06;
     const s = 0.78 - t * 0.16;
-    st.push({ y: y - 0.004, sx: s * 1.022, sz: s * 1.022 });
+    st.push({ y: y - 0.030, sx: s * 1.030, sz: s * 1.030 });
     st.push({ y, sx: s, sz: s });
   }
   stack(shaft, sp, st);

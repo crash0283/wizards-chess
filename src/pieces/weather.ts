@@ -108,22 +108,23 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
 
   const displace: Weather['displace'] = (x, y, z, nx, ny, nz, freshV, arris) => {
     const swell = fSwell(x * 1.15 + ox, y * 0.95 + oy, z * 1.15 + oz) * spec.swell * wear;
-    const pit = fPit(x * 8.5 + ox, y * 8.5 + oy, z * 8.5 + oz) * spec.pit * wear;
+    const pit = fPit(x * 4.0 + ox, y * 4.0 + oy, z * 4.0 + oz) * spec.pit * wear;
     const f1 = facets(
       x + facetPhase, y + facetPhase * 0.31, z - facetPhase * 0.7,
       nx, ny, nz,
-      spec.facetLargeCell, 0.075, spec.facetLarge * wear, seedA,
+      spec.facetLargeCell, 0.040, spec.facetLarge * wear, seedA,
     );
     const f2 = facets(
       x - facetPhase * 0.5, y + facetPhase, z + facetPhase * 0.22,
       nx, ny, nz,
-      spec.facetFineCell, 0.14, spec.facetFine * wear, seedB,
+      spec.facetFineCell, 0.055, spec.facetFine * wear, seedB,
     );
-    // Break faces are rawer: no chisel work on them, more irregular fracture relief.
+    // Break faces are rawer: no chisel work on them. Their relief stays low-frequency so
+    // the cut face still reads as one plane, the way a real fracture does.
     const raw = freshV;
-    const chisel = (f1 + f2) * (1 - raw * 0.8);
-    const fracture = raw * fPit(x * 5.5 + sx, y * 5.5 + sy, z * 5.5 + sz) * 0.021;
-    // Arrises erode. Limestone loses far more than basalt (see StoneSpec.erode).
+    const chisel = (f1 + f2) * (1 - raw);
+    const fracture = raw * fPit(x * 1.9 + sx, y * 1.9 + sy, z * 1.9 + sz) * 0.010;
+    // Arrises erode — but only genuine convex arrises, and limestone far more than basalt.
     const ero = arris * erodeK * (0.55 + 0.9 * (fPit(x * 3.1 + sx, y * 3.1 + sy, z * 3.1 + sz) * 0.5 + 0.5));
     return (swell + pit + chisel + fracture - ero) * heightScale;
   };
@@ -134,7 +135,7 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
     const mo = fMottle(x * 5.2 + oz, y * 5.2 + ox, z * 5.2 + oy);
     const bed = spec.bedding > 0 ? fBed(x * 0.45 + ox, y * 7.5, z * 0.45 + oz) : 0;
 
-    const rn = recess / 0.030;
+    const rn = recess / 0.014;
     const rIn = rn > 0 ? (rn > 1 ? 1 : rn) : 0;
     const rOut = rn < 0 ? (rn < -1 ? 1 : -rn) : 0;
 

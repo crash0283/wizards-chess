@@ -78,8 +78,15 @@ export class Part {
   }
 
   q(a: number, b: number, c: number, d: number, fresh = 0): void {
-    this.t(a, b, c, fresh);
-    this.t(a, c, d, fresh);
+    // Alternate the diagonal on a hash of the corners. A fixed diagonal makes displaced
+    // quads shade in a regular chevron, which reads instantly as a mesh rather than stone.
+    if (((Math.imul(a + 1, 31) ^ Math.imul(c + 1, 17)) & 2) === 0) {
+      this.t(a, b, c, fresh);
+      this.t(a, c, d, fresh);
+    } else {
+      this.t(b, c, d, fresh);
+      this.t(b, d, a, fresh);
+    }
   }
 
   mesh(): CMesh {

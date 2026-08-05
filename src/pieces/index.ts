@@ -179,9 +179,9 @@ export function createPieceFactory(world: World): PieceFactory {
     body = chip(body, dr, hi ? dr.int(6, 11) : 5, 0.30, 0.014, 0.085);
     if (arm) arm = chip(arm, dr.fork('arm'), 3, 0.22, 0.010, 0.045);
 
-    // Refine the raw break faces, which arrive as coarse fans.
-    body = subdivide(body, detail * 1.45);
-    if (arm) arm = subdivide(arm, detail * 1.45);
+    // Refine the raw break faces, which arrive from the clipper as coarse fans.
+    body = subdivide(body, detail * 1.15);
+    if (arm) arm = subdivide(arm, detail * 1.15);
 
     // --- weathering ----------------------------------------------------------------
     const weather = makeWeather(stone.spec, rng.fork('weather'), 1);
