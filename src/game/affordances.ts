@@ -243,6 +243,10 @@ export function createAffordances(world: World): Affordances {
   const selection = plate(mats.select, SQUARE * 0.94);
   const check = plate(mats.check, SQUARE * 1.02);
   const mate = plate(mats.mate, SQUARE * 1.55);
+  // Drawn AFTER the dimming quad below, so the fire withdrawing from the room does not
+  // take the mark under the fallen king with it. Still depth-tested, so it stays on the
+  // floor rather than floating over the pieces.
+  mate.renderOrder = 950;
 
   // Destination pool. 28 covers a queen on an open board (27) with room to spare; the
   // rare overflow simply is not drawn rather than allocating mid-turn.

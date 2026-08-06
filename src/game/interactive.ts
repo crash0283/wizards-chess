@@ -18,18 +18,27 @@
  * 2. The frame loop died. `Engine.search()` at 120,000 nodes is a synchronous hole in the
  *    main thread, so each reply stopped rAF outright and the tab was killed mid-render.
  *    The search now happens in a Worker (thinker.ts) and the loop never blocks. Because
- *    the search really does span many frames now, `state.thinking` is a state the HUD can
+ *    the search really does span real seconds now, `state.thinking` is a state the HUD can
  *    actually show, rather than something set and cleared inside one call.
  *
- * ── and the third: the loop was too slow to play on ──────────────────────────────────
+ * ── and the consequence of both: nothing waits for a frame ───────────────────────────
  *
- * Interactive rendering was costing seconds per frame, mostly in two passes that exist to
- * serve the still frames: a 2048² shadow map re-rendered every frame for a light that
- * never moves, and a full second scene render for the marble's planar reflection. Neither
- * needs to be redone at frame rate while a person is looking at a board that is mostly
- * standing still, so this module throttles both while interactive — the shadow map only
- * when something is actually moving, the reflection on a fixed stride. Under capture both
- * are left completely alone.
+ * The reply is applied from the worker's message event via a timer, not from `update()`.
+ * That matters more than it sounds: this scene can take seconds to render one frame under
+ * a software rasteriser, and a reply that is only ever applied inside the frame loop is a
+ * reply the player waits a whole frame for no matter how quick the search was. Clicks,
+ * searches and replies all now happen between frames. Only the animation is frame-bound,
+ * because animation has to be.
+ *
+ * ── the interactive quality tier ─────────────────────────────────────────────────────
+ *
+ * A live page gets `world.quality === 'high'` and every other module has already been
+ * built by the time the game exists, so the tier cannot be chosen at construction. What
+ * this module can still do, and does, is cut the work per interactive frame: render at
+ * half resolution and scale up in CSS, stop re-rendering a 2048² shadow map for a light
+ * that never moves while nothing is moving under it, and stop re-rendering the marble's
+ * planar reflection — a second, larger, full scene render — at frame rate. Under capture
+ * none of this exists: the module is not constructed at all.
  */
 import * as THREE from 'three';
 import type { GameDeps, GameState, PieceInstance } from '../core/api';
@@ -425,8 +434,11 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   renderer.shadowMap.autoUpdate = false;
   let lastShadow = -1;
   let frame = 0;
-  /** Rendered frames between planar-reflection refreshes. */
-  const REFL_STRIDE = 3;
+  /** Rendered frames between planar-reflection refreshes: while moving, and while idle. */
+  const REFL_MOVING = 3;
+  const REFL_IDLE = 24;
+  /** Scene seconds between shadow-map refreshes while nothing is moving. */
+  const SHADOW_IDLE = 2.0;
   let reflDriver: THREE.Object3D | null | undefined;
 
   /**
@@ -463,17 +475,21 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   function budget(t: number) {
     fitCanvas();
     const moving = t < activeUntil;
-    // The only shadow-caster in the scene is a fixed key light, so a still board's shadow
-    // map is still correct several frames later. Refresh it every frame while a piece is
-    // walking or rubble is settling, and a few times a second otherwise.
-    if (moving || lastShadow < 0 || t - lastShadow > 0.25) {
+    // The only shadow-caster in the scene is one fixed key light, so a still board's
+    // shadow map is still correct many frames later. Refresh it every frame while a piece
+    // is walking or rubble is settling, and rarely otherwise.
+    if (moving || lastShadow < 0 || t - lastShadow > SHADOW_IDLE) {
       renderer.shadowMap.needsUpdate = true;
       lastShadow = t;
     }
+    // The marble's planar reflection is a SECOND full scene render, at high quality a
+    // larger one than the interactive frame itself. What it shows is the room, which
+    // barely changes; a stale mirror on a piece of polished floor is not a thing the eye
+    // catches, and this is the single biggest saving available from here.
     if (reflDriver === undefined) {
       reflDriver = world.scene.getObjectByName('board-reflection-driver') ?? null;
     }
-    if (reflDriver) reflDriver.visible = frame % REFL_STRIDE === 0;
+    if (reflDriver) reflDriver.visible = frame % (moving ? REFL_MOVING : REFL_IDLE) === 0;
     frame++;
   }
 
