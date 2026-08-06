@@ -388,12 +388,13 @@ export function createAffordances(world: World): Affordances {
 
     showPromotion(sq, side) {
       const { x, z } = squareCentre(sq.file, sq.rank);
-      // Lay the four tablets out along the rank, hovering just clear of the crowns, and
-      // pulled toward the middle of the board so they never sit off the edge.
+      // Lay the four tablets out along the rank starting over the promotion square and
+      // running INWARD, so they are always above the board however near the edge it is.
+      // 5.2 m clears the tallest crown (a king is 4.55 m) with room to read under them.
       const dir = sq.file > 3.5 ? -1 : 1;
       const set = side === 'white' ? runes.white : runes.black;
       tablets.forEach((t, i) => {
-        t.holder.position.set(x + dir * (i - 1.5) * SQUARE * 0.95, 5.2, z);
+        t.holder.position.set(x + dir * i * SQUARE * 0.95, 5.2, z);
         t.faceMat.map = set[i];
         t.faceMat.needsUpdate = true;
       });

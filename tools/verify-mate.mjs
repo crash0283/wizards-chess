@@ -1,6 +1,8 @@
 import { build } from 'esbuild';
 import { resolve } from 'node:path';
-const ROOT = '/home/user/wizards-chess';
+// Resolve relative to this file, never an absolute path: CI checks the repo out at a
+// different root, and a hardcoded one fails there while passing locally.
+const ROOT = resolve(import.meta.dirname, '..');
 const out = await build({
   entryPoints: [resolve(ROOT, 'src/chess/index.ts')],
   bundle: true, format: 'esm', platform: 'neutral', target: 'es2022',
