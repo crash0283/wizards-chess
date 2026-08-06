@@ -285,7 +285,31 @@ export function buildWall(
   // Large, ordered courses. Doubling the stone halves the block count, which is most of
   // what pays for the shaft screens, and it is also the right look: the room is cut
   // masonry laid to a system, not a heap of small irregular lumps.
-  const sizeK = hi ? 1.55 : 2.0;
+  //
+  // The low tier takes that argument one course further, because it is the same argument.
+  // A field's block count goes as 1/k^2, so 2.0 -> 2.6 is 41% of the blocks for stone
+  // that is 30% bigger. From the play camera the nearest of these walls is nineteen metres
+  // off to the side and the rest are behind the shaft screens, so a course goes from about
+  // fifty pixels to sixty-five behind a 512 px buffer. Same wall, same coursing, same
+  // system — fewer, larger stones, which is exactly what a coarser cut of the same
+  // masonry is.
+  const sizeK = hi ? 1.55 : 2.6;
+
+  /**
+   * Where the coursed masonry stops on the low tier.
+   *
+   * `makeWeather` takes every wall to 7% of its tone by DARK_FULL = 12.8 m and the end
+   * wall is dimmed to a fifth on top of that, so a block at 12.6 m is already inside a
+   * factor of a hundred of black. Above that line the long walls carry another four
+   * metres of field and ribs and the end wall carries another twelve, and every one of
+   * those blocks is transformed, rasterised and shaded to produce a pixel indistinguishable
+   * from the one the backing plane behind it already gives for free — the backing runs to
+   * `spec.height + 6` and is what is actually being seen up there.
+   *
+   * This is the largest single block cut on the end wall: its ribs alone ran from 8.3 m
+   * to 25 m.
+   */
+  const vTop = hi ? spec.height : Math.min(spec.height, 12.6);
 
   const L = spec.length;
   const uMin = -L / 2;
@@ -383,12 +407,17 @@ export function buildWall(
       occ: 0.10, relief: 0.055, ruin: spec.ruin, spans: outside,
     }, losses);
 
+    // Voussoir counts. The ring is what makes a recess read as an arch and it stays on
+    // both tiers; what changes is how many stones it is cut into. At low, nine and eleven
+    // still put a visible radial joint every twenty-odd degrees of a head that subtends
+    // well under a hundred pixels, and the two rings together drop from 34 blocks a bay to
+    // 20 — a hundred and eighty blocks across the room's thirteen open bays.
     voussoirs(sink, rng, weather, 700 + b * 37, cx, spring, r, ring, FACE_Z, FACE_D + 0.1,
-      hi ? 19 : 13, 0.06);
+      hi ? 19 : 9, 0.06);
     // a hood mould over the ring: one more order of relief, and the line the damp
     // runs off before it stains the spandrel
     voussoirs(sink, rng, weather, 820 + b * 29, cx, spring, r + ring, 0.24,
-      FACE_Z + 0.15, FACE_D + 0.25, hi ? 23 : 15, 0.0);
+      FACE_Z + 0.15, FACE_D + 0.25, hi ? 23 : 11, 0.0);
 
     // impost blocks where the arch springs
     for (const s of [-1, 1]) {
@@ -407,7 +436,14 @@ export function buildWall(
       courseH: 0.40 * sizeK, blockLen: 1.0 * sizeK,
       occ: 0.30, relief: 0.025, ruin: 0,
     });
-    if (!spec.blindArcade) continue;
+    // The band of masonry behind the arcading stays on both tiers — it is a course of the
+    // wall and its absence would show as a gap. The ARCHES do not survive the low tier:
+    // one bay is about 0.86 m wide there, which from the play camera is three pixels of a
+    // colonnette and one of a soffit, and there are a hundred and thirty of them across
+    // the room in their own instanced mesh with their own geometry. Three pixels cannot
+    // carry an order; what it carries is a faint mottle that the per-block tone already
+    // gives. Two draw calls, 2646 triangles and one geometry, for nothing resolvable.
+    if (!spec.blindArcade || !hi) continue;
     const w = bay.u1 - bay.u0;
     const n = Math.max(3, Math.round(w / (hi ? 0.60 : 0.86)));
     const unit = w / n;
@@ -464,8 +500,8 @@ export function buildWall(
     // rib above the string course, running up into the dark
     let rv = STRING_TOP;
     let rc = 0;
-    while (rv < spec.height - 0.05) {
-      const ch = Math.min(0.82 * sizeK * rng.float(0.9, 1.15), spec.height - rv);
+    while (rv < vTop - 0.05) {
+      const ch = Math.min(0.82 * sizeK * rng.float(0.9, 1.15), vTop - rv);
       if (ch < 0.24) break;
       weather.tone(px, rv + ch * 0.5, 0.0, col);
       sink.block(970 + i * 7 + rc, px, rv + ch / 2, RIB_PROJ + rng.float(-0.03, 0.04),
@@ -505,7 +541,7 @@ export function buildWall(
     return out;
   };
   fillField(sink, rng, weather, variants, {
-    u0: uMin, u1: uMax, v0: STRING_TOP, v1: spec.height,
+    u0: uMin, u1: uMax, v0: STRING_TOP, v1: vTop,
     faceZ: FACE_Z, depth: FACE_D,
     courseH: 1.00 * sizeK, blockLen: 2.05 * sizeK,
     occ: 0.14, relief: 0.05, ruin: spec.ruin * 0.5, spans: ribSpans,

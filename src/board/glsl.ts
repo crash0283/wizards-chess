@@ -11,6 +11,20 @@
  * Determinism: no time, no frame counter, no screen-space randomness. Every value is a
  * pure function of world position, so two renders of the same frame are byte-identical.
  * The hash is fract/dot only — no sin() — so it is stable across drivers too.
+ *
+ * QUALITY TIERS. Everything below that costs real ALU is written twice: the full path,
+ * and a `#ifdef BOARD_LOW` path for interactive play on a phone. The define is set from
+ * `world.quality === 'low'` and NOTHING else, so the high tier compiles the same tokens
+ * it always did — the preprocessor removes the low branches before the compiler sees
+ * them, and a byte-identical capture proves it.
+ *
+ * What the low path drops is chosen by ARITHMETIC, not by taste. The phone renders a
+ * ~512 px buffer over a 19 m board, i.e. roughly 4 cm per pixel across the middle of the
+ * field and about 1 cm at the near kerb. Every generation gated out below is band-limited
+ * by `bFade` to a feature size at or under 3 cm, so it was already being multiplied by
+ * approximately zero on that device — the low path stops paying for it rather than
+ * changing what it looks like. The veins, the joints, the grit, the tooling and the
+ * polish all stay; there are simply fewer octaves of them.
  */
 
 export const NOISE_GLSL = /* glsl */ `
@@ -137,9 +151,19 @@ vec4 bMarbleFigure(vec2 p, float w, float px, float hairW){
 
   // Generation 3 — hairlines, ~17 mm on the ground, so present within a metre or so of
   // the lens and gone by the middle of the board. Faded on that real width.
+  //
+  // A 17 mm feature at the low tier's ~4 cm pixel is already multiplied by bFade ≈ 0
+  // everywhere but the nearest half-metre of the frame, so the phone pays for a
+  // three-octave fbm and a smoothstep to be told "nothing here". It keeps the trunk and
+  // the tributaries — the figure the eye reads as marble — and stops buying the third
+  // generation. Density, not character.
+#ifdef BOARD_LOW
+  float hair = 0.0;
+#else
   float w3 = w * 0.55;
   float hair = (1.0 - smoothstep(w3 * 0.50, w3 * 1.20, abs(bFbm(a * 6.15 + 41.0, 3) - 0.5)))
              * (0.10 + 0.90 * near) * bFade(0.017, px) * hairW;
+#endif
 
   // Where the figure gathers. Marble runs in swathes with clear stone between them, and
   // that clear stone is most of what makes a light square read as WHITE rather than as a
@@ -184,8 +208,17 @@ vec4 bMarbleFigure(vec2 p, float w, float px, float hairW){
  */
 vec3 bJoint(float t, vec2 w, float px){
   float g1 = bNoise(w * 26.0);
+  // 14 mm and 5.5 mm grain. Both are written to fade to their own mean (0.5) once they go
+  // sub-pixel, which on the phone they always are, so the low path substitutes that mean
+  // outright: identical result, two fewer noise lookups on a run that borders all 112
+  // internal joints of the field.
+#ifdef BOARD_LOW
+  float g2 = 0.5;
+  float g3 = 0.5;
+#else
   float g2 = bNoise(w * 74.0) * bFade(0.014, px) + 0.5 * (1.0 - bFade(0.014, px));
   float g3 = bNoise(w * 190.0) * bFade(0.0055, px) + 0.5 * (1.0 - bFade(0.0055, px));
+#endif
   float grit = clamp(0.44 + 1.00 * (g1 - 0.46) + 0.46 * (g2 - 0.5) + 0.24 * (g3 - 0.5), 0.0, 1.0);
   // The stones meet at t = 0 and that is the bottom of the cut. Grime has run into it for
   // five hundred years and no light reaches it.
@@ -222,11 +255,62 @@ vec4 boardWear(vec2 w){
  * blurred through the mip chain by the local roughness rather than faked with an env map.
  */
 export const REFLECT_GLSL = /* glsl */ `
-uniform sampler2D uRefl;
 uniform float uReflStrength;
 uniform float uReflLod;
 uniform vec3 uReflTint;
 uniform float uReflKnee;
+
+#ifdef BOARD_LOW
+/**
+ * THE LOW TIER'S MIRROR — the single biggest thing this piece stops doing on a phone.
+ *
+ * The high tier renders the entire room a second time, from the mirrored eye point, into
+ * its own target, every frame (see reflection.ts). Measured on this box at 640x268: that
+ * pass is 140 extra draw calls, 431 000 extra triangles and 850 ms of a 2 750 ms frame —
+ * 31 % of the whole picture, spent on the floor alone. On the phone that is what was
+ * driving the resolution scaler to its floor, and a 512 px upscale destroys far more of
+ * this floor than losing a true mirror ever could.
+ *
+ * So at the low tier there is no second render and no reflection target at all. What
+ * stands in for it is the cheapest thing that keeps the stone POLISHED rather than matte:
+ * an analytic environment, evaluated along the reflected ray, with exactly the same
+ * anisotropy-free broad character the mirror had after its five blurred taps.
+ *
+ * It is built to match what the mirror actually returns rather than to look like a room:
+ *
+ *   - the room's bright band — the kerb fires, the lit plinth faces, the pale armour of
+ *     the ranks — all sits within a few metres of the floor, so the environment is bright
+ *     at low reflected elevation and falls away exponentially into cold dark stone above;
+ *   - a rough or dusty patch gathers a wider cone and therefore averages the room, which
+ *     is what the mirror's roughness-driven mip walk was doing;
+ *   - the caller's normal jitter and dust mask still break it up, so the sheen is torn by
+ *     the same dry film that tears the real one, not laid on like varnish;
+ *   - and it goes through the SAME per-stone luminance knee. That is what keeps the
+ *     chequer: the cream's knee (0.60) passes most of the band, the navy's (2.80)
+ *     suppresses all but the brightest of it, so a dark square stays near-black with a
+ *     sheen on it and a light square stays polished.
+ *
+ * Cost: no render target, no texture fetch, about a dozen ALU ops.
+ */
+uniform vec3 uEnvBand;
+uniform vec3 uEnvHigh;
+
+vec3 boardReflection(vec4 projected, vec3 nWorld, float rough, float mask, float jitter){
+  if (uReflStrength <= 0.0) return vec3(0.0);
+  vec3 V = normalize(cameraPosition - vWPos);
+  vec3 R = reflect(-V, nWorld);
+  // Reflected elevation, nudged by the surface's own break-up so the sheen wanders over
+  // the slabs' undulation instead of lying flat across the field.
+  float el = clamp(R.y + jitter * 0.05, 0.0, 1.0);
+  vec3 c = mix(uEnvHigh, uEnvBand, exp(-el * 4.2));
+  // Wider gather on rough stone: towards the room's mean rather than towards its floor.
+  c = mix(c, mix(uEnvBand, uEnvHigh, 0.62), clamp(rough * 0.85, 0.0, 0.62));
+  float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c *= lum / (lum + uReflKnee);
+  return c * uReflTint * mask;
+}
+#else
+uniform sampler2D uRefl;
 
 /**
  * The film's floor is reflective but it is not a mirror. Sampling the mirror pass at one
@@ -285,4 +369,5 @@ vec3 boardReflection(vec4 projected, vec3 nWorld, float rough, float mask, float
   c *= lum / (lum + uReflKnee);
   return c * uReflTint * mask * inside;
 }
+#endif
 `;

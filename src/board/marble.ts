@@ -38,7 +38,13 @@ export interface SlabBuild {
  * per-slab yaw and tilt so the joints are never quite parallel.
  */
 export function buildSlab(file: number, rank: number, rng: Rng, world: World): SlabBuild {
-  const n = world.quality === 'high' ? 14 : 8;
+  // 14 x 14 quads on the polished top at the high tier, 6 x 6 at the low one. The height
+  // field the grid samples is unchanged — the dish, the drop, the tilt and the chipped
+  // corners are all still there and still the same shape — there are simply fewer
+  // vertices holding it. At 2.35 m a square that is a 39 cm quad, and the terms this mesh
+  // carries are millimetres deep: what breaks the silhouette survives, what is finer than
+  // the phone's pixel does not need a vertex.
+  const n = world.quality === 'high' ? 14 : 6;
   const seed = rng.int(1, 0x7fffffff);
   const fbmSurf = makeFbm(seed, 4);
   const fbmChip = makeFbm(seed ^ 0x77c1, 3);
@@ -217,6 +223,9 @@ varying vec4 vReflUV;
 varying vec2 vLoc;
 varying float vChip;
 uniform mat4 uReflMatrix;
+#ifdef BOARD_MERGED
+attribute vec2 aLoc;
+#endif
 `;
 
 const VERT_BODY = /* glsl */ `
@@ -225,7 +234,17 @@ const VERT_BODY = /* glsl */ `
   vReflUV = uReflMatrix * bWorld;
   // Object space, so the inlaid band round the slab's edge sits exactly on the edge
   // however the slab is yawed and tilted.
+  //
+  // At the low tier the sixty-four slabs are merged into two meshes, so the vertex has
+  // already been moved to its place on the board and transformed.xz is no longer the
+  // slab's own coordinate. The merge bakes that coordinate into aLoc instead — the same
+  // number the unmerged path computes, carried rather than derived — so the joint band,
+  // the per-slab marble rotation and the chamfer all land exactly where they did.
+#ifdef BOARD_MERGED
+  vLoc = aLoc;
+#else
   vLoc = transformed.xz;
+#endif
   vChip = aChip;
 `;
 
@@ -292,15 +311,31 @@ vec4 bSlabKey(vec2 w){
 float bMicro(vec2 w, float grit, float px){
   float h = 0.00120 * bFbm(w * 2.6, 2);
   h += 0.00042 * bNoise(w * 11.0) * bFade(0.09, px);
+  // The 2.3 cm grit octave. bMicro is evaluated three times per fragment for the normal's
+  // finite difference, so this one line is three noise lookups — and at the low tier's
+  // pixel it is under the band limit, i.e. three lookups multiplied by zero.
+#ifndef BOARD_LOW
   h += 0.00016 * (0.4 + grit) * bNoise(w * 44.0) * bFade(0.023, px);
+#endif
   return h;
 }
 
-/** Hairline cracks. World space, so they run across joints without noticing them. */
+/**
+ * Hairline cracks. World space, so they run across joints without noticing them.
+ *
+ * The crack is 1.4 cm wide, so on the phone bFade returns zero for it across the whole
+ * field — but the domain-warped turbulence feeding it is the single most expensive call
+ * in this shader (two three-octave fbms, twenty-four hashes) and it was being paid for in
+ * full to produce that zero.
+ */
 float bCracks(vec2 w, float px){
+#ifdef BOARD_LOW
+  return 0.0;
+#else
   float a = bTurb(w * 0.26, 3);
   float c = 1.0 - smoothstep(0.0, 0.0018, abs(a - 0.5));
   return c * bFade(0.014, px);
+#endif
 }
 
 // Filled by the albedo stage and read again by the roughness and normal stages.
@@ -390,7 +425,13 @@ const FRAG_COLOR = /* glsl */ `
   // both faded once they are finer than a pixel. Close to the lens this is the layer
   // that carries the frame's peak detail; at the far end of the board it is gone.
   float speckA = smoothstep(0.79, 0.90, bNoise(w * 12.5)) * bFade(0.08, px);
+  // The 3 cm sand. Sub-pixel on the phone; the 8 cm chips above it are not, and they are
+  // the size that actually reads as grit standing on a polished floor.
+#ifdef BOARD_LOW
+  float speckB = 0.0;
+#else
   float speckB = smoothstep(0.84, 0.94, bNoise(w * 34.0)) * bFade(0.029, px);
+#endif
   float edge = max(abs(loc.x), abs(loc.y));
   float toJoint = smoothstep(B_HALF_TOP * 0.80, B_HALF_TOP, edge);
   float grits = clamp(speckA * 0.55 + speckB, 0.0, 1.0)
@@ -532,10 +573,14 @@ const FRAG_COLOR = /* glsl */ `
   rough += (bNoise(w * 3.1) - 0.5) * 0.09;
   rough += clamp(grits, 0.0, 1.0) * 0.40;
   // Polishing swirl: fine directional scratches, laid per slab. They only exist within
-  // a couple of metres of the lens, which is exactly where they are wanted.
+  // a couple of metres of the lens, which is exactly where they are wanted — and the
+  // phone's near half-metre is the one place its pixel could hold them, so they are the
+  // cheapest thing on the board to let go of.
+#ifndef BOARD_LOW
   vec2 sd = vec2(ca, sa);
   float scratch = bNoise(vec2(dot(loc, sd) * 62.0, dot(loc, vec2(-sd.y, sd.x)) * 5.0));
   rough += (scratch - 0.5) * 0.16 * bFade(0.032, px);
+#endif
   gRough = clamp(rough, 0.045, 1.0);
   gReflMask = clamp((1.0 - dustMask * 1.25) * (1.0 - worn * 0.7) * (1.0 - score) * (1.0 - chip)
                     * (1.0 - film * 0.86) * (1.0 - core * 0.78) * (1.0 - groove), 0.0, 1.0);
@@ -567,10 +612,14 @@ const FRAG_COLOR = /* glsl */ `
   float hx = bMicro(w + vec2(ee, 0.0), grit, px);
   float hz = bMicro(w + vec2(0.0, ee), grit, px);
   gNormalPert = vec3(-(hx - h0) / ee, 0.0, -(hz - h0) / ee) * amp;
-  // A crack is a real kink in the surface, not a painted line.
+  // A crack is a real kink in the surface, not a painted line. Both of these ride on a
+  // term the low tier has already band-limited away (crack, and 2.6 cm grit), so on the
+  // phone they are four noise lookups scaled by zero.
+#ifndef BOARD_LOW
   gNormalPert += vec3(bNoise(w * 24.0) - 0.5, 0.0, bNoise(w * 24.0 + 7.0) - 0.5) * crack * 0.35;
   gNormalPert += vec3(bNoise(w * 46.0) - 0.5, 0.0, bNoise(w * 46.0 + 3.0) - 0.5)
                * clamp(grits, 0.0, 1.0) * 0.30 * bFade(0.026, px);
+#endif
   // The joint is a groove: the surface turns down into the seam where the two stones
   // meet, and the mortar between them is coarse. jt.z is now dominated by that downturn
   // rather than by the grit, so the run reads as one continuous shadowed cut instead of
@@ -579,8 +628,12 @@ const FRAG_COLOR = /* glsl */ `
   // of this render's edge energy into the finest band, where the film has none.
   vec2 acrossDir = (abs(loc.x) > abs(loc.y)) ? vec2(sign(loc.x), 0.0) : vec2(0.0, sign(loc.y));
   gNormalPert += vec3(acrossDir.x, 0.0, acrossDir.y) * band * jt.z * 0.34;
+  // 1.6 cm mortar grain in the normal — the finest term on the board, and the first one
+  // the phone's pixel cannot hold.
+#ifndef BOARD_LOW
   gNormalPert += vec3(bNoise(w * 60.0) - 0.5, 0.0, bNoise(w * 60.0 + 11.0) - 0.5)
                * band * 0.16 * bFade(0.016, px);
+#endif
 `;
 
 const FRAG_ROUGH = /* glsl */ `
@@ -813,6 +866,7 @@ export function createMarble(
     refl: THREE.Texture | null;
     reflMatrix: THREE.Matrix4;
     reflLod: number;
+    low: boolean;
   },
 ): Marble {
   const s = MARBLE[kind];
@@ -859,6 +913,26 @@ export function createMarble(
     uReflKnee: { value: s.reflKnee },
   };
 
+  if (shared.low) {
+    // No mirror pass: the analytic environment stands in for it. See REFLECT_GLSL's
+    // BOARD_LOW branch — these two colours are the room as the floor sees it, in linear
+    // HDR, so the per-stone knee above can tell the fires from the dark stone.
+    // Levelled against the mirror, not chosen by eye: rendered at 1920x804 with the true
+    // planar reflection, the field region of `wide-establishing` means (75.1, 86.0, 99.9)
+    // with its dark quartile at (21.2, 25.4, 36.2) and its light quartile at
+    // (169.9, 190.0, 201.5) — a chequer of 7.4 to 1. These two colours are the values that
+    // reproduce that from an analytic room: with them the same region comes back at
+    // (76.2, 87.4, 101.6), dark (21.8, 26.1, 37.1), light (171.3, 191.6, 203.3), a chequer
+    // of 7.2 to 1 — within a percent and a half of the mirror everywhere, and the residual
+    // is the dropped hairline generation, not the reflection. The phone's marble sits
+    // where the mirror put it rather than somewhere plausible.
+    uniforms.uEnvBand = { value: new THREE.Vector3(2.02, 2.16, 2.52) };
+    uniforms.uEnvHigh = { value: new THREE.Vector3(0.046, 0.055, 0.081) };
+    // The mirror's own strength, kept: the stand-in is calibrated to land the field where
+    // the true mirror lands it, so the polish reads the same and the chequer holds.
+    uniforms.uReflStrength.value = s.reflect;
+  }
+
   const material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     roughness: 1.0,
@@ -866,6 +940,11 @@ export function createMarble(
     dithering: true,
   });
   material.name = `board-marble-${kind}`;
+  if (shared.low) {
+    // Set from world.quality and nothing else. The high tier never sees either define, so
+    // its program is the one it always compiled.
+    material.defines = { BOARD_LOW: '', BOARD_MERGED: '' };
+  }
   // The environment's specular lobe is added on top of the albedo, so at the grazing
   // angle this shot is judged from it lands on light and dark squares ALIKE. Proved by
   // rendering the dark marble with a pure red albedo: the squares still came back with
@@ -887,6 +966,91 @@ export function createMarble(
       material.dispose();
     },
   };
+}
+
+// ---------------------------------------------------------------------------------------
+// Merging the field, for the low tier
+// ---------------------------------------------------------------------------------------
+
+export interface SlabPlacement {
+  geometry: THREE.BufferGeometry;
+  /** Where this slab sits on the board — its position, yaw and tilt, as one matrix. */
+  matrix: THREE.Matrix4;
+}
+
+/**
+ * Bake a set of placed slabs into one buffer.
+ *
+ * Sixty-four slabs is sixty-four draw calls, sixty-four state changes and sixty-four
+ * bounding-sphere tests for a surface that is never partly present: the field is one
+ * object as far as the frame is concerned. Merged by material — the light stone and the
+ * dark stone — the whole field costs two calls.
+ *
+ * The one thing that cannot be lost in the bake is each vertex's position within its OWN
+ * slab: the joint band, the chamfer and the per-slab rotation of the marble figure are
+ * all functions of it. It travels as the `aLoc` attribute instead of being read off the
+ * untransformed position, which is what `#ifdef BOARD_MERGED` switches to in the vertex
+ * shader. Every other input — the world position the marble is evaluated in, the slab key
+ * the block's rotation comes from — is unchanged by definition, because the vertices end
+ * up in exactly the same place they did as separate meshes.
+ */
+export function mergeSlabs(parts: SlabPlacement[]): THREE.BufferGeometry {
+  let vTotal = 0;
+  let iTotal = 0;
+  for (const p of parts) {
+    vTotal += p.geometry.attributes.position.count;
+    iTotal += p.geometry.index ? p.geometry.index.count : 0;
+  }
+
+  const pos = new Float32Array(vTotal * 3);
+  const nrm = new Float32Array(vTotal * 3);
+  const chip = new Float32Array(vTotal);
+  const loc = new Float32Array(vTotal * 2);
+  const idx = vTotal > 65535 ? new Uint32Array(iTotal) : new Uint16Array(iTotal);
+
+  const v = new THREE.Vector3();
+  const nm = new THREE.Matrix3();
+  let vo = 0;
+  let io = 0;
+
+  for (const p of parts) {
+    const g = p.geometry;
+    const P = g.attributes.position;
+    const N = g.attributes.normal;
+    const C = g.attributes.aChip;
+    const I = g.index!;
+    nm.getNormalMatrix(p.matrix);
+
+    for (let i = 0; i < P.count; i++) {
+      const lx = P.getX(i);
+      const ly = P.getY(i);
+      const lz = P.getZ(i);
+      loc[(vo + i) * 2] = lx;
+      loc[(vo + i) * 2 + 1] = lz;
+      v.set(lx, ly, lz).applyMatrix4(p.matrix);
+      pos[(vo + i) * 3] = v.x;
+      pos[(vo + i) * 3 + 1] = v.y;
+      pos[(vo + i) * 3 + 2] = v.z;
+      v.set(N.getX(i), N.getY(i), N.getZ(i)).applyMatrix3(nm).normalize();
+      nrm[(vo + i) * 3] = v.x;
+      nrm[(vo + i) * 3 + 1] = v.y;
+      nrm[(vo + i) * 3 + 2] = v.z;
+      chip[vo + i] = C.getX(i);
+    }
+    for (let i = 0; i < I.count; i++) idx[io + i] = I.getX(i) + vo;
+
+    vo += P.count;
+    io += I.count;
+  }
+
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  out.setAttribute('aChip', new THREE.BufferAttribute(chip, 1));
+  out.setAttribute('aLoc', new THREE.BufferAttribute(loc, 2));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  out.computeBoundingSphere();
+  return out;
 }
 
 export { HALF_SLAB, HALF_TOP };

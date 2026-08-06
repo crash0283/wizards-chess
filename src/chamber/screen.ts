@@ -173,8 +173,13 @@ export function buildSideScreen(
   const m = new CarvedMesh();
   const z0 = sign * SIDE_Z;
   const inward = -sign;          // toward the board
-  const radial = hi ? 11 : 7;
-  const bendSteps = hi ? 6 : 4;
+  // The PITCH does not change between tiers and neither does the span: the rhythm of the
+  // screen, its major-shaft beat and where it stops are the look, and thinning them would
+  // change the room's character rather than its density. What changes is how finely each
+  // shaft is swept — six facets over 1.80 pi and three steps through the bend, on a shaft
+  // whose analytic normals mean facet count only ever shows in silhouette.
+  const radial = hi ? 11 : 6;
+  const bendSteps = hi ? 6 : 3;
   // Wide enough that both flanks of every shaft run past the web behind it. Normals are
   // analytic, so eleven facets on a shaft this size are smooth to well under a pixel.
   const arc = Math.PI * 1.80;
@@ -259,7 +264,7 @@ export function buildBackRow(sign: 1 | -1, hi: boolean, tone: Tone, bay: boolean
   const m = new CarvedMesh();
   const z0 = sign * (SIDE_Z + 3.1);
   const inward = -sign;
-  const radial = hi ? 9 : 6;
+  const radial = hi ? 9 : 5;
   const arc = Math.PI * 1.5;
 
   const clusters: number[] = [];
@@ -277,8 +282,14 @@ export function buildBackRow(sign: 1 | -1, hi: boolean, tone: Tone, bay: boolean
       st.push({ x: cx + d, y: 10.5, z: z0, r: r * 0.96 });
       sweepShaft(m, st, 0, inward, radial, arc, tone);
     }
-    ringMoulding(m, cx, 5.9, z0, 1.30, 0.16, 0, Math.PI * 2, hi ? 12 : 8, 5,
-      (x, y, z) => tone(x, y, z, 0.3));
+    // The roll at the head of the cluster. It is a full torus — 80 triangles at low — on
+    // stone that stands three metres BEHIND the screen and is seen only through the slots
+    // between its shafts, at thirty-seven metres. On the low tier the cluster keeps its
+    // shafts, which is what the gap-filling is for, and loses the moulding.
+    if (hi) {
+      ringMoulding(m, cx, 5.9, z0, 1.30, 0.16, 0, Math.PI * 2, 12, 5,
+        (x, y, z) => tone(x, y, z, 0.3));
+    }
   }
 
   return { geometry: m.build(), triangles: m.triangles };

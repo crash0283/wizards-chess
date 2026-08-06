@@ -26,7 +26,21 @@ export interface ImpactField {
 }
 
 export function createImpactField(world: World): ImpactField {
-  const size = world.quality === 'high' ? 512 : 256;
+  /**
+   * The one texture this piece allocates, RGBA8 over a 24.8 m square.
+   *
+   *   high  512 x 512 = 1 048 576 bytes,  4.8 cm per texel
+   *   low   128 x 128 =    65 536 bytes, 19.4 cm per texel
+   *
+   * What lives in it is the slowest-varying thing on the board — baked traffic wear, and
+   * the dust a burst throws — and every one of those terms is given its structure again
+   * per pixel in the shader (see the dustMask arithmetic in marble.ts, which multiplies
+   * this by fbm at 30 cm and at 3 cm). So the map only has to say WHERE, not what it
+   * looks like, and 19 cm is finer than the softest edge any deposit has. It also makes
+   * markImpact sixteen times cheaper, which matters: it runs on the CPU every time a
+   * piece is destroyed, on the same thread as the frame.
+   */
+  const size = world.quality === 'high' ? 512 : 128;
   const data = new Uint8Array(size * size * 4);
   const seed = world.rng.fork('board-wear').int(1, 0x7fffffff);
   const fbmWear = makeFbm(seed, 5);

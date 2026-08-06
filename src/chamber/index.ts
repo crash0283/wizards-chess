@@ -100,8 +100,29 @@ function dimWeather(w: Weather, k: number, mottle: number, seed: number): Weathe
   };
 }
 
-const VARIANTS = 12;
-const CHUNK_VARIANTS = 5;
+/**
+ * How many unit geometries the instanced fields are cut into — and, because
+ * `InstanceSink` bakes one InstancedMesh per variant, how many DRAW CALLS every field in
+ * the room costs.
+ *
+ * This is the low tier's biggest structural saving and it removes nothing from the frame.
+ * A variant differs from its neighbours only in chamfer jitter, corner jitter and which
+ * atlas cell it samples; every instance is then scaled to its own width, height and depth
+ * and tinted its own colour, which is where the masonry's irregularity actually comes
+ * from. Twelve variants exist so that at capture resolution, with a metre of block filling
+ * a hundred pixels, no two adjacent stones share a pit pattern.
+ *
+ * MEASURED, low tier, before: each wall baked 12 InstancedMeshes, the floor 12, and each
+ * of the seven scree sinks 5 — 80 draw calls from the chamber alone out of 162 in the
+ * frame. At 4 and 2 the same instances go down the same pipe in a third of the calls.
+ * The four block variants are spread to the four corners of the atlas grid (cells 0, 4, 8,
+ * 12) rather than the first four cells, so the surface variety that remains is the
+ * widest-separated four rather than a huddle.
+ */
+const VARIANTS_HI = 12;
+const VARIANTS_LO = 4;
+const CHUNK_VARIANTS_HI = 5;
+const CHUNK_VARIANTS_LO = 2;
 
 /** Root that decides, at draw time, which walls the camera is inside of. */
 class ChamberRoot extends THREE.Group {
@@ -124,6 +145,10 @@ interface Panel {
 
 export function createChamber(world: World): Chamber {
   const hi = world.quality === 'high';
+  const VARIANTS = hi ? VARIANTS_HI : VARIANTS_LO;
+  const CHUNK_VARIANTS = hi ? CHUNK_VARIANTS_HI : CHUNK_VARIANTS_LO;
+  /** Stride through the atlas grid, so four variants land as far apart as sixteen cells allow. */
+  const CELL_STRIDE = hi ? 1 : 4;
   const group = new ChamberRoot();
   group.name = 'chamber';
 
@@ -138,18 +163,31 @@ export function createChamber(world: World): Chamber {
     color: 0xa79489,
     map: atlas.map,
     normalMap: atlas.normalMap,
+    // Null on the low tier — see textures.ts. `roughness` then stands in for the map's
+    // mean, so the stone answers light with the same broad dullness; what it loses is the
+    // centimetre-scale variation in that dullness, which is sub-pixel from the play camera.
     roughnessMap: atlas.roughnessMap,
-    roughness: 1.0,
+    roughness: atlas.roughnessMap ? 1.0 : 0.78,
     metalness: 0.0,
     normalScale: new THREE.Vector2(0.70, 0.70),
   });
   materials.push(stone);
 
-  const voidStone = new THREE.MeshStandardMaterial({
-    color: 0x0b0c11,
-    roughness: 1.0,
-    metalness: 0.0,
-  });
+  /**
+   * The room's darkness: the backing behind every open joint and lost block, and the vault.
+   *
+   * On the low tier it is not a physically-based material, and the lighting piece's own
+   * notes are the argument for it: "what is standing there is voidStone from the chamber
+   * piece, albedo 0x0b0c11, which multiplied by any irradiance this room can supply is
+   * still black" — that was written after adding a light aimed at it and measuring no
+   * change in the frame at all. It is nevertheless a full GGX evaluation against
+   * thirty-seven lights, run over the vault, which on a phone's taller frame is the whole
+   * top of the picture. Lambert keeps it lit, keeps it fogged, and keeps it black, for a
+   * fraction of the fragment cost.
+   */
+  const voidStone = hi
+    ? new THREE.MeshStandardMaterial({ color: 0x0b0c11, roughness: 1.0, metalness: 0.0 })
+    : new THREE.MeshLambertMaterial({ color: 0x0b0c11 });
   materials.push(voidStone);
 
   // Carved stone: the shaft screens. Smooth and ordered, so it takes none of the pitting
@@ -216,12 +254,15 @@ export function createChamber(world: World): Chamber {
   const blockRng = world.rng.fork('chamber-blocks');
   const blockGeos: THREE.BufferGeometry[] = [];
   for (let i = 0; i < VARIANTS; i++) {
-    const g = makeBlockGeometry(blockRng, atlas.cell(i, i * 5), hi ? 2 : 1, 0.7 + (i % 4) * 0.28);
+    const g = makeBlockGeometry(
+      blockRng, atlas.cell(i * CELL_STRIDE, i * 5), hi ? 2 : 1, 0.7 + (i % 4) * 0.28,
+    );
     blockGeos.push(g);
     geometries.push(g);
   }
-  const blindGeo = makeBlindArchGeometry(atlas.cell(3, 2), hi ? 9 : 5);
-  geometries.push(blindGeo);
+  // No blind arcading on the low tier, so no geometry for it either — see wall.ts.
+  const blindGeo = hi ? makeBlindArchGeometry(atlas.cell(3, 2), 9) : null;
+  if (blindGeo) geometries.push(blindGeo);
 
   const chunkRng = world.rng.fork('chamber-chunks');
   const chunkGeos: THREE.BufferGeometry[] = [];
@@ -362,6 +403,7 @@ export function createChamber(world: World): Chamber {
     const backGeo = new THREE.ShapeGeometry(shape);
     geometries.push(backGeo);
     const back = new THREE.Mesh(backGeo, voidStone);
+    back.name = `chamber-back-${spec.id}`;
     back.position.z = BACK_Z;
     back.receiveShadow = false;
     wallGroup.add(back);
@@ -372,7 +414,7 @@ export function createChamber(world: World): Chamber {
     });
     surfaces.push(...meshes);
 
-    if (parts.blind.length) {
+    if (blindGeo && parts.blind.length) {
       const im = new THREE.InstancedMesh(blindGeo, stone, parts.blind.length);
       im.name = `chamber-blind-${spec.id}`;
       for (let i = 0; i < parts.blind.length; i++) {
@@ -397,7 +439,7 @@ export function createChamber(world: World): Chamber {
 
   // --- floor ---------------------------------------------------------------------------------
   // Both extents now reach past the end wall at EAST_X rather than past CHAMBER.halfWidth.
-  const slab = buildFloorSlab(EAST_X + 3, HD);
+  const slab = buildFloorSlab(EAST_X + 3, HD, !hi);
   geometries.push(slab.geometry);
   materials.push(slab.material);
   group.add(slab.mesh);
@@ -562,7 +604,11 @@ export function createChamber(world: World): Chamber {
   void screenTris;
 
   // --- vault ---------------------------------------------------------------------------------
-  const vaultGeo = makeVaultGeometry(HW, HD + 1.0, H, 5.5, hi ? 26 : 14, hi ? 10 : 5);
+  // Nothing in any shot resolves the vault — it exists so the top of frame is a real
+  // ceiling and not a missing polygon. On the low tier it is an unlit-looking Lambert
+  // surface (see `voidStone`) and its section is cut to eight by three, which is still a
+  // smooth ellipse at the one thing it has to do, which is be there.
+  const vaultGeo = makeVaultGeometry(HW, HD + 1.0, H, 5.5, hi ? 26 : 8, hi ? 10 : 3);
   geometries.push(vaultGeo);
   const vault = new THREE.Mesh(vaultGeo, voidStone);
   vault.name = 'chamber-vault';

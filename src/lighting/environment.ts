@@ -98,6 +98,40 @@ export function createEnvironment(world: World): Environment {
   const group = new THREE.Group();
   group.name = 'lighting-environment';
 
+  /**
+   * LIGHT COUNT IS THIS RIG'S ENTIRE COST, and it is worth writing down why, because
+   * nothing about it is visible from the draw-call count.
+   *
+   * three forward-renders. Every one of these spots is an extra iteration of the light
+   * loop inside EVERY fragment shader in the scene — the marble, the pieces, the walls,
+   * the rubble — whether or not that fragment is inside the cone. Nineteen spots and
+   * sixteen points is thirty-five inverse-square evaluations, thirty-five cone tests and
+   * thirty-five BRDF evaluations for every pixel of a phone's screen, on top of the IBL.
+   * Measured on this box at the interactive resolution, taking the spots to five and the
+   * points to four cut the FRAME — not the lighting, the whole frame including the
+   * chamber, the board and the pieces — from 1775 ms to 1080 ms. Nothing else in this
+   * piece is within an order of magnitude of it: the bloom pass is 21 ms, the atmosphere
+   * pass 25 ms, all forty-six flames' worth of billboard geometry is inside the noise.
+   *
+   * So at 'low' the rig is thinned, and thinned the way the contract says to thin things:
+   * the same room, the same cold light from the same directions in the same places, fewer
+   * sources making it. Each group keeps its most load-bearing members and they carry the
+   * flux the retired ones used to. A strip of four overlapping pools becomes a strip of
+   * three; a three-source specular sweep becomes the one on the reflection ray; four lights
+   * per wall become the two that model rather than the two that wash. Nineteen spots become
+   * ten. Character identical, density thinned.
+   *
+   * One rule held throughout, and it is the one that took a measurement to learn: CONE
+   * ANGLES DO NOT CHANGE. Widening a cone to give back the coverage a retired light used to
+   * provide sounds like the same thing as adding its flux, and it is not — it moves light
+   * onto the ranked armies at |z| = 8.2, which are the pixels the person on the phone is
+   * complaining are blown out. Every level below is set by re-measuring the frame, not by
+   * adding up what was removed.
+   *
+   * 'high' takes none of these branches and is byte-for-byte what it was.
+   */
+  const high = world.quality === 'high';
+
   // The soft cool ambient, and it is meant to be the room's dominant light — the brief is
   // explicit that there is "no hard key" and that this is what models every piece.
   //
@@ -233,12 +267,29 @@ export function createEnvironment(world: World): Environment {
   // |z| = 8.2 and they are the one thing in the frame that is already too bright. Opened to
   // 0.46 rad the pools reached them and the near-left rank came back with 4.5% of its cell
   // clipped against the film's 1.5%. 0.37 keeps the useful light inboard of the kerb.
-  for (const [ax, az, mul] of [
-    [-9.4, -2.4, 1.62],
-    [-3.1, 2.5, 1.22],
-    [3.1, -2.5, 1.38],
-    [9.4, 2.4, 2.80],
-  ] as const) {
+  //
+  // At 'low' the four become three, spread the same length of board, still alternating
+  // near-kerb / far-kerb, still biased hard down the room. Each covers a wider stretch on
+  // its own so each carries more flux — but the CONE IS NOT TOUCHED, and that is the whole
+  // discipline of the change. The first attempt at this merged them to two and opened the
+  // angle to 0.52 rad to give the coverage back, which is precisely the mistake the note
+  // above records: a pool from 11.4 m at 0.52 rad has a 6.5 m radius, and a light sitting
+  // at az = -2.4 with a 6.5 m radius reaches z = -8.9, which is the rank. Measured, that
+  // put the near army's mean up from 78 to 93 and it is exactly the "blown out on the
+  // phone" complaint. Three at 0.37 rad cover x = -11..11 between them with a soft seam
+  // where each pair overlaps, and reach no further across the board than four did.
+  for (const [ax, az, mul] of (high
+    ? ([
+        [-9.4, -2.4, 1.62],
+        [-3.1, 2.5, 1.22],
+        [3.1, -2.5, 1.38],
+        [9.4, 2.4, 2.80],
+      ] as const)
+    : ([
+        [-7.4, -2.4, 1.85],
+        [0.0, 2.5, 2.00],
+        [7.4, -2.4, 3.15],
+      ] as const))) {
     const s = new THREE.SpotLight(new THREE.Color(COLD.key), 318 * mul, 0, 0.37, 0.88, 1.0);
     s.position.set(ax, 11.4, az);
     s.target.position.set(ax, 0, az * 0.35);
@@ -272,12 +323,22 @@ export function createEnvironment(world: World): Environment {
   // single blown white sheet with no squares in it at all. It is a highlight, not a key:
   // the diffuse level is the aisle's job, and the sheen only has to put a soft bright
   // sweep where the marble is throwing the room at the lens.
+  //
+  // At 'low', one of them, standing where the middle one did — on the ray from the camera's
+  // mirror image, which is the only place a source can be and still be thrown down the lens
+  // by the marble. The cone is NOT opened to give the lost width back, for the same reason
+  // as the aisle: this thing grazes, and a grazing lobe that reaches the ranks lands on
+  // vertical stone at the angle that blows it out. What it loses is some of the band's
+  // spread across z; what it keeps is the sweep, in the same place, from the same
+  // direction, at a level set by measurement rather than by adding the three together.
   const sheen: THREE.SpotLight[] = [];
-  for (const [sx, sy, sz, si] of [
-    [12.4, 7.6, -3.4, 1.0],
-    [14.2, 8.8, 0.6, 1.25],
-    [12.4, 7.6, 3.9, 1.0],
-  ] as const) {
+  for (const [sx, sy, sz, si] of (high
+    ? ([
+        [12.4, 7.6, -3.4, 1.0],
+        [14.2, 8.8, 0.6, 1.25],
+        [12.4, 7.6, 3.9, 1.0],
+      ] as const)
+    : ([[14.2, 8.8, 0.6, 2.40]] as const))) {
     // The cutoff distance is doing real work: a cone aimed at the middle of the board does
     // not stop there, and left unclamped these rake straight on across the near kerb and
     // blow its whole length out into one continuous white band. The film's near kerb is
@@ -295,7 +356,9 @@ export function createEnvironment(world: World): Environment {
     // at this angle of view a dark stone returns most of what you see off its surface, not
     // out of its body. This is that term, and it is the only lever in the rig that lifts a
     // navy square without touching a cream one in proportion.
-    const s = new THREE.SpotLight(new THREE.Color(COLD.sheen), 186 * si, 34, 0.34, 0.92, 1.0);
+    const s = new THREE.SpotLight(
+      new THREE.Color(COLD.sheen), 186 * si, 34, 0.34, 0.92, 1.0,
+    );
     s.position.set(sx, sy, sz);
     s.target.position.set(-5.0, 0, sz * 0.35);
     s.castShadow = false;
@@ -331,17 +394,33 @@ export function createEnvironment(world: World): Environment {
   // what the film's frame edges are made of, and it is where the film keeps its shadow:
   // its outer grid columns hold 0.19/0.16/0.07 and 0.20/0.18/0.15 deep shadow top to
   // bottom, spread through the whole height, not dumped in a ring at the top.
+  //
+  // Two per wall at 'low' instead of four, and which two is decided by where the low tier's
+  // camera actually looks. PLAY_SHOT sits at [0, 15, -21] — inside the room, at the near
+  // end, pitched about 33 degrees down — so the top of its frame is only eight or nine
+  // metres up the wall twenty metres away. `crown` throws along the wall at y = 9.6-13.6,
+  // which in this view is above the picture; `fill` is a broad frontal wash from the far
+  // end that sets a level but draws no edges, and at this camera most of what it lights is
+  // behind black's ranks. What is kept is the pair whose work is visible from here: the
+  // `rake`, which is the only source that lights the pier faces a camera in the room can
+  // see, and `nearEnd`, which is the only thing in the rig that reaches the leaning screens
+  // in the bottom two corners of this frame. Both take more intensity to carry the level
+  // the other two used to, set by measuring those corners rather than by adding up.
   const colonnade: THREE.SpotLight[] = [];
   for (const sz of [-1, 1] as const) {
-    const fill = new THREE.SpotLight(new THREE.Color(COLD.sky), 980, 21.0, 0.80, 0.92, 2.0);
-    fill.position.set(10.2, 10.6, sz * 11.8);
-    fill.target.position.set(7.4, 5.2, sz * 19.6);
-    fill.castShadow = false;
-    group.add(fill);
-    group.add(fill.target);
-    colonnade.push(fill);
+    if (high) {
+      const fill = new THREE.SpotLight(new THREE.Color(COLD.sky), 980, 21.0, 0.80, 0.92, 2.0);
+      fill.position.set(10.2, 10.6, sz * 11.8);
+      fill.target.position.set(7.4, 5.2, sz * 19.6);
+      fill.castShadow = false;
+      group.add(fill);
+      group.add(fill.target);
+      colonnade.push(fill);
+    }
 
-    const rake = new THREE.SpotLight(new THREE.Color(COLD.sky), 1950, 34.0, 0.40, 0.80, 2.0);
+    const rake = new THREE.SpotLight(
+      new THREE.Color(COLD.sky), high ? 1950 : 4000, 34.0, 0.40, 0.80, 2.0,
+    );
     rake.position.set(-11.5, 10.4, sz * 16.2);
     rake.target.position.set(9.0, 4.4, sz * 19.0);
     rake.castShadow = false;
@@ -362,13 +441,15 @@ export function createEnvironment(world: World): Environment {
     // Up by half. In the 6x3 grid the top band's two right-hand cells come back at 0.071
     // and 0.038 against the film's 0.171 and 0.103, with a quarter of its structure — the
     // "flat black cardboard" note, and this is the only source that reaches that stone.
-    const crown = new THREE.SpotLight(new THREE.Color(COLD.sky), 2150, 32.0, 0.36, 0.72, 2.0);
-    crown.position.set(-9.0, 13.6, sz * 15.0);
-    crown.target.position.set(11.0, 9.6, sz * 18.4);
-    crown.castShadow = false;
-    group.add(crown);
-    group.add(crown.target);
-    colonnade.push(crown);
+    if (high) {
+      const crown = new THREE.SpotLight(new THREE.Color(COLD.sky), 2150, 32.0, 0.36, 0.72, 2.0);
+      crown.position.set(-9.0, 13.6, sz * 15.0);
+      crown.target.position.set(11.0, 9.6, sz * 18.4);
+      crown.castShadow = false;
+      group.add(crown);
+      group.add(crown.target);
+      colonnade.push(crown);
+    }
 
     // The near end of the leaning side screen. This is the black wedge that eats frame
     // left from the top of the picture down to the ranks: the screen begins at x = -17,
@@ -390,7 +471,9 @@ export function createEnvironment(world: World): Environment {
     // the report is that the frame edges cannot come up until that material does. This
     // light stays because it does model the parts of the near screen that are NOT void
     // stone, and it is cheap.
-    const nearEnd = new THREE.SpotLight(new THREE.Color(COLD.sky), 300, 15.0, 0.52, 0.82, 2.0);
+    const nearEnd = new THREE.SpotLight(
+      new THREE.Color(COLD.sky), high ? 300 : 430, 15.0, 0.52, 0.82, 2.0,
+    );
     nearEnd.position.set(-12.6, 9.4, sz * 5.6);
     nearEnd.target.position.set(-16.4, 5.6, sz * 13.4);
     nearEnd.castShadow = false;
@@ -450,12 +533,23 @@ export function createEnvironment(world: World): Environment {
   // It went back in at roughly its old strength. The rakes buy the modelling, the frontal
   // buys the level; the top band's high-frequency energy came up from 0.0084 to 0.0102 on
   // the pair of them.
+  //
+  // One of the three at 'low', and it is the frontal — the one the note above calls
+  // load-bearing, because it is what covers the wall corner to corner and sets the level
+  // of the top of frame. What is lost with the two rakes is some of the alternation
+  // between lit and dark shafts across the end screen. That alternation is a modelling
+  // refinement measured in high-frequency energy against a film frame; it is not what the
+  // room IS, and on a phone the end wall is thirty metres away behind the whole board. The
+  // frontal opens from 0.66 to 0.74 rad and takes half again the intensity so the wall
+  // still reads as lit masonry rather than as the void above it.
   const wash: THREE.SpotLight[] = [];
-  for (const [wx, wy, wz, tx, ty, tz, wi, wa] of [
-    [12.8, 6.2, -13.8, CHAMBER.halfWidth - 0.3, 5.0, -2.5, 2500, 0.42],
-    [12.8, 7.9, 13.8, CHAMBER.halfWidth - 0.3, 6.4, 1.5, 2100, 0.42],
-    [7.2, 10.4, 0.0, CHAMBER.halfWidth, 6.4, 0.0, 1850, 0.66],
-  ] as const) {
+  for (const [wx, wy, wz, tx, ty, tz, wi, wa] of (high
+    ? ([
+        [12.8, 6.2, -13.8, CHAMBER.halfWidth - 0.3, 5.0, -2.5, 2500, 0.42],
+        [12.8, 7.9, 13.8, CHAMBER.halfWidth - 0.3, 6.4, 1.5, 2100, 0.42],
+        [7.2, 10.4, 0.0, CHAMBER.halfWidth, 6.4, 0.0, 1850, 0.66],
+      ] as const)
+    : ([[7.2, 10.4, 0.0, CHAMBER.halfWidth, 6.4, 0.0, 4000, 0.74]] as const))) {
     const s = new THREE.SpotLight(new THREE.Color(COLD.sky), wi, 24, wa, 0.62, 2.0);
     s.position.set(wx, wy, wz);
     s.target.position.set(tx, ty, tz);

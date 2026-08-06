@@ -27,6 +27,7 @@ import { AtmosphereShader } from './atmosphere';
 import { createEnvironment } from './environment';
 import { createFlames } from './flames';
 import { GradeShader } from './grade';
+import { LowGradeShader } from './grade-low';
 import { FIRE } from './palette';
 
 interface FlareSlot {
@@ -52,14 +53,37 @@ export function createLighting(
   env.apply(world.scene);
 
   // --- the flames ---------------------------------------------------------------------
-  const flames = createFlames(world, { lightCount: high ? 24 : 10 });
+  // The light pool, not the fire count: all forty-six flames still burn at both tiers,
+  // with the same layout, the same colours, the same flicker and the same contact pools
+  // and reflections in the stone. What scales is how many of them get a real
+  // inverse-square light, and `assign()` already spends that pool on whichever fires
+  // matter most for the current camera — so the near kerb still uplights the pieces standing
+  // on it, and the fires further off keep their glow, their contact pool and their
+  // reflection and lose only their two-metre wash.
+  //
+  // Eight, not the six this round first tried. At six the bottom band of the play frame —
+  // the near kerb, the leaning screens either side of it, the stone the nearest fires stand
+  // on — measured a fifth darker than it had been, because `assign()` ranks by size/d² and
+  // spends a small pool entirely on the fires closest to the lens, leaving the ones out at
+  // the frame edges with no light at all. Two more lights bought that band back. Each of
+  // them costs every fragment in the scene an iteration of the point-light loop, so this is
+  // the one number here that was set by measuring both directions; see environment.ts.
+  const flames = createFlames(world, {
+    lightCount: high ? 24 : 8,
+    bounceCount: high ? 4 : 2,
+  });
   group.add(flames.group);
 
   // --- impact flares ------------------------------------------------------------------
   // Always present, intensity 0 when idle, so the light count — and therefore every
   // compiled shader — stays constant for the whole run.
+  //
+  // One at 'low'. Two impacts never overlap in interactive play — a capture is a single
+  // event resolved before the next move begins — so the second slot only ever exists to be
+  // stolen, and it costs a point-light iteration in every fragment shader for the whole
+  // session to do it.
   const flareSlots: FlareSlot[] = [];
-  for (let i = 0; i < (high ? 3 : 2); i++) {
+  for (let i = 0; i < (high ? 3 : 1); i++) {
     const light = new THREE.PointLight(new THREE.Color(FIRE.flare), 0, 26, 2);
     light.castShadow = false;
     group.add(light);
@@ -108,11 +132,30 @@ export function createLighting(
   const renderPass = new RenderPass(world.scene, world.camera);
   composer.addPass(renderPass);
 
-  const atmoPass = new ShaderPass(AtmosphereShader);
-  atmoPass.material.depthTest = false;
-  atmoPass.material.depthWrite = false;
-  const au = atmoPass.uniforms as Record<string, { value: any }>;
-  composer.addPass(atmoPass);
+  /**
+   * The atmosphere pass exists as a pass only at 'high'. At 'low' the identical shader
+   * body is inlined into the front of the grade (see grade-low.ts), and that single change
+   * retires a full-frame RGBA16F buffer AND its depth texture as well as the pass.
+   *
+   * Why the buffer goes with it. EffectComposer ping-pongs between two targets and swaps
+   * only after a pass whose `needsSwap` is true. RenderPass and UnrealBloomPass both
+   * declare `needsSwap = false` and both write into `readBuffer`; the only swapping pass in
+   * this chain was the atmosphere one. With it gone — and with the grade's own swap turned
+   * off below, since nothing follows it — there are zero swaps in the frame, `readBuffer`
+   * is `renderTarget2` for the life of the page, and `renderTarget1` is never bound by
+   * anything at all. It is held at 1x1 in setSize() rather than allocated as a second
+   * full-size HDR buffer with a second full-size depth texture.
+   *
+   * If a pass is ever added after the grade, this reasoning has to be redone: restore the
+   * grade's needsSwap and give renderTarget1 its size and depth texture back.
+   */
+  let atmoPass: ShaderPass | null = null;
+  if (high) {
+    atmoPass = new ShaderPass(AtmosphereShader);
+    atmoPass.material.depthTest = false;
+    atmoPass.material.depthWrite = false;
+    composer.addPass(atmoPass);
+  }
 
   // Bloom thresholded well above anything the cold ambient can reach, so it only ever
   // touches flame cores, the specular bloom off the marble and a dust burst.
@@ -126,23 +169,82 @@ export function createLighting(
   // disappeared. Halation is the right idea; a bloom pass is the wrong instrument for it,
   // because it is symmetric and unbounded and the flames dominate it. It now happens in
   // the grade instead, one-sided and at a few texels (see `uHalation`).
+  /**
+   * The bloom's working resolution, and at 'low' it is PINNED rather than tracking the
+   * frame — which is a fix as much as a saving.
+   *
+   * UnrealBloomPass is not resolution-independent. It builds five mips from half the
+   * resolution it is given and blurs each with a fixed 3/5/7/9/11-tap kernel measured in
+   * that mip's own texels, so the width of the bloom as a FRACTION OF THE PICTURE goes as
+   * 1 / resolution. The adaptive scaler hands this pass whatever buffer it has settled on,
+   * so on a phone pinned at its floor the bloom was running off a 256-px mip chain and
+   * spreading two and a half times as far across the frame as the same code does on the
+   * 1920-px capture the strength was tuned against. That is a large part of why the near
+   * pieces came back white: they are the pixels immediately around the near kerb's fires,
+   * and they were being handed a flame's worth of additive energy smeared over them.
+   *
+   * Pinned at 448 px wide the bloom's radius is a constant fraction of the frame whatever
+   * the scaler is doing, and its eleven render targets stop being a function of the canvas
+   * at all: 1.8 MB, fixed, instead of 2.3 MB at the scaler's floor rising to 14 MB if the
+   * scaler ever climbs back to a phone's full 1280. Strength comes down with it, because a
+   * kernel that no longer widens with every rung the scaler drops does not need to be
+   * defended against.
+   *
+   * 448 rather than something larger, and the number matters: it has to sit at or below the
+   * buffer the scaler is actually delivering, or the bloom costs MORE than it did. Pinned at
+   * 768 — measured — the mip chain went from 2.30 MB to 3.66 MB behind a 512-px buffer,
+   * which is the exact opposite of the point.
+   */
+  const BLOOM_PIN_W = 448;
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(width, height),
-    high ? 0.13 : 0.11,
+    high ? 0.13 : 0.075,
     0.22,
     1.0,
   );
+  if (!high) {
+    // Neutralise the pass's own resize before it can ever be called: EffectComposer calls
+    // setSize on addPass and on every composer.setSize, and either would put the mip chain
+    // back on the canvas.
+    (bloom as unknown as { setSize(w: number, h: number): void }).setSize = () => {};
+  }
   composer.addPass(bloom);
 
-  const gradePass = new ShaderPass(GradeShader);
+  const gradePass = new ShaderPass(high ? GradeShader : LowGradeShader);
   gradePass.material.depthTest = false;
   gradePass.material.depthWrite = false;
   gradePass.renderToScreen = true;
+  // Nothing follows it, so the swap would only be there to hand the next frame a buffer it
+  // does not use. See the note on the atmosphere pass above — this is what keeps
+  // renderTarget1 out of the frame entirely.
+  if (!high) gradePass.needsSwap = false;
   composer.addPass(gradePass);
 
   const gu = gradePass.uniforms as Record<string, { value: any }>;
+  // At 'low' the veil is part of this pass, so its uniforms are these ones.
+  const au = (atmoPass ? atmoPass.uniforms : gradePass.uniforms) as Record<
+    string,
+    { value: any }
+  >;
   gu.uAspect.value = width / Math.max(1, height);
   gu.uTexel.value.set(1 / width, 1 / height);
+
+  /**
+   * Aspect-track the pinned bloom, and never let it exceed the frame.
+   *
+   * The clamp is belt and braces rather than a live case: the scaler's lowest rung behind a
+   * 1280-px canvas is 486 px, so on a phone the pin binds and the clamp does not. But the
+   * ladder is not this piece's to depend on, and a bloom mip chain wider than the buffer it
+   * is blooming is pure waste in the one situation — a very small frame — where waste is
+   * least affordable.
+   */
+  const repinBloom = () => {
+    if (high) return;
+    const pinW = Math.max(1, Math.min(BLOOM_PIN_W, width));
+    const pinH = Math.max(1, Math.round((pinW * height) / Math.max(1, width)));
+    UnrealBloomPass.prototype.setSize.call(bloom, pinW, pinH);
+  };
+  repinBloom();
 
   // Grain has to move frame to frame or it reads as fixed-pattern noise, but it must
   // still be a pure function of scene time.
@@ -165,7 +267,14 @@ export function createLighting(
       s.light.intensity = s.intensity * 220 * falloff;
       flash += s.intensity * falloff;
     }
-    flashLevel = Math.min(0.6, flash * 0.22);
+    // The global exposure lift an impact throws. Capped lower at 'low' for the same reason
+    // the roll-off in grade-low.ts exists: this multiplies the WHOLE frame's exposure, and
+    // PLAY_SHOT's near rank already sits at the top of the curve where wide-establishing's
+    // nearest stone is twenty metres from the lens and nowhere near it. At 0.6 a capture
+    // turned the two closest pieces into a hole in the picture. The flare LIGHTS are
+    // untouched, so an impact still throws real light on real geometry; what comes down is
+    // only the global lift laid over the whole frame on top of them.
+    flashLevel = Math.min(high ? 0.6 : 0.26, flash * 0.22);
   });
 
   const api: Lighting & { composer: EffectComposer } = {
@@ -203,14 +312,28 @@ export function createLighting(
       world.renderer.setSize(width, height, false);
       composer.setSize(width, height);
       bloom.setSize(width, height);
+      repinBloom();
       if (changed) {
         // RenderTarget.setSize does not resize an attached depth texture, so swap in
-        // fresh ones at the new size and release the old.
-        for (const rt of [composer.renderTarget1, composer.renderTarget2]) {
+        // fresh ones at the new size and release the old. At 'low' only renderTarget2 is
+        // ever rendered into, so only it needs one.
+        const live = high
+          ? [composer.renderTarget1, composer.renderTarget2]
+          : [composer.renderTarget2];
+        for (const rt of live) {
           const old = rt.depthTexture;
           rt.depthTexture = makeDepth(width, height);
           old?.dispose();
         }
+      }
+      if (!high) {
+        // The unused half of the ping-pong. composer.setSize() has just put it back to full
+        // frame; it never gets bound, so it is held at one pixel and carries no depth.
+        const spare = composer.renderTarget1;
+        const oldDepth = spare.depthTexture;
+        spare.depthTexture = null;
+        oldDepth?.dispose();
+        spare.setSize(1, 1);
       }
       gu.uAspect.value = width / height;
       gu.uTexel.value.set(1 / width, 1 / height);
@@ -242,7 +365,7 @@ export function createLighting(
       flames.dispose();
       for (const s of flareSlots) s.light.dispose();
       gradePass.dispose();
-      atmoPass.dispose();
+      atmoPass?.dispose();
       bloom.dispose();
       renderPass.dispose();
       composer.dispose();

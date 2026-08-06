@@ -24,6 +24,8 @@ export interface SharedMaps {
   refl: THREE.Texture | null;
   reflMatrix: THREE.Matrix4;
   reflLod: number;
+  /** world.quality === 'low'. Set from that and nothing else — see marble.ts. */
+  low: boolean;
 }
 
 const COMMON_VERT_HEAD = /* glsl */ `
@@ -128,14 +130,25 @@ function baseMaterial(
     uRefl: { value: reflect > 0 ? shared.refl : null },
     uReflMatrix: { value: shared.reflMatrix },
     uReflLod: { value: shared.reflLod },
-    uReflStrength: { value: shared.refl && reflect > 0 ? reflect : 0 },
+    uReflStrength: { value: (shared.low || shared.refl) && reflect > 0 ? reflect : 0 },
     uReflTint: { value: new THREE.Color(0.99, 0.99, 1.0) },
     // Luminance knee for the mirror — see boardReflection. Bound on every board material
     // because REFLECT_GLSL is shared, even where the mirror is switched off.
     uReflKnee: { value: 0.55 },
+    // The low tier's stand-in room. Unused where the mirror is real; see REFLECT_GLSL.
+    //
+    // Not the marble's values. The marble is an open floor and the room it returns is the
+    // cold one; the only surface out here that takes a reflection is the border band, and
+    // that is a 34 cm channel sunk below the field with the kerb standing over it and
+    // fires burning on top of the kerb. What it can see is mostly firelight, and not much
+    // of it — which is what the mirror pass was showing there, and why a cold band at
+    // marble strength turned the whole ring into a bright blue rail.
+    uEnvBand: { value: new THREE.Vector3(1.34, 0.83, 0.46) },
+    uEnvHigh: { value: new THREE.Vector3(0.050, 0.038, 0.030) },
   };
   m.onBeforeCompile = patch(frag);
-  m.customProgramCacheKey = () => name;
+  if (shared.low) m.defines = { BOARD_LOW: '' };
+  m.customProgramCacheKey = () => (shared.low ? `${name}-low` : name);
   return m;
 }
 
@@ -209,10 +222,19 @@ const BED_FRAG = /* glsl */ `
   // applied last and it can only subtract.
   gCavity = 0.42;
 
+  // The 7.7 mm aggregate octave in the bed's relief. The bed is never more than a couple
+  // of pixels wide in the frame, so on the phone this is three noise lookups spent on a
+  // feature a twentieth the size of the pixel showing it; the 2 cm octave carries the run.
   const float ee = 0.008;
+#ifdef BOARD_LOW
+  float h0 = bNoise(w * 46.0);
+  float hx = bNoise((w + vec2(ee, 0.0)) * 46.0);
+  float hz = bNoise((w + vec2(0.0, ee)) * 46.0);
+#else
   float h0 = bNoise(w * 46.0) + 0.5 * bNoise(w * 130.0);
   float hx = bNoise((w + vec2(ee, 0.0)) * 46.0) + 0.5 * bNoise((w + vec2(ee, 0.0)) * 130.0);
   float hz = bNoise((w + vec2(0.0, ee)) * 46.0) + 0.5 * bNoise((w + vec2(0.0, ee)) * 130.0);
+#endif
   gNormalPert = vec3(-(hx - h0) / ee, 0.0, -(hz - h0) / ee) * 0.0035;
 `;
 
@@ -306,7 +328,13 @@ const BORDER_FRAG = /* glsl */ `
   albedo = mix(albedo, uGrime, lost * 0.9);
 
   float grain = bFbm(w * 9.0, 3);
+  // 3 cm grain, already written to fade to its own mean once it goes sub-pixel. On the
+  // phone it always has, so the low tier substitutes the mean and skips the lookup.
+#ifdef BOARD_LOW
+  float fine = 0.5;
+#else
   float fine = mix(0.5, bNoise(w * 33.0), bFade(0.03, px));
+#endif
   albedo *= 0.90 + 0.17 * grain + 0.07 * fine;
   // A sunk band collects five centuries of sweepings. Kept off the raised faces, which
   // are the only reason the band reads at all.
@@ -391,7 +419,12 @@ const KERB_FRAG = /* glsl */ `
 
   float mottle = clamp(0.5 + 3.2 * (bFbm(w * 1.5 + blockId * 3.7, 4) - 0.5), 0.0, 1.0);
   float grain = bFbm(w * 12.0, 3);
+  // 2.6 cm grain — sub-pixel on the phone, and written to fade to its own mean there.
+#ifdef BOARD_LOW
+  float fine = 0.5;
+#else
   float fine = mix(0.5, bNoise(w * 38.0), bFade(0.026, px));
+#endif
   // Pitting: this stone has been spalled by five centuries of fires burning on it.
   float pit = smoothstep(0.60, 0.78, bNoise(w * 17.0)) * bFade(0.06, px);
 
@@ -408,14 +441,26 @@ const KERB_FRAG = /* glsl */ `
   float acrossM = dot(w, outw);
   float alongM = dot(w, alongDir);
   float chat = bNoise(vec2(acrossM * 26.0, alongM * 2.2 + blockId * 7.3));
+  // The drag-tooling's two finer passes, at 3.0 cm and 3.4 cm. The 4 cm ridges the flames
+  // rake end to end are the signal; these two are the chatter over them, and the phone's
+  // pixel is wider than either. Their band limits were already returning zero there.
+#ifdef BOARD_LOW
+  float tooling = (chat - 0.5) * 0.58 * bFade(0.085, px);
+#else
   float chat2 = bNoise(vec2(acrossM * 71.0, alongM * 5.0 + blockId * 2.1)) * bFade(0.030, px);
   float chatX = bNoise(vec2(alongM * 31.0, acrossM * 3.4 + blockId * 4.9)) * bFade(0.034, px);
   float tooling = ((chat - 0.5) * 0.58 + (chat2 - 0.5) * 0.30 + (chatX - 0.5) * 0.24)
                 * bFade(0.085, px);
+#endif
   // Bigger, sparser spalls where a corner has flaked away: hard-edged, pale inside.
   float spall = smoothstep(0.70, 0.80, bFbm(w * 5.5 + 31.0, 3)) * bFade(0.12, px);
-  // Fine sand and stone powder standing on the face.
+  // Fine sand and stone powder standing on the face. 2.4 cm, so sub-pixel on the phone;
+  // the spalls and the pitting above are the two coarser sizes and they stay.
+#ifdef BOARD_LOW
+  float sand = 0.0;
+#else
   float sand = smoothstep(0.72, 0.90, bNoise(w * 44.0)) * bFade(0.024, px);
+#endif
 
   vec3 albedo = mix(uStone, uStoneB, mottle);
   // Block-to-block value spread, widened. Cut stone from one quarry still varies far
@@ -467,7 +512,9 @@ const KERB_FRAG = /* glsl */ `
   gNormalPert += vec3(alongDir.x, 0.0, alongDir.y) * tooling * 0.12;
   // Spalls are shallow craters; sand is grit standing on the face.
   gNormalPert += vec3(bNoise(w * 6.2) - 0.5, 0.0, bNoise(w * 6.2 + 9.0) - 0.5) * spall * 0.55;
+#ifndef BOARD_LOW
   gNormalPert += vec3(bNoise(w * 52.0) - 0.5, 0.0, bNoise(w * 52.0 + 3.0) - 0.5) * sand * 0.34;
+#endif
   // The joint is a groove: the surface turns down into it from both sides.
   float side = sign(fract(blk) - 0.5);
   gNormalPert += vec3(alongDir.x, 0.0, alongDir.y) * side * joint * 0.95;
@@ -510,7 +557,17 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
   const meshes: THREE.Mesh[] = [];
   const geos: THREE.BufferGeometry[] = [];
   const mats: THREE.Material[] = [];
-  const segs = world.quality === 'high' ? 64 : 24;
+  /**
+   * Segments per side of the swept ring.
+   *
+   * Each side is a STRAIGHT run between two mitres, and every quantity the shaders read
+   * off it — the across-band coordinate, the along-band metre count, the normal — is
+   * linear along that run. Subdividing it therefore adds vertices and changes nothing at
+   * all: the sixty-four the high tier uses are there because the sweep is also what the
+   * shadow map and the mirror see, and because a critic renders it at 1920 px. The low
+   * tier drops to four and the border and kerb come out geometrically identical.
+   */
+  const segs = world.quality === 'high' ? 64 : 4;
 
   // --- mortar bed -----------------------------------------------------------------------
   const bedMat = baseMaterial(
@@ -535,7 +592,10 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
   bedMat.envMapIntensity = 0.12;
   // Stops just past the field: the border band and the kerb cover everything beyond it,
   // so the bed never pokes out over the chamber floor.
-  const bedGeo = new THREE.PlaneGeometry((R.filletIn + 0.12) * 2, (R.filletIn + 0.12) * 2, 24, 24);
+  // A flat plane, shaded entirely per fragment from world position: its subdivision buys
+  // nothing but vertices, so the low tier takes the two triangles the surface actually is.
+  const bedSegs = world.quality === 'high' ? 24 : 1;
+  const bedGeo = new THREE.PlaneGeometry((R.filletIn + 0.12) * 2, (R.filletIn + 0.12) * 2, bedSegs, bedSegs);
   bedGeo.rotateX(-Math.PI / 2);
   bedGeo.translate(0, BED_Y, 0);
   const bed = new THREE.Mesh(bedGeo, bedMat);

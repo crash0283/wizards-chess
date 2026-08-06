@@ -24,7 +24,12 @@ export function buildFloor(
   sink: InstanceSink, rng: Rng, weather: Weather, o: FloorOpts,
 ): void {
   const col = new THREE.Color();
-  const k = o.hi ? 1.0 : 1.4;
+  // Flag size. Count goes as 1/k^2, so 1.4 -> 2.35 is a third of the flags for stone that
+  // is two thirds bigger: a 3.4 m flag against the board's 2.35 m square, which is still a
+  // floor laid to broken joints in large irregular slabs and not a different floor. The
+  // joint width is untouched, so the raking light along the joints — the only reason these
+  // are instanced blocks and not one plane — reads exactly as before, just on fewer lines.
+  const k = o.hi ? 1.0 : 2.35;
   const nominal = 1.45 * k;
   const joint = 0.045;
   // A little past the walls, so a camera outside the room never finds the floor's edge.
@@ -76,12 +81,21 @@ export function buildFloor(
   }
 }
 
-/** The slab under the flags — nothing more than a guarantee of no holes. */
-export function buildFloorSlab(halfWidth: number, halfDepth: number): {
+/**
+ * The slab under the flags — nothing more than a guarantee of no holes.
+ *
+ * `cheap` swaps its full standard BRDF for a Lambert one on the low tier. This is a
+ * forty-nine by fifty-three metre plane at albedo 0x14141a whose entire job is to not be
+ * a hole; every pixel of it that survives the flags on top runs the room's whole light
+ * loop for a result that is black either way.
+ */
+export function buildFloorSlab(halfWidth: number, halfDepth: number, cheap = false): {
   mesh: THREE.Mesh; geometry: THREE.BufferGeometry; material: THREE.Material;
 } {
   const geometry = new THREE.PlaneGeometry((halfWidth + 5) * 2, (halfDepth + 5) * 2);
-  const material = new THREE.MeshStandardMaterial({ color: 0x14141a, roughness: 1.0, metalness: 0 });
+  const material = cheap
+    ? new THREE.MeshLambertMaterial({ color: 0x14141a })
+    : new THREE.MeshStandardMaterial({ color: 0x14141a, roughness: 1.0, metalness: 0 });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.y = -0.34;

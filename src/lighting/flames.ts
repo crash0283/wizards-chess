@@ -415,7 +415,10 @@ void main(){
 }
 `;
 
-export function createFlames(world: World, opts: { lightCount: number }): FlameSystem {
+export function createFlames(
+  world: World,
+  opts: { lightCount: number; bounceCount?: number },
+): FlameSystem {
   const group = new THREE.Group();
   group.name = 'lighting-flames';
 
@@ -726,13 +729,25 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   // edges are individual FIRES sitting near the frame border, not a wash behind them.
   // Range now dies before it clears the wall face, so what is left is a faint warm
   // footing under the near piers and nothing above it.
+  //
+  // Two at 'low' rather than four: one per side wall, standing between where the pair used
+  // to, with the pair's flux. Their range is 7.4 m and the two they replace were 9 m apart
+  // along x, so what changes is that the warm footing under the near piers runs as one
+  // slightly longer smear instead of two overlapping ones. Same colour, same height, same
+  // "faint warm footing and nothing above it" that the note below is careful about.
   const bounce: THREE.PointLight[] = [];
-  for (const p of [
-    [-6.5, 5.8, -14.2],
-    [-6.5, 5.8, 14.2],
-    [2.5, 6.2, -14.2],
-    [2.5, 6.2, 14.2],
-  ] as const) {
+  const bounceHigh = (opts.bounceCount ?? 4) >= 4;
+  for (const p of (bounceHigh
+    ? ([
+        [-6.5, 5.8, -14.2],
+        [-6.5, 5.8, 14.2],
+        [2.5, 6.2, -14.2],
+        [2.5, 6.2, 14.2],
+      ] as const)
+    : ([
+        [-2.0, 6.0, -14.2],
+        [-2.0, 6.0, 14.2],
+      ] as const))) {
     const l = new THREE.PointLight(new THREE.Color(FIRE.bounce), 0, 7.4, 2.0);
     l.position.set(p[0], p[1], p[2]);
     l.castShadow = false;
@@ -770,7 +785,9 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
       }
       // The bounce breathes with the whole fire population, not with any one flame.
       mean = flames.length ? mean / flames.length : 0.5;
-      for (const l of bounce) l.intensity = 0.82 * (0.78 + 0.44 * mean);
+      // Half as many of them at 'low', each carrying twice the flux — same total bounce.
+      const bi = bounceHigh ? 0.82 : 1.64;
+      for (const l of bounce) l.intensity = bi * (0.78 + 0.44 * mean);
     },
 
     assign(camera: THREE.Camera) {

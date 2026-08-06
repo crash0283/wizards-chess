@@ -68,7 +68,13 @@ export function buildHeap(
   const len = Math.hypot(dx, dz);
   const ux = dx / len;
   const uz = dz / len;
-  const n = Math.round(len * (hi ? 21 : 7));
+  // Density along the ridge. The heap's job is a broken silhouette against the room
+  // behind it, and a silhouette is set by the crest wander and by the biggest stones in
+  // it, not by how many small ones are packed in underneath where nothing can see them.
+  // Cutting 7/m to 4/m across the two banks and the talus takes the far heap from 448
+  // chunks to about 250 without moving the crest line, because `wob` and `crest` are pure
+  // functions of the sample parameter and are unchanged.
+  const n = Math.round(len * (hi ? 21 : 4));
   const m = new THREE.Matrix4();
 
   for (let i = 0; i < n; i++) {
@@ -115,8 +121,23 @@ export function buildScree(
   sink: InstanceSink, rng: Rng, weather: Weather, lines: ScreeLine[], hi: boolean,
 ): void {
   const col = new THREE.Color();
-  const perMetre = hi ? 3.1 : 1.4;
-  const gritPerMetre = hi ? 3.4 : 1.4;
+  const perMetre = hi ? 3.1 : 0.9;
+  /**
+   * Grit does not exist on the low tier, and this is the clearest case in the piece of
+   * geometry that cannot resolve.
+   *
+   * A grit chunk is 3.5 to 16 cm across. The play camera stands 15 m up and 21 m back, so
+   * the nearest wall foot is twenty-five metres out and the far heap is forty; behind a
+   * 512 px render buffer across the frame's horizontal field, one pixel is about four
+   * centimetres at twenty-five metres and seven at forty. Every one of these is between a
+   * quarter of a pixel and four pixels, they sit in the darkest band of the floor, and
+   * there were roughly seven hundred of them around the room. They are a talus texture for
+   * a camera standing in the room, and no camera in interactive play ever does.
+   *
+   * The talus itself stays — the line where floor meets wall still has stone banked
+   * against it, just laid at 0.9 chunks a metre instead of 1.4.
+   */
+  const gritPerMetre = hi ? 3.4 : 0;
 
   for (const line of lines) {
     const dx = line.bx - line.ax;
@@ -155,7 +176,7 @@ export function buildScree(
       sink.add((i * 5) | 0, m, col);
     }
 
-    const g = Math.round(len * gritPerMetre);
+    const g = gritPerMetre > 0 ? Math.round(len * gritPerMetre) : 0;
     for (let i = 0; i < g; i++) {
       const t = rng();
       const off = 0.12 + Math.abs(rng.gauss()) * 0.9;

@@ -143,8 +143,21 @@ export function makeNearTone(tag: string, seed: number): Tone {
   };
 }
 
-/** The path of one shaft of a near pier: moulded foot, plain shaft, annulet, and over. */
-function shaftPath(x: number, z0: number, inward: number, r: number, bendSteps: number): Station[] {
+/**
+ * The path of one shaft of a near pier: moulded foot, plain shaft, annulet, and over.
+ *
+ * `drums` is the low tier's biggest single saving in this file. A drum joint is four
+ * stations for a groove 11 cm tall and 5% of a radius deep, and there are five of them on
+ * every shaft — 20 of the 34 sweep rings on a shaft exist to describe them. From the
+ * establishing camera these piers stand six metres from the lens and the joint is the only
+ * strong horizontal in the top third of frame, which is why it is there. From the play
+ * camera the near row is culled outright (the camera is outside it) and the far row is
+ * thirty-four metres away, where a 11 cm groove behind a 512 px buffer is a fifth of a
+ * pixel. Dropping them takes a shaft from 34 rings to 13.
+ */
+function shaftPath(
+  x: number, z0: number, inward: number, r: number, bendSteps: number, drums: boolean,
+): Station[] {
   const st: Station[] = [];
   const at = (y: number, rr: number) => st.push({ x, y, z: z0 + inward * lean(y), r: rr });
 
@@ -175,6 +188,7 @@ function shaftPath(x: number, z0: number, inward: number, r: number, bendSteps: 
 
   /** A bed joint: a shallow groove with a nose above and below it. */
   function drum(y: number, rr: number) {
+    if (!drums) return;
     at(y - 0.055, rr);
     at(y - 0.020, rr * 0.945);
     at(y + 0.020, rr * 0.945);
@@ -195,8 +209,11 @@ export function buildNearPiers(sign: 1 | -1, hi: boolean, tone: Tone): PierBuild
   const m = new CarvedMesh();
   const z0 = sign * NEAR_Z;
   const inward = -sign;
-  const radial = hi ? 13 : 8;
-  const bendSteps = hi ? 7 : 4;
+  // Facets round a shaft, and steps through the bend. Normals are analytic, so the
+  // silhouette is the only thing a facet count changes; seven facets over 1.72 pi on a
+  // 0.62 m shaft at thirty-four metres puts each facet edge under a pixel apart.
+  const radial = hi ? 13 : 7;
+  const bendSteps = hi ? 7 : 3;
   // Three-quarter round, facing the board: the back of a pier standing against a screen
   // is triangles nobody sees from any shot in the film.
   const arc = Math.PI * 1.72;
@@ -207,7 +224,7 @@ export function buildNearPiers(sign: 1 | -1, hi: boolean, tone: Tone): PierBuild
     for (const [dx, r] of SECTION) {
       // The core stands a little proud of its flanks, so the cluster has a section.
       const zz = z0 + inward * (dx === 0 ? 0.20 : 0);
-      sweepShaft(m, shaftPath(cx + dx, zz, inward, r, bendSteps), 0, inward, radial, arc, tone);
+      sweepShaft(m, shaftPath(cx + dx, zz, inward, r, bendSteps, hi), 0, inward, radial, arc, tone);
     }
     // The three are banded together by the annulet cut into each shaft's own profile
     // rather than by a ring round the cluster: a ring wide enough to pass three shafts

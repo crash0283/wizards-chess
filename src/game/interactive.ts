@@ -58,18 +58,21 @@
  * ends at 628. A player clicking where their own king visibly stands hits page background.
  *
  * The fix cannot be in the shot — src/core is frozen, and the shot's eye and fov are the
- * contract. It is in the ASPECT. `main.ts` already holds the horizontal extent fixed and
- * derives the vertical fov from the aspect (see `fitFov` there), precisely so a narrower
- * frame shows MORE height rather than less width. The old code here defeated that by
- * pinning the canvas to RENDER.aspect on every frame, so interactive play was always the
- * cinema letterbox. Give it a 1.6:1 frame instead and the same 30° shot opens to 43.6°
- * vertical: a1's centre moves from 5% outside the bottom of frame to 71% of the way out
- * from the middle, and rank 1 becomes an 88 px band on a 720 px canvas.
+ * contract. The previous fix here was to letterbox the canvas to 1.6:1, which bought the
+ * height by throwing the sides away: on a 2.16:1 phone a fifth of the screen was black bar
+ * and the picture in the middle was no bigger for it. The canvas is now the VIEWPORT, and
+ * the height is bought with `camera.zoom` instead, which costs nothing and crops nothing.
+ * See `fitBoard` below for the solve; the short version is that the board's own corners
+ * decide the frame, so it fits at any aspect from 1.3:1 to 2.4:1 — and lands 20% larger on
+ * a phone than the letterbox did, on a canvas a third wider again.
  */
 import * as THREE from 'three';
 import type { GameDeps, GameState, PieceInstance } from '../core/api';
 import type { World } from '../core/world';
-import { RENDER, SQUARE, squareCentre, type PieceType, type Side } from '../core/constants';
+import {
+  PIECE_HEIGHT, RENDER, SQUARE, squareCentre, type PieceType, type Side,
+} from '../core/constants';
+import { PLAY_SHOT } from '../core/shots';
 import type { Engine, Move } from '../chess';
 import { STRIKE_CONTACT, STRIKE_RECOVER, WALK_MIN, WALK_PER_SQUARE } from './timeline';
 import { createAffordances, type Affordances, type Mark } from './affordances';
@@ -581,21 +584,102 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   let reflDriver: THREE.Object3D | null | undefined;
 
   /**
-   * The shape of the interactive frame.
+   * The shape of the interactive frame: the whole viewport, and the board inside it.
    *
-   * 1.6:1, not the 2.39:1 of the capture frame, and this is the whole fix for the play
-   * camera cropping White's back rank. `main.ts` derives the vertical fov from the aspect
-   * while holding the HORIZONTAL extent fixed (`fitFov` there), so a narrower frame is a
-   * TALLER view of the same board rather than a smaller one — the board keeps its width in
-   * pixels and gains sky and floor. At 1.6 the shot's 30° opens to 43.6° vertical and rank
-   * 1 sits well inside the picture. See the note at the top of this file for the numbers.
+   * The canvas is the viewport — no letterbox. `main.ts` already sets `camera.aspect` from
+   * the real viewport and widens the vertical fov when the frame is narrower than the
+   * 2.39:1 reference (`fitFov` there), so filling the screen is mostly a matter of not
+   * fighting it.
    *
-   * Clamped at both ends. A viewport wider than 1.6 is letterboxed to 1.6 rather than
-   * allowed to crop the near rank again; a viewport TALLER than 1.15 is letterboxed the
-   * other way, because past that the derived fov goes wide enough to bend the room.
+   * But fitFov alone does not keep the board in frame, and that is the whole reason the
+   * letterbox was here. It holds the HORIZONTAL extent fixed, so at 2.16:1 the vertical fov
+   * opens to only 33° — and White's own back rank needs 18.5° below the lens axis from this
+   * eye. Rank 1 falls off the bottom and a player cannot click their own king.
+   *
+   * So the height is bought with ZOOM instead. `PerspectiveCamera.zoom` divides the frame
+   * extent in BOTH axes: no stretch, no re-aim, not one number of the frozen shot touched.
+   * Neither the camera rig nor fitFov reads or writes it, so a value set here survives into
+   * the projection matrix — and into the raycaster, which unprojects through that same
+   * matrix, so picking follows the picture for free.
+   *
+   * `view` carries the other half. The board is not centred on the lens axis — it runs from
+   * 18.5° below it to 8.5° above — so the frame is shifted DOWN by the difference, and the
+   * board sits in the middle of the picture instead of hugging the bottom edge. That shift
+   * is what pays for most of the extra size: without it the frame has to be opened wide
+   * enough to hold 18.5° in both directions, and half of that is empty ceiling.
+   *
+   * Zoom is capped at 1: the play view is never TIGHTER than the shot. A frame wider than
+   * the reference gets a zoom below 1 because it needs the height; anything narrower has
+   * the height from fitFov already and is left alone.
    */
-  const PLAY_ASPECT_MAX = 1.6;
-  const PLAY_ASPECT_MIN = 1.15;
+
+  /** Half the board, metres, and the tallest crown that can stand on a corner square. */
+  const BOARD_HALF = SQUARE * 4;
+  const CROWN = PIECE_HEIGHT.king;
+  /** Clearance kept around the board plane, and around those crowns. */
+  const PLANE_MARGIN = 1.18;
+  const CROWN_MARGIN = 1.06;
+
+  /**
+   * What the board demands of the frame, in tangent units off the play camera's lens axis:
+   * half-width, half-height, and where the middle of the vertical band it occupies sits.
+   *
+   * Solved once from the FROZEN shot rather than from the live camera. The operator's
+   * handheld drift is ±0.5° and its flinch about 1.3°; re-solving against that every frame
+   * would breathe the framing in time with the shake. The margins above cover it instead.
+   */
+  const FIT = (() => {
+    const eye = new THREE.Vector3(...PLAY_SHOT.eye);
+    const fwd = new THREE.Vector3(...PLAY_SHOT.target).sub(eye).normalize();
+    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
+    const v = new THREE.Vector3();
+    let halfX = 0;
+    let lo = 0;
+    let hi = 0;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        for (const y of [0, CROWN]) {
+          const margin = y === 0 ? PLANE_MARGIN : CROWN_MARGIN;
+          v.set(sx * BOARD_HALF, y, sz * BOARD_HALF).sub(eye);
+          const depth = Math.max(0.1, v.dot(fwd));
+          halfX = Math.max(halfX, (Math.abs(v.dot(right)) / depth) * margin);
+          const ty = (v.dot(up) / depth) * margin;
+          lo = Math.min(lo, ty);
+          hi = Math.max(hi, ty);
+        }
+      }
+    }
+    return { eye, halfX, halfY: (hi - lo) / 2, centreY: (hi + lo) / 2 };
+  })();
+
+  /**
+   * Solve zoom and the vertical shift for this aspect, and hand them to the camera.
+   *
+   * Runs from `update()`, which main.ts calls BEFORE the camera rig composes the frame and
+   * before fitFov, so both values are in place for the projection matrix this frame builds.
+   *
+   * The guard is for a live page opened with `?shot=` and no `?t=`: that is not a capture,
+   * it is interactive play behind a FILM camera, whose framing is somebody else's contract.
+   * Fit only the camera this solve is about.
+   */
+  function fitBoard(aspect: number) {
+    const cam = world.camera;
+    if (cam.position.distanceToSquared(FIT.eye) > 4) {
+      cam.zoom = 1;
+      if (cam.view) cam.clearViewOffset();
+      return;
+    }
+    // The vertical half-extent main.ts is about to derive from this aspect, as a tangent.
+    const shotHalf = Math.tan((PLAY_SHOT.fov * Math.PI) / 360);
+    const tanV = aspect < RENDER.aspect ? (shotHalf * RENDER.aspect) / aspect : shotHalf;
+    const zoom = Math.min(1, tanV / FIT.halfY, (aspect * tanV) / FIT.halfX);
+    // view.offsetY is in units of the full frame and moves the window DOWN; the frame
+    // centre ends up at -2·offsetY·halfHeight, hence the sign and the factor.
+    const shift = -FIT.centreY / (2 * (tanV / zoom));
+    cam.zoom = zoom;
+    if (!cam.view || cam.view.offsetY !== shift) cam.setViewOffset(1, 1, 0, shift, 1, 1);
+  }
 
   /**
    * Interactive resolution, as a fraction of the display size — chosen by measurement.
@@ -609,26 +693,39 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
    * dropping the bloom pass entirely, or the shadow map, or the planar reflection, each
    * moved the same frame by well under a factor of two.
    *
-   * So this solves for the rung rather than walking to it. Frame cost is modelled as a
-   * fixed overhead plus a per-pixel rate; the rate is measured from the frame time we are
-   * actually seeing at the resolution we are actually rendering, and the largest rung that
-   * fits the target is chosen. That converges in one step. Walking one rung at a time cost
-   * a frame per rung, and on a machine spending a second a frame the walk down was itself
-   * several seconds of a person's life.
-   *
    * The canvas is rendered small and stretched to full size in CSS, so framing, camera and
    * pointer mapping (which reads getBoundingClientRect — CSS pixels) are untouched.
+   *
+   * ── the floor ──
+   *
+   * The ladder used to bottom out at 0.38, which on a 1280 px canvas is a 486 px buffer —
+   * and a phone reached it in the first second and stayed there, so the game a person
+   * actually played was a 486 px picture stretched over their screen. Every carved edge,
+   * every vein in the marble and every letter of the HUD was an upscale of something that
+   * had never been rendered. No amount of detail elsewhere survives that.
+   *
+   * So the floor is now absolute as well as fractional: never below 75% of the display, and
+   * never below 800 px across whatever the display is. On a phone in landscape (844 CSS px)
+   * that pins the buffer at 800; on a 1280 px desktop canvas the floor is 960. Both are
+   * resolutions where the picture is a picture rather than a magnified thumbnail.
+   *
+   * The rungs are gentle to match — 0.75 / 0.85 / 0.92 / 1.0, about 15% of pixel cost
+   * apiece, so the scaler trades a little sharpness for a little speed instead of falling
+   * off a cliff. And it is slower to give up: a frame has to be over 70 ms (14 fps) for
+   * three quarters of a second before a rung goes. Dropping a few frames is cheaper than
+   * rendering mush — mush is permanent while it lasts, and a dropped frame is gone.
    */
-  const SCALE_LADDER = [0.38, 0.48, 0.6, 0.75, 1.0];
-  /** Start mid-ladder: good hardware climbs within a second, bad hardware drops in one step. */
-  let scaleIdx = 2;
+  const SCALE_LADDER = [0.75, 0.85, 0.92, 1.0];
+  /** Start one rung down: good hardware climbs in a second, bad hardware is already there. */
+  let scaleIdx = 1;
+  /** Absolute sharpness floor and sanity cap on the render buffer, in pixels across. */
+  const MIN_BUFFER_W = 800;
+  const MAX_BUFFER_W = 1920;
   let scaleChanges = 0;
   const MAX_SCALE_CHANGES = 14;
-  /** Real seconds per frame we are aiming at, and the band that counts as "close enough". */
+  /** Real seconds per frame we are aiming at, and the one that counts as too slow. */
   const FRAME_TARGET = 0.033;
-  const FRAME_SLOW = 0.045;
-  /** Fixed per-frame cost that does not scale with resolution, real seconds. Measured. */
-  const FRAME_FIXED = 0.02;
+  const FRAME_SLOW = 0.070;
   /** Real seconds of shader compilation and first-frame cost to ignore before judging. */
   const WARMUP = 1.5;
   let frameEma = 0;
@@ -639,25 +736,30 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   let cssW = 0;
   let cssH = 0;
 
-  /** The frame's aspect for this viewport, clamped to the playable band. */
-  function playAspect(): number {
-    const vw = Math.max(320, window.innerWidth || RENDER.width);
-    const vh = Math.max(200, window.innerHeight || RENDER.height);
-    return Math.min(PLAY_ASPECT_MAX, Math.max(PLAY_ASPECT_MIN, vw / vh));
+  /** Viewport size in CSS pixels. The canvas is exactly this — there is no letterbox. */
+  const viewW = () => Math.max(320, window.innerWidth || RENDER.width);
+  const viewH = () => Math.max(200, window.innerHeight || RENDER.height);
+
+  /**
+   * Render scale for a given rung on a canvas `cw` CSS pixels wide.
+   *
+   * The floor is the interesting half: whichever is LARGER of the rung and the fraction
+   * that still leaves MIN_BUFFER_W pixels across. On a small canvas the pixel floor wins
+   * and the ladder is effectively disabled — an 844 px phone canvas never renders below
+   * 800 px — while on a large one the fractional floor keeps the cost bounded.
+   */
+  function scaleFor(idx: number, cw: number): number {
+    const floor = Math.min(1, MIN_BUFFER_W / Math.max(1, cw));
+    return Math.min(1, Math.max(SCALE_LADDER[idx], floor));
   }
 
   function fitCanvas() {
     const el = renderer.domElement;
-    const vw = Math.max(320, window.innerWidth || RENDER.width);
-    const vh = Math.max(200, window.innerHeight || RENDER.height);
-    const aspect = playAspect();
+    const cw = viewW();
+    const ch = viewH();
+    const aspect = cw / ch;
 
-    // Largest box of that aspect that fits the viewport.
-    let cw = vw;
-    let ch = Math.round(cw / aspect);
-    if (ch > vh) { ch = vh; cw = Math.round(ch * aspect); }
-
-    const w = Math.max(160, Math.round(cw * SCALE_LADDER[scaleIdx]));
+    const w = Math.max(320, Math.min(MAX_BUFFER_W, Math.round(cw * scaleFor(scaleIdx, cw))));
     const h = Math.max(1, Math.round(w / aspect));
 
     if (el.width !== w || el.height !== h || cssW !== cw || cssH !== ch) {
@@ -669,27 +771,29 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       renderer.setPixelRatio(1);
       // Lighting owns the post chain, so it — not the renderer — is what gets resized.
       deps.lighting.setSize(w, h);
+      // The buffer is stretched to the whole viewport. Both dimensions are set explicitly:
+      // #stage centres the canvas, so a canvas that is not the full size leaves black bar.
       el.style.width = `${cw}px`;
       el.style.height = `${ch}px`;
     }
 
-    // Every frame, not just on change: main.ts's resize handler rewrites camera.aspect
-    // from the viewport, and this value being BELOW RENDER.aspect is the entire mechanism
-    // that opens the vertical fov far enough to show rank 1.
-    if (world.camera.aspect !== aspect) {
-      world.camera.aspect = aspect;
-      world.camera.updateProjectionMatrix();
-    }
+    // Every frame, not just on change: main.ts's resize handler rewrites camera.aspect from
+    // the viewport, and the rig rebuilds the projection from it after this runs.
+    world.camera.aspect = aspect;
+    fitBoard(aspect);
+    world.camera.updateProjectionMatrix();
   }
 
   /**
-   * Watch the real frame time and solve for the resolution that fits the budget.
+   * Watch the real frame time and pick the rung.
    *
-   * Asymmetric on purpose. Dropping happens as soon as there is half a second of evidence,
-   * because on a renderer taking seconds a frame "wait for twenty more frames" is a minute
-   * of a person's life, and it may drop several rungs at once. Climbing needs both a run of
-   * frames and a second of real time, and only ever moves one rung, so a momentary lull
-   * cannot push a machine into a resolution it cannot hold.
+   * Still asymmetric, but both directions are now one rung at a time. The old version
+   * solved for the biggest rung that fitted the budget and took it in a single step, which
+   * made sense when the bottom of the ladder was 0.38 and the walk down was four frames of
+   * a person's life. With four gentle rungs above a hard floor there is nothing left to
+   * solve for: the worst case is three steps, and each one costs 15% of the picture rather
+   * than half of it. Climbing additionally needs a run of frames and a second and a half,
+   * so a momentary lull cannot push a machine into a resolution it cannot hold.
    */
   function adaptScale(realT: number) {
     if (lastRealT < 0) { lastRealT = realT; decisionAt = realT; return; }
@@ -711,21 +815,14 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       frameEma = 0;
     };
 
-    if (frameEma > FRAME_SLOW && scaleIdx > 0 && since > 0.5) {
-      // Cost ≈ FRAME_FIXED + rate·pixels, and pixels go as scale². Solve for the biggest
-      // rung that still fits the target, then take it in one step.
-      const here = SCALE_LADDER[scaleIdx] ** 2;
-      const variable = Math.max(1e-6, frameEma - FRAME_FIXED);
-      const room = Math.max(0, FRAME_TARGET - FRAME_FIXED);
-      let want = 0;
-      for (let i = scaleIdx - 1; i >= 0; i--) {
-        if (variable * (SCALE_LADDER[i] ** 2 / here) <= room) { want = i; break; }
-      }
-      commit(Math.min(scaleIdx - 1, want));
+    const cw = cssW || viewW();
+    if (frameEma > FRAME_SLOW && scaleIdx > 0 && since > 0.75) {
+      // Nothing to gain from a rung the pixel floor is already holding above it.
+      if (scaleFor(scaleIdx - 1, cw) < scaleFor(scaleIdx, cw)) commit(scaleIdx - 1);
       return;
     }
-    if (frameEma < FRAME_TARGET * 0.7 && scaleIdx < SCALE_LADDER.length - 1
-        && since > 1.0 && framesSince >= 20) {
+    if (frameEma < FRAME_TARGET && scaleIdx < SCALE_LADDER.length - 1
+        && since > 1.5 && framesSince >= 20) {
       commit(scaleIdx + 1);
     }
   }
@@ -843,6 +940,10 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       aff.dispose();
       renderer.shadowMap.autoUpdate = shadowWasAuto;
       if (reflDriver) reflDriver.visible = true;
+      // Hand the camera back exactly as it was found: no zoom, no shifted window.
+      world.camera.zoom = 1;
+      world.camera.clearViewOffset();
+      world.camera.updateProjectionMatrix();
     },
   };
 }

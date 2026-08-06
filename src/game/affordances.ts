@@ -454,10 +454,14 @@ export function createAffordances(world: World): Affordances {
         mats.mate.opacity = 0.45 + 0.5 * Math.abs(Math.sin(time * 1.15));
 
         // Hold the dim quad in front of the camera. Oversized by 1.6 so one frame of
-        // camera lag cannot uncover an edge.
+        // camera lag cannot uncover an edge. `zoom` divides the frame extent, so the quad
+        // has to be divided by it too — interactive play opens the play camera up with a
+        // zoom below 1 to fit the board on a wide phone, and a quad sized off fov alone
+        // would sit inside the picture with the room visible around it.
         const cam = world.camera;
         const d = Math.max(0.4, cam.near * 4);
-        const h = 2 * d * Math.tan(THREE.MathUtils.degToRad(cam.fov * 0.5)) * 1.6;
+        const h = (2 * d * Math.tan(THREE.MathUtils.degToRad(cam.fov * 0.5)) * 1.6)
+          / Math.max(0.05, cam.zoom);
         cam.getWorldDirection(fwd);
         dim.position.copy(cam.position).addScaledVector(fwd, d);
         dim.quaternion.copy(cam.quaternion);
