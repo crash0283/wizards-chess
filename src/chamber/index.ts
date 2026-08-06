@@ -219,8 +219,11 @@ export function createChamber(world: World): Chamber {
       // The end wall. Taller than the others because it stands past the vault's
       // springing and has to close the top of the room on its own, and dimmed because
       // it is the one surface in the room that must not resolve.
+      // No blind arcade on it, and cut to a fifth. Everything that reads as a FEATURE at
+      // the end of a room — a band of small arches, a lit recess, a capital catching the
+      // wash — is a statement about where the room stops. This wall may state nothing.
       id: 'east', length: HD * 2, height: H + 8, pierAt: farPiers, pierWidth: 1.9,
-      blindArcade: true, ruin: 0.09, dim: 0.66,
+      blindArcade: false, ruin: 0.06, dim: 0.21,
       place: (g) => { g.position.set(EAST_X, 0, 0); g.rotation.y = -Math.PI / 2; },
       panel: { nx: -1, nz: 0, d: EAST_X - 0.9 },
       foot: (uMin, uMax, losses) => ({
@@ -337,7 +340,8 @@ export function createChamber(world: World): Chamber {
   }
 
   // --- floor ---------------------------------------------------------------------------------
-  const slab = buildFloorSlab(HW, HD);
+  // Both extents now reach past the end wall at EAST_X rather than past CHAMBER.halfWidth.
+  const slab = buildFloorSlab(EAST_X + 3, HD);
   geometries.push(slab.geometry);
   materials.push(slab.material);
   group.add(slab.mesh);
@@ -348,7 +352,7 @@ export function createChamber(world: World): Chamber {
     floorSink,
     world.rng.fork('chamber-floor'),
     makeWeather('chamber-weather-floor', world.seed, 1.2),
-    { halfWidth: HW, halfDepth: HD, boardHalf: BOARD_SIZE / 2 + 0.85, hi },
+    { halfWidth: EAST_X - 3.0, halfDepth: HD, boardHalf: BOARD_SIZE / 2 + 0.85, hi },
   );
   surfaces.push(...floorSink.bake(group, blockGeos, stone, 'chamber-floor', {
     receiveShadow: true,
@@ -417,8 +421,8 @@ export function createChamber(world: World): Chamber {
       screeWeather,
       [{
         ax: -17.0, az: s.sign * (SIDE_Z - 0.75),
-        bx: 19.6, bz: s.sign * (SIDE_Z - 0.75),
-        nx: 0, nz: -s.sign, losses: [], uMin: -17.0, uMax: 19.6,
+        bx: 21.6, bz: s.sign * (SIDE_Z - 0.75),
+        nx: 0, nz: -s.sign, losses: [], uMin: -17.0, uMax: 21.6,
       }],
       hi,
     );

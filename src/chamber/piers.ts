@@ -65,9 +65,17 @@ const BEND_K = 0.285;
 const BEND_E = 1.50;
 const TOP = 13.8;
 
-/** Above this a pier is a silhouette; above the second it is nothing. */
-const DARK_START = 5.0;
-const DARK_FULL = 11.4;
+/**
+ * Above this a pier is a silhouette; above the second it is nothing.
+ *
+ * Both sit well above the screens' 4.2 / 9.6. A near pier subtends four times the frame
+ * height of a shaft on the screen behind it, so the screens' fall — which is complete
+ * inside three metres — reads on one of these as a painted band across the frame, and it
+ * takes the whole upper half of the outer thirds to black before the top of frame is
+ * anywhere near.
+ */
+const DARK_START = 6.1;
+const DARK_FULL = 13.6;
 
 function smooth(a: number, b: number, x: number): number {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
@@ -81,12 +89,14 @@ function lean(y: number): number {
 /**
  * Per-vertex tone for the near piers.
  *
- * Cut well below the screens'. These are the nearest stone to both the camera and the
- * kerb fires, and at the screens' albedo they came out as a pale warm wall down one side
- * of the frame — the exact opposite of the reference, where the near columns are a dark
- * mass with firelight only catching their edges. The fall into dark also starts lower and
- * finishes higher than the screens', because a near pier subtends four times the frame
- * height of a far one and a short gradient on it reads as a painted band.
+ * A shade ABOVE the screens'. The instinct was the other way — these stand a metre from
+ * the kerb fires and ought to be the best-lit stone in the room — but they are not: they
+ * lean away over the board, so their modelled faces turn up into the air rather than
+ * toward anything that is lit, and at 0.70 of the screens' albedo the whole left third of
+ * the frame measured 0.03 to 0.08 against the film's 0.07 to 0.21. Colossal near stone
+ * that does not READ is worth nothing at all; it is the same black void with a different
+ * silhouette. The one thing kept from that pass is the deep cut in the hollows, which is
+ * what separates one pier from the next and is where the frame's true blacks come from.
  */
 export function makeNearTone(tag: string, seed: number): Tone {
   const s = (hashString(tag) ^ seed) >>> 0;
@@ -94,12 +104,12 @@ export function makeNearTone(tag: string, seed: number): Tone {
   const fine = makeFbm((s ^ 0x27d4eb2f) >>> 0, 3, 2.19, 0.55);
 
   return (x, y, z, fold) => {
-    let v = 0.70 * (1
+    let v = 1.34 * (1
       + 0.24 * broad(x * 0.070, y * 0.048, z * 0.070)
       + 0.13 * fine(x * 0.55, y * 0.27, z * 0.55));
 
     // the hollow between two shafts of a cluster, and the wide slot between two piers
-    v *= 1 - 0.84 * fold * fold;
+    v *= 1 - 0.80 * fold * fold;
 
     // grime off the floor; nothing blooms this close to the fires
     v *= 1 - 0.30 * smooth(2.2, 0.0, y);

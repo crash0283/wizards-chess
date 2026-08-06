@@ -37,7 +37,7 @@ import type { World } from '../core/world';
 import { RENDER, SQUARE, type PieceType, type Side } from '../core/constants';
 import type { Engine, Move } from '../chess';
 import { STRIKE_CONTACT, STRIKE_RECOVER, WALK_MIN, WALK_PER_SQUARE } from './timeline';
-import { createAffordances, type Mark } from './affordances';
+import { createAffordances, type Affordances, type Mark } from './affordances';
 import { createThinker, type Thought } from './thinker';
 
 /** The human plays White. The engine answers as Black. */
@@ -87,10 +87,30 @@ const TYPE_OF_PROMO: Record<string, PieceType> = {
   q: 'queen', r: 'rook', b: 'bishop', n: 'knight',
 };
 
+/** Everything the markers do, doing nothing. Used only if the real ones fail to build. */
+function nullAffordances(): Affordances {
+  return {
+    group: new THREE.Group(),
+    setSelection() {}, setDestinations() {}, refuse() {}, setCheck() {},
+    setGameOver() {}, showPromotion: () => [], hidePromotion() {},
+    pickables: () => [], update() {}, dispose() {},
+  };
+}
+
 export function createInteractive(world: World, deps: GameDeps, model: BoardModel): Interactive {
   const { engine, state } = model;
-  const aff = createAffordances(world);
-  world.scene.add(aff.group);
+
+  // Priority one is that the engine replies. The markers are worth a great deal, but not
+  // the whole game: if anything in them fails to build (a canvas the browser will not
+  // give us, a texture it will not allocate) play carries on without them.
+  let aff: Affordances;
+  try {
+    aff = createAffordances(world);
+    world.scene.add(aff.group);
+  } catch (err) {
+    console.warn('affordances unavailable, playing without markers:', err);
+    aff = nullAffordances();
+  }
   const think = createThinker();
 
   /** Deferred VISUALS only, on world.time. Board bookkeeping is always immediate. */
@@ -105,6 +125,8 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   let replyDueAt = -1;
   let thoughtHeld: Thought | null = null;
   let thinkStartedAt = 0;
+  /** Position the in-flight search was started from. A reply for any other is discarded. */
+  let thinkFen = '';
   /** world.time until which something is visibly moving. Drives the shadow throttle. */
   let activeUntil = 0;
 
@@ -339,8 +361,9 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     replyDueAt = -1;
     thoughtHeld = null;
     thinkStartedAt = realT;
+    thinkFen = engine.fen;
     state.thinking = true;
-    think.start(engine.fen, REPLY_NODES, realT);
+    think.start(thinkFen, REPLY_NODES, realT);
   }
 
   function tryPlayThought(realT: number) {
@@ -354,6 +377,9 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
 
     thoughtHeld = null;
     state.thinking = false;
+    // The board may have been replaced under the search (setPosition). A move found for
+    // some other position is not an answer to this one, however legal it happens to be.
+    if (engine.fen !== thinkFen) return;
     if (!th.uci) { model.syncState(); refreshMarks(); return; }
     // Re-resolve against our own live engine: the worker sent back text, not trust.
     const m = engine.moves().find((c) => c.uci === th.uci);
@@ -457,6 +483,7 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       promoPending = null;
       aff.hidePromotion();
       thoughtHeld = null;
+      thinkFen = '';
       state.thinking = false;
       refreshMarks();
       scheduleReply();

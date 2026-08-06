@@ -598,11 +598,11 @@ function helmCross(
   // family of oriented edges on what was a smooth drum.
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-    const bx = cx + Math.cos(a) * r * 0.97, bz = cz + Math.sin(a) * r * 0.97;
+    const bx = cx + Math.cos(a) * r * 0.95, bz = cz + Math.sin(a) * r * 0.95;
     slab(
       p,
       V(bx, cy + h * (flat ? 0.52 : 0.46), bz),
-      V(r * 0.048, h * (flat ? 0.30 : 0.24), r * 0.040),
+      V(r * 0.048, h * (flat ? 0.30 : 0.24), r * 0.058),
       quatFromAxes(V(-Math.sin(a), 0, Math.cos(a)), V(0, 1, 0), V(Math.cos(a), 0, Math.sin(a))),
     );
   }
@@ -613,7 +613,7 @@ function helmCross(
       { y: cy + h * 0.904, sx: 1.00, sz: 1.00, ox: cx, oz: cz },
       { y: cy + h * 0.938, sx: 0.88, sz: 0.88, ox: cx, oz: cz },
     ]);
-    rivetRing(p, cx, cy + h * 0.904, cz, r * 1.01, 7, r * 0.050, r * 0.042, 0.21);
+    rivetRing(p, cx, cy + h * 0.904, cz, r * 1.00, 9, r * 0.050, r * 0.042, Math.PI / 9);
   }
   if (flat) {
     p.thinNow = 0.55;
@@ -653,7 +653,7 @@ function kettleHelm(
     slab(p, V(cx, yy, zz), V(r * 0.055, h * 0.075, r * 0.19), new THREE.Quaternion());
   }
   // Rivet row around the brim.
-  rivetRing(p, cx, cy + h * 0.105, cz, r * 1.15, 8, r * 0.070, r * 0.055, Math.PI / 8);
+  rivetRing(p, cx, cy + h * 0.105, cz, r * 1.13, 9, r * 0.068, r * 0.055, Math.PI / 9);
 }
 
 /** A circlet of points over a helm — the royal crown. */
