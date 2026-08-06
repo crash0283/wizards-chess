@@ -63,13 +63,20 @@ export const SHOTS: ShotDef[] = [
     proves: 'Floor-level scale: pieces tower, flames sit low as small warm points in a cold room.',
   },
   {
-    // Reference: in among the pieces, low and close, the great arched portal behind.
+    /**
+     * Reference: in among the pieces, low and close, looking UP at a mounted knight.
+     *
+     * This was previously aimed at mid-board with the eye below plinth-cap height, so the
+     * near pieces were cropped headless and the shot's stated subject — the mounted knight
+     * — was not in frame at all. It now sits on the black knight's square b8 = (1,7), one
+     * plinth-height up, close enough that the piece fills the frame.
+     */
     id: 'knight-looking-up',
     label: 'Knight, looking up',
-    eye: [-2.2, 1.25, 12.6],
-    target: [-0.6, 2.75, 2.0],
+    eye: [c(1, 7).x + 0.35, 1.15, c(1, 7).z + 4.0],
+    target: [c(1, 7).x, 2.65, c(1, 7).z],
     fov: 42,
-    focus: 10.5,
+    focus: 4.3,
     fstop: 2.0,
     t: 3.0,
     judges: ['pieces', 'lighting', 'camera'],
