@@ -169,14 +169,19 @@ export function createChamber(world: World): Chamber {
   // four times the environment response: the environment gradient carries its energy
   // overhead, and a pier that leans out over the board is the one thing in this room
   // whose modelled face is turned up into it. That is the whole reason these read at all.
+  // Its own grain, tiled three times finer than the screens'. At twenty metres the
+  // screens' 2.3 m tile is 134 px across and carries nothing at the scale the detail
+  // metric measures; on the nearest stone in the room that is a bare cylinder.
+  const nearGrain = makeGrainNormal(hashString('chamber-near-grain') ^ world.seed, hi ? 256 : 128);
+  nearGrain.repeat.set(3.4, 3.4);
   const nearStone = new THREE.MeshStandardMaterial({
-    color: 0xa2968a,
-    roughness: 0.86,
+    color: 0xbfb4a6,
+    roughness: 0.80,
     metalness: 0.0,
     vertexColors: true,
-    normalMap: grain,
-    normalScale: new THREE.Vector2(0.34, 0.34),
-    envMapIntensity: 4.0,
+    normalMap: nearGrain,
+    normalScale: new THREE.Vector2(0.85, 0.85),
+    envMapIntensity: 9.0,
   });
   materials.push(nearStone);
 
@@ -247,7 +252,7 @@ export function createChamber(world: World): Chamber {
       // the end of a room — a band of small arches, a lit recess, a capital catching the
       // wash — is a statement about where the room stops. This wall may state nothing.
       id: 'east', length: HD * 2, height: H + 8, pierAt: farPiers, pierWidth: 1.9,
-      blindArcade: false, plain: true, ruin: 0.06, dim: 0.30,
+      blindArcade: false, plain: true, ruin: 0.06, dim: 0.20,
       place: (g) => { g.position.set(EAST_X, 0, 0); g.rotation.y = -Math.PI / 2; },
       panel: { nx: -1, nz: 0, d: EAST_X - 0.9 },
       foot: (uMin, uMax, losses) => ({
@@ -534,7 +539,9 @@ export function createChamber(world: World): Chamber {
     dispose() {
       for (const g of geometries) g.dispose();
       for (const m of materials) m.dispose();
-      atlas.dispose();
+      nearGrain.dispose();
+    grain.dispose();
+    atlas.dispose();
       group.cull = null;
     },
   };

@@ -68,14 +68,17 @@ const TOP = 13.8;
 /**
  * Above this a pier is a silhouette; above the second it is nothing.
  *
- * Both sit well above the screens' 4.2 / 9.6. A near pier subtends four times the frame
- * height of a shaft on the screen behind it, so the screens' fall — which is complete
- * inside three metres — reads on one of these as a painted band across the frame, and it
- * takes the whole upper half of the outer thirds to black before the top of frame is
- * anywhere near.
+ * Both sit FAR above the screens' 4.2 / 9.6, and they got there by measurement. The
+ * establishing frame's top band carries 0.0074 of edge energy against the film's 0.0201,
+ * and cropped at 1:1 the two are not close: the film's top-left corner is separated round
+ * columns with lit crowns and black slots between them, ours was one even black field.
+ * The room does have to lose its ceiling, but a near pier is still architecture at eleven
+ * metres — it is only four metres above the ranks in FRAME terms — and blacking it there
+ * throws away the only modelled thing in the top third of the picture. The darkness that
+ * the top of frame needs comes from the slots between these, not from the piers going out.
  */
-const DARK_START = 6.1;
-const DARK_FULL = 13.6;
+const DARK_START = 8.6;
+const DARK_FULL = 18.0;
 
 function smooth(a: number, b: number, x: number): number {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
@@ -104,12 +107,14 @@ export function makeNearTone(tag: string, seed: number): Tone {
   const fine = makeFbm((s ^ 0x27d4eb2f) >>> 0, 3, 2.19, 0.55);
 
   return (x, y, z, fold) => {
-    let v = 1.34 * (1
+    let v = 1.20 * (1
       + 0.24 * broad(x * 0.070, y * 0.048, z * 0.070)
       + 0.13 * fine(x * 0.55, y * 0.27, z * 0.55));
 
-    // the hollow between two shafts of a cluster, and the wide slot between two piers
-    v *= 1 - 0.80 * fold * fold;
+    // The hollow between two shafts of a cluster, and the wide slot between two piers.
+    // Cut harder than anything else in the room: with the fall into dark pushed up out of
+    // frame, this is now where every black pixel in the top third comes from.
+    v *= 1 - 0.92 * fold * fold;
 
     // grime off the floor; nothing blooms this close to the fires
     v *= 1 - 0.30 * smooth(2.2, 0.0, y);
@@ -135,7 +140,12 @@ function shaftPath(x: number, z0: number, inward: number, r: number, bendSteps: 
   at(0.66, r * 1.34);
   at(0.92, r * 1.10);
   at(1.28, r * 1.00);
-  at(3.40, r);
+  // Drum joints. The screens are single carved shafts with no joint anywhere on them and
+  // that is right for their girth; a pier this size is not carried up in one piece by
+  // anybody, and the horizontal it puts across the shaft every metre and a half is worth
+  // more than the purity — it is the only strong horizontal in the top third of frame.
+  drum(2.20, r);
+  drum(3.55, r);
   at(4.52, r);
   // annulet at the springing
   at(4.74, r);
@@ -143,9 +153,19 @@ function shaftPath(x: number, z0: number, inward: number, r: number, bendSteps: 
   at(5.10, r * 1.26);
   at(BEND_Y, r);
   for (let i = 1; i <= bendSteps; i++) {
-    at(BEND_Y + ((TOP - BEND_Y) * i) / bendSteps, r * (1 - 0.08 * (i / bendSteps)));
+    const y = BEND_Y + ((TOP - BEND_Y) * i) / bendSteps;
+    at(y, r * (1 - 0.08 * (i / bendSteps)));
+    if (i < bendSteps) drum(y + (TOP - BEND_Y) / (bendSteps * 2), r * (1 - 0.08 * (i / bendSteps)));
   }
   return st;
+
+  /** A bed joint: a shallow groove with a nose above and below it. */
+  function drum(y: number, rr: number) {
+    at(y - 0.055, rr);
+    at(y - 0.020, rr * 0.945);
+    at(y + 0.020, rr * 0.945);
+    at(y + 0.055, rr);
+  }
 }
 
 export interface PierBuild {

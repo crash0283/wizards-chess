@@ -61,7 +61,7 @@ const SPEC: Record<Side, StoneSpec> = {
     // lives entirely in the stain patches; the field between them is cold. Basing the
     // whole stone warm is what turns a chessman into terracotta the instant a flame gets
     // near it, and it is the reverse of what the reference does.
-    base: new THREE.Color().setHex(0xaeafae, THREE.SRGBColorSpace),
+    base: new THREE.Color().setHex(0xa8aeb8, THREE.SRGBColorSpace),
     // Rust-ochre. Present and identifiable, but the frame shows it as a dull mauve-brown
     // bloom in the stone, not orange paint: a saturated warm here reads instantly as CG.
     warm: new THREE.Color().setHex(0x7d5f4a, THREE.SRGBColorSpace),
@@ -94,7 +94,7 @@ const SPEC: Record<Side, StoneSpec> = {
     // samples around (25,33,38). Round 2's albedo rendered that same mass as a featureless
     // black egg — the subject of the shot, carrying no information at all. Lifted, and
     // kept firmly blue: this stone is value-and-hue, never a warm.
-    base: new THREE.Color().setHex(0x3c434f, THREE.SRGBColorSpace),
+    base: new THREE.Color().setHex(0x454e5c, THREE.SRGBColorSpace),
     warm: new THREE.Color().setHex(0x554b3e, THREE.SRGBColorSpace),
     warmDeep: new THREE.Color().setHex(0x2e2820, THREE.SRGBColorSpace),
     cool: new THREE.Color().setHex(0x1c222c, THREE.SRGBColorSpace),
