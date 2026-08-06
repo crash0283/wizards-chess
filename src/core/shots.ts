@@ -73,11 +73,16 @@ export const SHOTS: ShotDef[] = [
      */
     id: 'knight-looking-up',
     label: 'Knight, looking up',
-    eye: [c(1, 7).x + 0.35, 1.15, c(1, 7).z + 4.0],
-    target: [c(1, 7).x, 2.65, c(1, 7).z],
-    fov: 42,
-    focus: 4.3,
-    fstop: 2.0,
+    // Camera stands INSIDE the board looking back at White's knight on b1. Two earlier
+    // versions of this shot failed for the same reason in different ways: aimed at
+    // mid-board, then aimed correctly but placed BEYOND the back rank, where the subject
+    // is backlit against a void and a critic had to brighten crops 3x to see anything.
+    // The flames burn on the kerb, so the light is on the board side — stand there.
+    eye: [c(1, 0).x + 1.45, 1.30, c(1, 0).z + 6.6],
+    target: [c(1, 0).x, 2.20, c(1, 0).z],
+    fov: 40,
+    focus: 6.8,
+    fstop: 2.2,
     t: 3.0,
     judges: ['pieces', 'lighting', 'camera'],
     proves: 'Figurative armoured combatants on moulded plinths, rust-stained pale stone, soft background.',

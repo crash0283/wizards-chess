@@ -27,6 +27,90 @@ export interface ScreeLine {
   uMax: number;
 }
 
+export interface HeapSpec {
+  /** Ridge line of the heap, in world xz. */
+  ax: number;
+  az: number;
+  bx: number;
+  bz: number;
+  /** Which way the heap spills. Unit vector. */
+  nx: number;
+  nz: number;
+  /** Height at the crest, metres. */
+  crest: number;
+  /** How far it spills forward from the ridge at the crest. */
+  reach: number;
+}
+
+/**
+ * The heap of destroyed pieces banked behind the far ranks.
+ *
+ * `buildScree` lays a talus: chunks resting on the floor, a metre high at most, which is
+ * right at the foot of a wall and useless here. What the reference has behind the far
+ * rank is a MOUND — three and a half metres of piled wreckage with fires burning in it,
+ * standing between the board and the end of the room, and it is doing two jobs at once.
+ * It is the last thing the eye resolves looking down the board, so it is what stops the
+ * far wall from being read as the end of anything; and it is the only large irregular
+ * mass in the top third of frame that stands close enough to the kerb fires to actually
+ * be lit, which matters because that band of the picture carries a third of the film's
+ * edge energy and almost nothing else up there has a light on it.
+ *
+ * Built as a profile rather than a scatter: density and block size fall off from the
+ * crest, pieces sit at every height rather than all on the floor, and the crest line
+ * itself wanders, so the silhouette against the wall behind is broken all the way along.
+ */
+export function buildHeap(
+  sink: InstanceSink, rng: Rng, weather: Weather, spec: HeapSpec, hi: boolean,
+): void {
+  const col = new THREE.Color();
+  const dx = spec.bx - spec.ax;
+  const dz = spec.bz - spec.az;
+  const len = Math.hypot(dx, dz);
+  const ux = dx / len;
+  const uz = dz / len;
+  const n = Math.round(len * (hi ? 21 : 7));
+  const m = new THREE.Matrix4();
+
+  for (let i = 0; i < n; i++) {
+    const t = rng();
+    // Crest height wanders along the ridge — three low sags and a couple of shoulders,
+    // so the top line never rules straight across the room.
+    const wob = 0.62
+      + 0.38 * Math.sin(t * 11.3 + 0.7)
+      + 0.24 * Math.sin(t * 4.1 + 2.4)
+      + 0.16 * Math.sin(t * 23.7);
+    const crest = spec.crest * Math.max(0.28, wob);
+
+    // Where in the section this block sits: h is height fraction, and the heap narrows
+    // as it rises, so the profile is a mound and not a wall.
+    const h = Math.pow(rng(), 0.62);
+    const y = h * crest;
+    const spread = spec.reach * (1 - h * 0.82);
+    const off = (rng() * 2 - 1) * spread;
+
+    // Big stone at the bottom, smaller and more broken toward the crest.
+    const s = (0.34 + Math.pow(rng(), 2.0) * 1.35) * (1 - 0.45 * h);
+    const x = spec.ax + ux * (t * len) + spec.nx * off;
+    const z = spec.az + uz * (t * len) + spec.nz * off;
+    if (Math.abs(x) < 10.4 && Math.abs(z) < 10.4) continue;
+
+    weather.tone(x * 0.7 + 57, 0.5 + y * 0.4, 0.30 + 0.22 * h, col);
+    // Cut hard. At the scree's albedo this heap came back a blown white drift standing in
+    // the middle of a cold dark room; the reference's is dark brown-grey wreckage that the
+    // fires pick out in places and nowhere else. It also has to stay under the far wall in
+    // value, or it becomes the new thing that tells you where the room ends.
+    col.multiplyScalar(0.38);
+    m.compose(
+      new THREE.Vector3(x, y + s * rng.float(0.10, 0.34), z),
+      new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(rng.float(0, 6.283), rng.float(0, 6.283), rng.float(0, 6.283)),
+      ),
+      new THREE.Vector3(s, s * rng.float(0.55, 1.0), s * rng.float(0.7, 1.4)),
+    );
+    sink.add((i * 7) | 0, m, col);
+  }
+}
+
 export function buildScree(
   sink: InstanceSink, rng: Rng, weather: Weather, lines: ScreeLine[], hi: boolean,
 ): void {

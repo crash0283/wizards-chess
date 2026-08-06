@@ -55,6 +55,9 @@ const BEND_TOP = 12.20;
  */
 const WEB_BACK = 0.52;
 
+/** Height at which the web stops and the wall behind starts showing between the shafts. */
+const WEB_TOP = 6.30;
+
 const SIDE_X0 = -17.0;
 /**
  * The screens now run all the way to the end wall. They have to: the end wall stood at
@@ -207,13 +210,42 @@ export function buildSideScreen(
   // bay ends at -4.9, so it never had. The shafts still stop at the bay — it is a real
   // recessed panel in the screen, and the portal behind it still stands — but the screen
   // is now a surface with a bay cut into it rather than a curtain with a hole through it.
+  //
+  // And it STOPS at the springing, everywhere except across the bay. That is the single
+  // change that put light into the top of this frame, and it came out of reading the
+  // lighting piece rather than the reference: the rig hangs three sources per side aimed
+  // squarely at the long walls at |z| = 18.4 to 19.6, between four and ten metres up,
+  // precisely to model the piers there — and this web was standing five metres in front of
+  // them, opaque, from floor to vault. Every one of those lights was landing on masonry no
+  // camera could see, while the face of the screen turned toward the lens got the spill.
+  // Above the springing the gaps between shafts now show that lit wall, and the screen
+  // reads as a colonnade standing against a modelled surface instead of a black curtain:
+  // thin bright slots between dark leaning shafts, which is edge energy exactly where the
+  // frame had none. Below the springing it stays solid, because there the thing behind it
+  // is the bare foot of the wall and the eye would find the corner of the room.
   const webPath = sidePath(0, z0 - inward * WEB_BACK, inward, 0, bendSteps)
     .map((s) => ({ x: 0, y: s.y, z: s.z }));
-  sweepWeb(m, webPath, 1, 0, SIDE_X0 - PITCH * 0.6, SIDE_X1 + PITCH * 0.6,
-    0, inward, (x, y, z) => {
-      const [r, g, bb] = tone(x, y, z, 1);
-      return [r * 0.40, g * 0.40, bb * 0.42];
-    });
+  const webTone = (x: number, y: number, z: number): [number, number, number] => {
+    const [r, g, bb] = tone(x, y, z, 1);
+    return [r * 0.40, g * 0.40, bb * 0.42];
+  };
+  const lower = webPath.filter((s) => s.y <= WEB_TOP);
+  if (lower.length && lower[lower.length - 1].y < WEB_TOP) {
+    const a = lower[lower.length - 1];
+    const b = webPath[lower.length];
+    const t = (WEB_TOP - a.y) / (b.y - a.y);
+    lower.push({ x: 0, y: WEB_TOP, z: a.z + (b.z - a.z) * t });
+  }
+  const solid: [number, number][] = bay
+    ? [[SIDE_X0 - PITCH * 0.6, BAY_X0 + PITCH * 0.6], [BAY_X1 - PITCH * 0.6, SIDE_X1 + PITCH * 0.6]]
+    : [[SIDE_X0 - PITCH * 0.6, SIDE_X1 + PITCH * 0.6]];
+  for (const [a, b] of solid) sweepWeb(m, lower, 1, 0, a, b, 0, inward, webTone);
+  // The bay keeps its web all the way up: it is the one span with no shafts in front of
+  // it, so an open head there is a clear hole through the screen — which is exactly the
+  // leak `wide-establishing` was catching at the extreme left of frame.
+  if (bay) {
+    sweepWeb(m, webPath, 1, 0, BAY_X0 - PITCH * 0.6, BAY_X1 + PITCH * 0.6, 0, inward, webTone);
+  }
 
   return { geometry: m.build(), triangles: m.triangles };
 }

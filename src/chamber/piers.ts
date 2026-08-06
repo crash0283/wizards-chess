@@ -44,15 +44,25 @@ import { CarvedMesh, sweepShaft, type Station, type Tone } from './carved';
  */
 export const NEAR_Z = 12.72;
 
-const X0 = -15.55;
-const PITCH = 3.02;
-const COUNT = 5;
+const X0 = -16.50;
+const PITCH = 3.30;
+const COUNT = 6;
 /** The south row is offset along the board so the frame is not a mirror of itself. */
 const STAGGER = 0.62;
 
-const R_CORE = 0.66;
-const R_FLANK = 0.355;
-const FLANK_DX = 0.86;
+/**
+ * The section through one pier: five shafts, a heavy core with two orders of flank.
+ *
+ * Three was not enough, and the reference says so directly. Boosted and cropped 1:1, the
+ * film's top-left corner carries about twelve round shafts across the width our five
+ * clusters filled with six — the near field there is very nearly continuous stone, at
+ * roughly half our pitch. Every one of those is two more silhouette edges in the band of
+ * frame that measures a third of the film's edge energy, and edge count is the one thing
+ * in that band that does not depend on a light I do not own.
+ */
+const SECTION: readonly (readonly [number, number])[] = [
+  [-1.32, 0.29], [-0.72, 0.40], [0, 0.62], [0.72, 0.40], [1.32, 0.29],
+];
 
 /**
  * The lean. Gentler than the screens' (0.40 / 1.55): these stand four metres nearer the
@@ -107,7 +117,7 @@ export function makeNearTone(tag: string, seed: number): Tone {
   const fine = makeFbm((s ^ 0x27d4eb2f) >>> 0, 3, 2.19, 0.55);
 
   return (x, y, z, fold) => {
-    let v = 1.20 * (1
+    let v = 0.98 * (1
       + 0.24 * broad(x * 0.070, y * 0.048, z * 0.070)
       + 0.13 * fine(x * 0.55, y * 0.27, z * 0.55));
 
@@ -193,8 +203,8 @@ export function buildNearPiers(sign: 1 | -1, hi: boolean, tone: Tone): PierBuild
 
   for (let k = 0; k < COUNT; k++) {
     const cx = X0 + k * PITCH + (sign > 0 ? STAGGER : 0);
-    // A compound pier: one heavy core with a lighter shaft engaged either side of it.
-    for (const [dx, r] of [[-FLANK_DX, R_FLANK], [0, R_CORE], [FLANK_DX, R_FLANK]] as const) {
+    // A compound pier: one heavy core with two orders of lighter shaft engaged either side.
+    for (const [dx, r] of SECTION) {
       // The core stands a little proud of its flanks, so the cluster has a section.
       const zz = z0 + inward * (dx === 0 ? 0.20 : 0);
       sweepShaft(m, shaftPath(cx + dx, zz, inward, r, bendSteps), 0, inward, radial, arc, tone);

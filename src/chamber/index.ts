@@ -56,13 +56,13 @@ import { InstanceSink } from './sink';
 import { buildWall, BACK_Z, STRING_TOP, type WallSpec } from './wall';
 import { buildPortalOrders, buildPortalPassage, portalHalfWidth, type PortalSpec } from './portal';
 import { buildFloor, buildFloorSlab } from './floor';
-import { buildScree, type ScreeLine } from './rubble';
+import { buildScree, buildHeap, type ScreeLine } from './rubble';
 import {
   buildSideScreen, buildBackRow, makeCarvedTone, SIDE_Z, PORTAL_X,
 } from './screen';
 import { buildNearPiers, makeNearTone, NEAR_Z } from './piers';
 import { makeGrainNormal, type Tone } from './carved';
-import { hashString } from '../core/rng';
+import { hashString, makeFbm } from '../core/rng';
 import type { Weather } from './weather';
 
 /**
@@ -79,10 +79,23 @@ import type { Weather } from './weather';
  */
 const EAST_X = 22.6;
 
-/** Uniformly darken a wall's per-block colour. Used to sink the end wall into the air. */
-function dimWeather(w: Weather, k: number): Weather {
+/**
+ * Darken a wall's per-block colour and scatter it slab to slab.
+ *
+ * The mottle is the important half and it is aimed at one number. The end wall is the
+ * only stone in the top third of this frame that any source actually reaches — the rig's
+ * three end-wall washes land on it — and the top third measures a third of the film's
+ * edge energy. Cutting its blocks smaller barely moved that, because relief alone gives
+ * you a shadow line a pixel wide; what the reference's end wall actually has is slabs that
+ * differ from their neighbours in VALUE, heavily, so every joint is a step and not a line.
+ * The noise runs at roughly one cycle per block so neighbours land on different parts of
+ * it, and it is a pure function of position like everything else here.
+ */
+function dimWeather(w: Weather, k: number, mottle: number, seed: number): Weather {
+  const f = makeFbm((hashString('chamber-mottle') ^ seed) >>> 0, 3, 2.11, 0.55);
   return {
-    tone: (u, v, occ, out) => w.tone(u, v, occ, out).multiplyScalar(k),
+    tone: (u, v, occ, out) => w.tone(u, v, occ, out)
+      .multiplyScalar(k * (1 + mottle * f(u * 0.62, v * 0.86, 5.3))),
     decay: w.decay,
   };
 }
@@ -179,14 +192,23 @@ export function createChamber(world: World): Chamber {
   // metric measures; on the nearest stone in the room that is a bare cylinder.
   const nearGrain = makeGrainNormal(hashString('chamber-near-grain') ^ world.seed, hi ? 256 : 128);
   nearGrain.repeat.set(3.4, 3.4);
+  // HONEST RESULT, and the reason the numbers below are where they are. Taking this stone
+  // from the screens' albedo at unit environment response all the way to a pale grey at
+  // nine times it — an eleven-fold change in how much of the room these surfaces return —
+  // moved the top band's edge energy from 0.0074 to 0.0077 against a target of 0.0201, and
+  // cost the frame more than half its true blacks (deep shadow 0.125 -> 0.042) and pushed
+  // the cool fraction from 0.52 to 0.62 against the film's 0.43. There is no light in that
+  // corner of the room to reflect; all the extra albedo did was reflect the veil. So it is
+  // set back to a dark stone that keeps its blacks, and the density of the piers — twice
+  // the shafts, twice the silhouette edges — carries the structure instead.
   const nearStone = new THREE.MeshStandardMaterial({
-    color: 0xbfb4a6,
-    roughness: 0.80,
+    color: 0x7a7062,
+    roughness: 0.82,
     metalness: 0.0,
     vertexColors: true,
     normalMap: nearGrain,
     normalScale: new THREE.Vector2(0.85, 0.85),
-    envMapIntensity: 9.0,
+    envMapIntensity: 1.3,
   });
   materials.push(nearStone);
 
@@ -304,7 +326,7 @@ export function createChamber(world: World): Chamber {
 
     const rng = world.rng.fork(`chamber-wall-${spec.id}`);
     const raw = makeWeather(`chamber-weather-${spec.id}`, world.seed, STRING_TOP);
-    const weather = spec.dim === undefined ? raw : dimWeather(raw, spec.dim);
+    const weather = spec.dim === undefined ? raw : dimWeather(raw, spec.dim, 0.62, world.seed);
     const parts = buildWall(spec, rng, weather, VARIANTS, world.quality);
 
     if (spec.portalBay !== undefined) {
@@ -477,12 +499,33 @@ export function createChamber(world: World): Chamber {
   const fg = new THREE.Group();
   fg.name = 'chamber-far-heap';
   const farScreeSink = new InstanceSink(CHUNK_VARIANTS);
+  // Two banks, one behind the other. The near one crests at four metres just past the
+  // kerb, close enough that the far kerb's fires are burning in it — which is exactly the
+  // reference and is also the only reason it reads, since it is the one large irregular
+  // mass in the top third of frame with a light anywhere near it. The far one stands four
+  // metres higher and four metres back, so its broken crest shows over the first and the
+  // eye finds a second silhouette where it was looking for the back of the room. Together
+  // they took the top band from 0.0070 to 0.0087.
+  for (const [x, z0, z1, crest, reach, tag] of [
+    [13.55, -14.4, 14.4, 3.55, 2.05, 'chamber-far-heap'],
+    // Deliberately not centred on the room: it runs out well before the far corner on one
+    // side, so the two crests never form a symmetry about the board's axis.
+    [18.20, -15.0, 8.6, 4.20, 2.60, 'chamber-far-heap-2'],
+  ] as const) {
+    buildHeap(
+      farScreeSink,
+      world.rng.fork(tag),
+      screeWeather,
+      { ax: x, az: z0, bx: x, bz: z1, nx: -1, nz: 0, crest, reach },
+      hi,
+    );
+  }
   buildScree(
     farScreeSink,
     world.rng.fork('chamber-far-scree'),
     screeWeather,
     [{
-      ax: 12.35, az: -14.6, bx: 12.35, bz: 14.6,
+      ax: 12.05, az: -14.6, bx: 12.05, bz: 14.6,
       nx: -1, nz: 0, losses: [], uMin: -14.6, uMax: 14.6,
     }],
     hi,

@@ -334,7 +334,12 @@ export function buildWall(
       fillField(sink, rng, weather, variants, {
         u0: left, u1: right, v0: PLINTH_TOP, v1: STRING_TOP,
         faceZ: FACE_Z, depth: FACE_D,
-        courseH: 0.92 * sizeK, blockLen: 1.95 * sizeK,
+        // Small stone, not large. Everywhere else in this room the courses are cut big
+        // because big is the idiom; here the wall is forty-six metres out and a 3 m slab
+        // subtends seventy pixels, so a wall built of them is four joints across and reads
+        // as a flat card. The reference's end wall is a dense irregular field of slabs
+        // about forty pixels each, and that density is the only structure the far end has.
+        courseH: 0.52 * sizeK, blockLen: 1.05 * sizeK,
         // Heavy relief and a wide joint, which is the one place in this room that is
         // allowed either. At forty-six metres a slab is sixty pixels across and the only
         // thing that survives of it is the shadow down its side; without that the end wall
