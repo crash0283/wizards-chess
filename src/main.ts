@@ -77,6 +77,21 @@ async function boot() {
   if (!req.showHud) hud.classList.add('hidden');
 
   // --- the frame ---------------------------------------------------------------------
+  /**
+   * Widen the vertical FOV when the viewport is narrower than the reference frame.
+   *
+   * MUST run after camera.update(): the camera rig sets fov from the shot definition on
+   * every frame, so anything applied earlier is simply overwritten. In capture the aspect
+   * is always exactly RENDER.aspect, so this is a no-op and determinism is unaffected.
+   */
+  const fitFov = () => {
+    const aspect = world.camera.aspect;
+    if (aspect >= RENDER.aspect) return;
+    const halfW = Math.tan((world.camera.fov * Math.PI) / 360) * RENDER.aspect;
+    world.camera.fov = (Math.atan(halfW / aspect) * 360) / Math.PI;
+    world.camera.updateProjectionMatrix();
+  };
+
   const frame = (t: number, dt: number, realT: number = t) => {
     runUpdaters(world, t, dt, realT);
     game.update(t, dt);
@@ -84,6 +99,7 @@ async function boot() {
     if (req.cam) camera.free(req.cam);
     else camera.applyShot(req.shot || 'wide-establishing', t);
     camera.update(t, dt);
+    fitFov();
   };
 
   if (req.capturing) {
@@ -121,15 +137,40 @@ async function boot() {
     };
     requestAnimationFrame(loop);
 
-    addEventListener('resize', () => {
-      const w = Math.min(innerWidth, Math.round(innerHeight * RENDER.aspect));
-      const h = Math.round(w / RENDER.aspect);
+    /**
+     * Fit the frame to whatever screen this is.
+     *
+     * Capture is always 1920x804 at 2.39:1 — that is the frame the shots are composed for
+     * and it must never change, or renders stop being comparable. Interactive play is a
+     * different problem: on a phone a letterboxed 2.39:1 strip is unusably small, so the
+     * canvas fills the viewport and the camera compensates.
+     *
+     * The compensation matters. FOV in three.js is VERTICAL, so simply handing the camera
+     * a taller aspect keeps the vertical extent and crops the sides — on a phone that
+     * throws away most of the board. Instead the horizontal extent is held constant and
+     * the vertical FOV is derived from it, so a narrower screen shows MORE height rather
+     * than less width, and the board stays in frame.
+     *
+     * Device pixel ratio is capped: a modern phone reports 3, which on this scene means
+     * rendering nine times the pixels and, on mobile Safari, a very good chance of the tab
+     * being killed for memory.
+     */
+    const fit = () => {
+      const w = Math.max(1, innerWidth);
+      const h = Math.max(1, innerHeight);
+      const dpr = Math.min(devicePixelRatio || 1, w * h > 1_200_000 ? 1.25 : 2);
+      renderer.setPixelRatio(dpr);
       renderer.setSize(w, h, false);
       lighting.setSize(w, h);
-      world.camera.aspect = RENDER.aspect;
+
+      // The FOV compensation itself lives in fitFov(), applied per frame after the camera
+      // rig has set fov from the shot — see the note there.
+      world.camera.aspect = w / h;
       world.camera.updateProjectionMatrix();
-    });
-    dispatchEvent(new Event('resize'));
+    };
+    addEventListener('resize', fit);
+    addEventListener('orientationchange', () => setTimeout(fit, 120));
+    fit();
   }
 
   // Debug handle. tools/play-test.mjs drives the interactive path through this, so THREE

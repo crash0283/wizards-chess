@@ -27,6 +27,8 @@ export interface StoneSpec {
   base: THREE.Color;
   /** Blotching pushes toward this. */
   warm: THREE.Color;
+  /** The dark core of a heavy stain — the middle of a rust patch, not its edge. */
+  warmDeep: THREE.Color;
   /** Staining runs push toward this. */
   cool: THREE.Color;
   /** Freshly broken interior. */
@@ -57,12 +59,13 @@ const SPEC: Record<Side, StoneSpec> = {
     base: new THREE.Color().setHex(0xa8a294, THREE.SRGBColorSpace),
     // Rust-ochre. Present and identifiable, but the frame shows it as a dull mauve-brown
     // bloom in the stone, not orange paint: a saturated warm here reads instantly as CG.
-    warm: new THREE.Color().setHex(0x7c5a48, THREE.SRGBColorSpace),
+    warm: new THREE.Color().setHex(0x86603f, THREE.SRGBColorSpace),
+    warmDeep: new THREE.Color().setHex(0x4e3325, THREE.SRGBColorSpace),
     // Soot / cold shadow grey the stone weathers toward.
-    cool: new THREE.Color().setHex(0x6e737a, THREE.SRGBColorSpace),
+    cool: new THREE.Color().setHex(0x5f6672, THREE.SRGBColorSpace),
     fresh: new THREE.Color().setHex(0xcdc7b8, THREE.SRGBColorSpace),
-    blotch: 0.60,
-    stain: 0.26,
+    blotch: 0.74,
+    stain: 0.34,
     mottle: 0.09,
     bedding: 0.035,
     cavity: 0.22,
@@ -83,10 +86,11 @@ const SPEC: Record<Side, StoneSpec> = {
   black: {
     base: new THREE.Color().setHex(0x2a2f36, THREE.SRGBColorSpace),
     warm: new THREE.Color().setHex(0x4a4237, THREE.SRGBColorSpace),
-    cool: new THREE.Color().setHex(0x171b21, THREE.SRGBColorSpace),
+    warmDeep: new THREE.Color().setHex(0x241f19, THREE.SRGBColorSpace),
+    cool: new THREE.Color().setHex(0x141821, THREE.SRGBColorSpace),
     fresh: new THREE.Color().setHex(0x5d626a, THREE.SRGBColorSpace),
-    blotch: 0.20,
-    stain: 0.30,
+    blotch: 0.26,
+    stain: 0.34,
     mottle: 0.16,
     bedding: 0.0,
     cavity: 0.26,
@@ -269,6 +273,11 @@ uniform float uGrainRough;
 uniform float uGrainAlb;
 uniform vec3 uSSS;
 uniform vec3 uMail;
+uniform vec3 uBlotch;
+uniform vec3 uRust;
+uniform vec3 uRustTint;
+uniform vec3 uRustDeep;
+uniform vec3 uTool;
 varying float vRough;
 varying float vThin;
 varying float vMail;
@@ -279,6 +288,8 @@ varying vec3 vBitV;
 float gGrain;
 float gMailH;
 float gMailK;
+float gRust;
+float gTool;
 vec3 gMailN;
 
 vec3 tpBlend( vec3 nn ) {
@@ -344,6 +355,41 @@ const FRAG_COLOR = /* glsl */ `
 	vec3 onn = normalize( vObjN );
 	gGrain = tpDetail( vObjP, onn, uGrainScale.x ) * 0.60 + tpDetail( vObjP, onn, uGrainScale.y ) * 0.40;
 	diffuseColor.rgb *= 1.0 + ( gGrain - 0.5 ) * uGrainAlb;
+
+	// --- rust and ochre staining, as PATCHES WITH EDGES -----------------------------
+	// The single most identifiable property of the film's pale army, and the one thing a
+	// vertex-interpolated stain can never deliver: at 10 cm triangles a threshold in
+	// vertex colour is a soft ramp a hand's width wide, which reads as an airbrush.
+	// Three triplanar octaves summed and hard-thresholded here instead, so the boundary
+	// is pixel-sharp: the metre layer places the patch, the two finer ones eat ragged
+	// bites out of its edge, and a second threshold darkens the middle of the patch where
+	// the iron has actually bled out. Warm in albedo, under cold light — the film's
+	// relationship, not the reverse.
+	float b1 = tpDetail( vObjP, onn, uBlotch.x );
+	float b2 = tpDetail( vObjP, onn, uBlotch.y );
+	float b3 = tpDetail( vObjP, onn, uBlotch.z );
+	float bk = ( b1 - 0.5 ) + ( b2 - 0.5 ) * 0.66 + ( b3 - 0.5 ) * 0.30;
+	gRust = smoothstep( uRust.x - uRust.y, uRust.x + uRust.y, bk );
+	float rcore = smoothstep( uRust.x + uRust.y * 1.10, uRust.x + uRust.y * 4.5, bk );
+	diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * uRustTint, gRust * uRust.z );
+	diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * uRustDeep, rcore * uRust.z );
+
+	// --- the mason's tooling ---------------------------------------------------------
+	// Parallel claw-chisel strokes, running horizontally around the piece the way a
+	// banker mason dresses a moulding. They come in patches — a real dressed face is
+	// tooled where the mason worked it and rubbed smooth where hands and weather have
+	// been — and they are the reason the stone's edge energy runs in oriented families
+	// instead of scattering isotropically the way procedural grain does.
+	gTool = 0.0;
+	if ( uTool.z > 0.0 ) {
+		float tm = smoothstep( 0.36, 0.64, gGrain ) * ( 1.0 - vMail ) * ( 1.0 - abs( onn.y ) );
+		tm *= 1.0 - smoothstep( 0.15, 0.50, fwidth( vObjP.y ) * uTool.x );
+		gTool = tm;
+		if ( gTool > 0.002 ) {
+			diffuseColor.rgb *= 1.0 + sin( vObjP.y * uTool.x * 6.2831853 ) * gTool * uTool.y;
+		}
+	}
+
 	gMailH = 0.5;
 	gMailN = onn;
 	gMailK = 0.0;
@@ -363,7 +409,8 @@ const FRAG_COLOR = /* glsl */ `
 
 const FRAG_ROUGH = /* glsl */ `
 float roughnessFactor = clamp(
-	roughness * vRough + ( gGrain - 0.5 ) * uGrainRough + ( 0.5 - gMailH ) * 0.10 * gMailK,
+	roughness * vRough + ( gGrain - 0.5 ) * uGrainRough + ( 0.5 - gMailH ) * 0.16 * gMailK
+		+ gRust * 0.07 - gTool * 0.05,
 	0.055, 1.0 );
 `;
 
@@ -373,6 +420,13 @@ const FRAG_NORMAL = /* glsl */ `
 	vec3 d1 = tpNormal( vObjP, onn, uGrainScale.x, uGrainAmp.x * ( 1.0 - 0.45 * gMailK ) );
 	vec3 d2 = tpNormal( vObjP, onn, uGrainScale.y, uGrainAmp.y );
 	vec3 nd = normalize( d1 + d2 - onn + ( gMailN - onn ) );
+	if ( gTool > 0.002 ) {
+		vec3 tUp = vec3( 0.0, 1.0, 0.0 ) - onn * onn.y;
+		float tl = length( tUp );
+		if ( tl > 1e-3 ) {
+			nd = normalize( nd + ( tUp / tl ) * ( cos( vObjP.y * uTool.x * 6.2831853 ) * gTool * uTool.z ) );
+		}
+	}
 	vec3 upRef = abs( onn.y ) < 0.9 ? vec3( 0.0, 1.0, 0.0 ) : vec3( 1.0, 0.0, 0.0 );
 	vec3 oT = normalize( cross( upRef, onn ) );
 	vec3 oB = cross( onn, oT );
@@ -428,10 +482,36 @@ export function createStone(world: World, side: Side): Stone {
     uGrainAmp: { value: new THREE.Vector2(side === 'white' ? 0.17 : 0.22, 0.11) },
     uGrainRough: { value: side === 'white' ? 0.13 : 0.17 },
     uGrainAlb: { value: side === 'white' ? 0.10 : 0.15 },
-    // Carved chainmail: ring pitch ~5.2 cm on the piece, which is what the reference
+    // Carved chainmail: ring pitch ~4.6 cm on the piece, which is what the reference
     // frame shows on the dark knight's cape at four metres. x = 1/pitch, y = normal
     // amplitude, z = albedo contrast between ring and interstice.
-    uMail: { value: new THREE.Vector3(1 / 0.039, side === 'white' ? 0.042 : 0.052, 0.12) },
+    //
+    // The round-2 amplitude (0.042) was a tenth of what it needed to be: rows of rings
+    // that shallow vanish into the ambient the moment the cape turns away, which is
+    // exactly how a mailed cape ended up reading as a glassy sheet. Mail relief is
+    // CARVED — every ring throws its own shadow — and it is the one surface treatment in
+    // this scene whose edges run in genuine oriented families.
+    uMail: { value: new THREE.Vector3(1 / 0.046, side === 'white' ? 0.30 : 0.34, 0.42) },
+    // Rust patch layer. x/y/z are triplanar tile frequencies: ~2.1 m places the patch,
+    // ~0.60 m and ~0.17 m tear its boundary into something a mineral did rather than a
+    // gradient tool.
+    uBlotch: { value: new THREE.Vector3(1 / 2.1, 1 / 0.6, 1 / 0.17) },
+    // threshold, half-width of the (deliberately narrow) edge, overall strength.
+    uRust: { value: new THREE.Vector3(side === 'white' ? -0.012 : 0.055, 0.022, side === 'white' ? 1.0 : 0.55) },
+    uRustTint: {
+      value:
+        side === 'white'
+          ? new THREE.Vector3(1.12, 0.80, 0.56)
+          : new THREE.Vector3(1.16, 0.94, 0.72),
+    },
+    uRustDeep: {
+      value:
+        side === 'white'
+          ? new THREE.Vector3(0.72, 0.55, 0.44)
+          : new THREE.Vector3(0.74, 0.66, 0.58),
+    },
+    // Claw-chisel tooling: 1/pitch (5.4 cm strokes), albedo contrast, normal amplitude.
+    uTool: { value: new THREE.Vector3(1 / 0.054, side === 'white' ? 0.085 : 0.065, side === 'white' ? 0.20 : 0.16) },
     uSSS: {
       value:
         side === 'white'

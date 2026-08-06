@@ -97,7 +97,13 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
   const fSwell = makeFbm(seedA ^ 0x11, 2, 2.05, 0.5);
   const fPit = makeFbm(seedA ^ 0x27, 2, 2.1, 0.5);
   const fBlotch = makeFbm(seedB ^ 0x31, 4, 2.03, 0.55);
+  // A second stain scale, ~30 cm, so a piece is not simply "a rusty one" or "a clean one":
+  // the frame's pale army carries several distinct patches per figure.
+  const fPatch = makeFbm(seedB ^ 0x91, 3, 2.07, 0.55);
   const fStain = makeFbm(seedB ^ 0x4d, 3, 2.09, 0.60);
+  // Fine downward runs off every ledge — narrow, strictly vertical, and the reason the
+  // pale stone's edges run in oriented families rather than scattering.
+  const fRun = makeFbm(seedB ^ 0xa7, 2, 2.13, 0.55);
   const fMottle = makeFbm(seedB ^ 0x63, 3, 2.11, 0.52);
   const fBed = makeFbm(seedB ^ 0x7f, 2, 2.0, 0.5);
 
@@ -154,12 +160,20 @@ export function makeWeather(spec: StoneSpec, rng: Rng, heightScale: number): Wea
     // Rust. Irregular PATCHES with definite edges, not a smooth gradient — this is the
     // most identifiable thing about the pale army. Iron in the stone bleeds out where
     // water sits, so up-facing surfaces and recesses take far more of it.
-    let rust = (bl + mo * 0.42 - rustBias) / 0.17;
+    //
+    // Two scales: the metre layer decides which side of a piece has stained, the ~30 cm
+    // layer breaks that into the several separate patches the frame actually shows on a
+    // single figure. Both are per-instance, so no two chessmen stain alike; the shader
+    // then cuts the boundary sharp, which vertex colour at 10 cm triangles cannot.
+    const pa = fPatch(x * 3.1 + sy, y * 2.6 + sz, z * 3.1 + sx);
+    let rust = (bl + pa * 0.60 + mo * 0.30 - rustBias) / 0.115;
     rust = rust <= 0 ? 0 : rust >= 1 ? 1 : rust * rust * (3 - 2 * rust);
     rust *= 0.62 + 0.40 * up + 0.28 * rIn;
     const kW = rust * spec.blotch;
-    // Soot and cold weathering run downward off the ledges.
-    const kC = Math.max(0, st) * stainK * (0.5 + 0.5 * Math.max(0, -ny));
+    // Soot and cold weathering run downward off the ledges. The fine run layer is
+    // stretched ~9:1 vertically: these are streaks, and streaks have a direction.
+    const run = Math.max(0, fRun(x * 5.2 + oy, y * 0.58 + oz, z * 5.2 + ox));
+    const kC = Math.max(0, st + run * 0.55) * stainK * (0.5 + 0.5 * Math.max(0, -ny));
     const kk = Math.min(0.92, kW + kC);
     const fW = kk > 0 ? (kW / (kW + kC || 1)) * kk : 0;
     const fC = kk > 0 ? (kC / (kW + kC || 1)) * kk : 0;
