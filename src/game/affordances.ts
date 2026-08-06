@@ -267,7 +267,7 @@ export function createAffordances(world: World): Affordances {
   // oversize absorbs.
   const dimMat = new THREE.MeshBasicMaterial({
     color: 0x05070b, transparent: true, opacity: 0, depthTest: false, depthWrite: false,
-    toneMapped: false,
+    toneMapped: false, side: THREE.DoubleSide,
   });
   const dim = new THREE.Mesh(quad, dimMat);
   dim.renderOrder = 900;

@@ -56,14 +56,19 @@ export interface StoneSpec {
 
 const SPEC: Record<Side, StoneSpec> = {
   white: {
-    base: new THREE.Color().setHex(0xa8a294, THREE.SRGBColorSpace),
+    // Measured off the frame, not guessed: the pale army's unstained stone samples at
+    // roughly (60,70,84) — a LIGHT COOL blue-grey. The warmth in the film's limestone
+    // lives entirely in the stain patches; the field between them is cold. Basing the
+    // whole stone warm is what turns a chessman into terracotta the instant a flame gets
+    // near it, and it is the reverse of what the reference does.
+    base: new THREE.Color().setHex(0xaeafae, THREE.SRGBColorSpace),
     // Rust-ochre. Present and identifiable, but the frame shows it as a dull mauve-brown
     // bloom in the stone, not orange paint: a saturated warm here reads instantly as CG.
     warm: new THREE.Color().setHex(0x7d5f4a, THREE.SRGBColorSpace),
     warmDeep: new THREE.Color().setHex(0x4a352a, THREE.SRGBColorSpace),
     // Soot / cold shadow grey the stone weathers toward.
     cool: new THREE.Color().setHex(0x5f6672, THREE.SRGBColorSpace),
-    fresh: new THREE.Color().setHex(0xcdc7b8, THREE.SRGBColorSpace),
+    fresh: new THREE.Color().setHex(0xd2cec4, THREE.SRGBColorSpace),
     blotch: 0.56,
     stain: 0.34,
     mottle: 0.09,
@@ -84,11 +89,16 @@ const SPEC: Record<Side, StoneSpec> = {
     erode: 0.0085,
   },
   black: {
-    base: new THREE.Color().setHex(0x2a2f36, THREE.SRGBColorSpace),
-    warm: new THREE.Color().setHex(0x4a4237, THREE.SRGBColorSpace),
-    warmDeep: new THREE.Color().setHex(0x241f19, THREE.SRGBColorSpace),
-    cool: new THREE.Color().setHex(0x141821, THREE.SRGBColorSpace),
-    fresh: new THREE.Color().setHex(0x5d626a, THREE.SRGBColorSpace),
+    // The dark army is DARK, not absent. In the reference the black knight's cape is the
+    // biggest single mass in this shot and you can read every row of mail on it; it
+    // samples around (25,33,38). Round 2's albedo rendered that same mass as a featureless
+    // black egg — the subject of the shot, carrying no information at all. Lifted, and
+    // kept firmly blue: this stone is value-and-hue, never a warm.
+    base: new THREE.Color().setHex(0x3c434f, THREE.SRGBColorSpace),
+    warm: new THREE.Color().setHex(0x554b3e, THREE.SRGBColorSpace),
+    warmDeep: new THREE.Color().setHex(0x2e2820, THREE.SRGBColorSpace),
+    cool: new THREE.Color().setHex(0x1c222c, THREE.SRGBColorSpace),
+    fresh: new THREE.Color().setHex(0x6e747d, THREE.SRGBColorSpace),
     blotch: 0.26,
     stain: 0.34,
     mottle: 0.16,

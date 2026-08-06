@@ -1118,7 +1118,7 @@ function knight(rng: Rng, d: number): FormResult {
     { y: barrelY + 0.10, sx: 0.70, sz: 0.60, oz: -0.36 },
     { y: barrelY - 0.34, sx: 0.72, sz: 0.62, oz: -0.40 },
     { y: barrelY - 0.60, sx: 0.66, sz: 0.57, oz: -0.40 },
-  ], 16, 0.130, 0.30, 0.34, 0.20, rng, 0.10);
+  ], 16, 0.160, 0.30, 0.34, 0.20, rng, 0.10);
   cowl(cape, shoY + 0.06, -0.16, 0.34, 0.30, 0.52, 0.30, rng);
   cape.mailNow = 0;
   cape.thinNow = 0;
