@@ -32,9 +32,9 @@
  * are left completely alone.
  */
 import * as THREE from 'three';
-import type { GameState, PieceInstance } from '../core/api';
+import type { GameDeps, GameState, PieceInstance } from '../core/api';
 import type { World } from '../core/world';
-import { SQUARE, type PieceType, type Side } from '../core/constants';
+import { RENDER, SQUARE, type PieceType, type Side } from '../core/constants';
 import type { Engine, Move } from '../chess';
 import { STRIKE_CONTACT, STRIKE_RECOVER, WALK_MIN, WALK_PER_SQUARE } from './timeline';
 import { createAffordances, type Mark } from './affordances';
@@ -87,7 +87,7 @@ const TYPE_OF_PROMO: Record<string, PieceType> = {
   q: 'queen', r: 'rook', b: 'bishop', n: 'knight',
 };
 
-export function createInteractive(world: World, model: BoardModel): Interactive {
+export function createInteractive(world: World, deps: GameDeps, model: BoardModel): Interactive {
   const { engine, state } = model;
   const aff = createAffordances(world);
   world.scene.add(aff.group);
@@ -199,7 +199,7 @@ export function createInteractive(world: World, model: BoardModel): Interactive 
     // Castling: the rook travels with the king. 0x88 arithmetic, same as the engine's.
     let rookFrom: Mark | null = null;
     let rookTo: Mark | null = null;
-    if (m.flags.includes('k') || m.flags.includes('q')) {
+    if (flags.includes('k') || flags.includes('q')) {
       const rf = m.to > m.from ? m.from + 3 : m.from - 4;
       const rt = m.to > m.from ? m.from + 1 : m.from - 1;
       rookFrom = { file: rf & 15, rank: rf >> 4 };
@@ -238,8 +238,7 @@ export function createInteractive(world: World, model: BoardModel): Interactive 
 
     if (m.promo) {
       const type = TYPE_OF_PROMO[m.promo] ?? 'queen';
-      const side: Side = m.piece === m.piece.toUpperCase() ? 'white' : 'black';
-      later(arriveAt, () => model.promoteOn(to.file, to.rank, type, side));
+      later(arriveAt, () => model.promoteOn(to.file, to.rank, type, mover));
     }
 
     markActive(arriveAt + 1.2);
@@ -369,11 +368,43 @@ export function createInteractive(world: World, model: BoardModel): Interactive 
   renderer.shadowMap.autoUpdate = false;
   let lastShadow = -1;
   let frame = 0;
-  /** Rendered frames between planar-reflection refreshes while nothing is moving. */
+  /** Rendered frames between planar-reflection refreshes. */
   const REFL_STRIDE = 3;
   let reflDriver: THREE.Object3D | null | undefined;
 
+  /**
+   * Interactive resolution, as a fraction of the display size.
+   *
+   * This is the interactive quality tier. `world.quality` is fixed at 'high' for a live
+   * page and every module has already been built by the time the game exists, so the tier
+   * cannot be chosen at construction — but resolution can be, and on a software
+   * rasteriser it is worth more than every other saving combined. The canvas is rendered
+   * small and stretched to full size in CSS, so the framing, the camera and the pointer
+   * mapping (which reads getBoundingClientRect, i.e. CSS pixels) are all untouched.
+   */
+  const INTERACTIVE_SCALE = 0.5;
+  let cssW = 0;
+
+  function fitCanvas() {
+    const el = renderer.domElement;
+    const wantCss = Math.max(
+      320,
+      Math.min(window.innerWidth || RENDER.width, Math.round((window.innerHeight || RENDER.height) * RENDER.aspect)),
+    );
+    const w = Math.max(160, Math.round(wantCss * INTERACTIVE_SCALE));
+    const h = Math.max(1, Math.round(w / RENDER.aspect));
+    if (el.width === w && el.height === h && cssW === wantCss) return;
+    cssW = wantCss;
+    // Lighting owns the post chain, so it — not the renderer — is what gets resized.
+    deps.lighting.setSize(w, h);
+    el.style.width = `${wantCss}px`;
+    el.style.height = `${Math.round(wantCss / RENDER.aspect)}px`;
+    world.camera.aspect = RENDER.aspect;
+    world.camera.updateProjectionMatrix();
+  }
+
   function budget(t: number) {
+    fitCanvas();
     const moving = t < activeUntil;
     // The only shadow-caster in the scene is a fixed key light, so a still board's shadow
     // map is still correct several frames later. Refresh it every frame while a piece is

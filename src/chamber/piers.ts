@@ -165,32 +165,11 @@ export function buildNearPiers(sign: 1 | -1, hi: boolean, tone: Tone): PierBuild
       const zz = z0 + inward * (dx === 0 ? 0.20 : 0);
       sweepShaft(m, shaftPath(cx + dx, zz, inward, r, bendSteps), 0, inward, radial, arc, tone);
     }
-    // The band that ties the three together at the springing. Its centre follows the
-    // lean, so it stays square to the cluster rather than sliding off the front of it.
-    const ry = 4.98;
-    ringMoulding(
-      m, cx, ry, z0 + inward * (lean(ry) + 0.10),
-      FLANK_DX + R_FLANK + 0.10, 0.17,
-      Math.PI * (sign > 0 ? 0.5 : -0.5) - Math.PI * 0.62,
-      Math.PI * (sign > 0 ? 0.5 : -0.5) + Math.PI * 0.62,
-      hi ? 14 : 9, 6,
-      (x, y, z) => tone(x, y, z, 0.35),
-    );
+    // The three are banded together by the annulet cut into each shaft's own profile
+    // rather than by a ring round the cluster: a ring wide enough to pass three shafts
+    // is 1.3 m in radius, and at this distance from the board it would hang out over the
+    // kerb and land in the fires.
   }
 
   return { geometry: m.build(), triangles: m.triangles };
-}
-
-/** Where the debris banked against the feet of one row of piers runs. */
-export function nearScreeLine(sign: 1 | -1): {
-  ax: number; az: number; bx: number; bz: number;
-  nx: number; nz: number; losses: number[]; uMin: number; uMax: number;
-} {
-  const az = sign * (NEAR_Z - 1.28);
-  return {
-    ax: X0 - 1.4, az,
-    bx: X0 + (COUNT - 1) * PITCH + 1.9, bz: az,
-    nx: 0, nz: -sign,
-    losses: [], uMin: X0 - 1.4, uMax: X0 + (COUNT - 1) * PITCH + 1.9,
-  };
 }

@@ -1,0 +1,74 @@
+name: Deploy to GitHub Pages
+
+# Builds the game as a static bundle and publishes it, so it can be opened on a phone
+# without needing a dev server on the same network.
+#
+# ONE-TIME SETUP, which only a repository admin can do:
+#   Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
+# Until that is set, this workflow builds successfully but the deploy step will fail.
+#
+# The published bundle contains only source-built code. The film reference frames in
+# refs/frames/ are gitignored and are never part of the build.
+
+on:
+  push:
+    branches:
+      - main
+      - claude/wizards-chess-3d-l11f22
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it, but only keep one queued.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Verify the chess is real
+        # Cheap, fast, and the thing most worth not shipping broken: perft against the
+        # standard positions, and a replay of every demo line through the move generator
+        # to confirm it ends in a genuine checkmate.
+        run: |
+          node tools/perft.mjs
+          node tools/verify-mate.mjs
+
+      - name: Build
+        # A project site is served from /<repo>/, so the asset base has to match. Local
+        # dev and preview leave PAGES_BASE unset and build at '/'.
+        env:
+          PAGES_BASE: /${{ github.event.repository.name }}/
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

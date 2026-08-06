@@ -15,6 +15,34 @@ npm install
 npm run dev          # http://127.0.0.1:5188
 ```
 
+Click a piece, then a destination square. You play White; the engine answers.
+
+## Playing it on a phone
+
+The game is a static bundle with no backend, so it can be published anywhere.
+
+`.github/workflows/pages.yml` builds it and deploys to GitHub Pages on every push. It
+needs one manual step that only a repository admin can do:
+
+> **Settings → Pages → Build and deployment → Source: “GitHub Actions”**
+
+Until that is set the workflow builds fine but the deploy step fails. Once set, the game
+is served at `https://<owner>.github.io/<repo>/`.
+
+The workflow typechecks, runs perft against the standard positions, and replays every demo
+line through the move generator to confirm it still ends in a real checkmate — so a broken
+build or broken chess never ships.
+
+Interactive play adapts to the screen: the canvas fills the viewport, device pixel ratio is
+capped (a phone reporting 3 would otherwise render nine times the pixels), and because
+three.js FOV is *vertical*, a narrow screen widens the field of view so it gains height
+rather than losing the sides of the board. Portrait phones get a rotate prompt — the
+chamber is a 2.39:1 room.
+
+**The capture path is unaffected by any of that.** Shots always render at 1920×804, quality
+`high`, pixel ratio 1. That separation is checked every round by confirming two captures of
+the same shot are byte-identical.
+
 ## How this project is built
 
 The goal was split into eight pieces small enough to be improved and judged on their own.

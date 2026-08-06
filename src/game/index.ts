@@ -32,7 +32,6 @@ import {
   parseFen,
   type DemoGame,
   type DemoMove,
-  type Move,
 } from '../chess';
 import { buildTimeline, lastCaptureIndex, type TimedEvent, type Timeline } from './timeline';
 import { createInteractive, type BoardModel, type Interactive } from './interactive';
@@ -362,7 +361,7 @@ export function createGame(world: World, deps: GameDeps): Game {
   return {
     start() {
       populate(START_FEN);
-      if (!world.capturing) interactive = createInteractive(world, model);
+      if (!world.capturing) interactive = createInteractive(world, deps, model);
     },
 
     stage,

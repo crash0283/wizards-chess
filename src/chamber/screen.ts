@@ -10,19 +10,24 @@
  * degrees off vertical toward the centre, where a truly vertical one would lean twelve
  * the other way. Everything below is fitted to that.
  *
- * Three screens:
+ * Two screens and a backing:
  *
  *   side   — the two great leaning screens at |z| = SIDE_Z, flanking the board's long
  *            kerbs. These are the shot. They crowd the ranks and close the frame.
- *   far    — a vertical screen of the same shafts across the end wall, behind the heap
- *            of accumulated rubble, so the far end of the room is stone too.
  *   web    — a plain dark surface a hand's breadth behind each screen, so the gap
  *            between two shafts reads as a deep groove and never as a hole.
  *
- * The north screen carries a clear central bay. The great portal is on that wall and a
- * shot looking down the room at it has to see it; the bay is wide enough to pass the
- * whole portal and is backed by the wall's own shafts, so from the wide shot it reads
- * as another depth of architecture rather than as a gap.
+ * There used to be a third, a vertical screen of the same shafts across the end wall.
+ * It has gone, and its going is the point. Standing thirteen metres out it resolved,
+ * from the establishing camera, into a clean symmetric ring of shafts with crisp bright
+ * speculars running down them and one heavy shaft parked all but dead on the board's
+ * axis — the brightest architectural element in the frame, announcing exactly where the
+ * room ended and, from the pitch of its own repeats, how big it was. The film's far end
+ * is a dark unresolvable mass of large irregular slabs. That is what the end wall itself
+ * already is, so the end wall does the job now, moved a long way back and cut dark.
+ *
+ * The north screen carries a clear bay in its shafts where the great portal stands
+ * behind it. The web runs across that bay unbroken — see `buildSideScreen`.
  */
 import * as THREE from 'three';
 import { makeFbm, hashString } from '../core/rng';
@@ -30,13 +35,6 @@ import { CarvedMesh, sweepShaft, sweepWeb, ringMoulding, type Station, type Tone
 
 /** Long kerb of the board is at 11.54; the screens stand immediately outside it. */
 export const SIDE_Z = 13.30;
-/**
- * Where the far screen stands. Well clear of the end wall rather than against it: the
- * wall's own engaged piers and capitals project a metre and a half into the room and
- * would otherwise poke through the screen as exactly the coursed rubble blocks this is
- * replacing. It has to stand in front of them, not behind.
- */
-export const FAR_X = 13.20;
 
 const PITCH = 1.06;
 const R_MINOR = 0.435;
@@ -58,25 +56,23 @@ const BEND_TOP = 12.20;
 const WEB_BACK = 0.52;
 
 const SIDE_X0 = -17.0;
-const SIDE_X1 = 19.6;
+/**
+ * The screens now run all the way to the end wall. They have to: the end wall stood at
+ * x = 15.5 and has gone back to `EAST_X`, and the long walls did not follow it, so from
+ * x = 15.5 onward there is no masonry at |z| = 19 at all. Every camera that could look
+ * into that corner looks through these screens first, and this is what guarantees it.
+ */
+const SIDE_X1 = 21.6;
 
 /**
- * Clear bay on the north screen, so the great portal on that wall is not curtained off.
- *
- * Its position is not free. `wide-establishing` looks down the room past this screen and
- * any gap in it is a hole straight out of the enclosure — the exact failure this screen
- * exists to fix. But `knight-looking-up` looks square at the portal and has to see it.
- * The two are only compatible in one place: far enough along the screen that the wide
- * shot's frame edge has already cut it off, while still well inside the near shot's much
- * wider field. That is here, and the portal itself is moved along the wall to match.
+ * Where the shafts of the north screen stop, leaving a wide recessed bay in front of the
+ * great portal on the wall behind. The web still runs across it, so this is a panel and
+ * not an opening; the portal's orders read through it as depth rather than as a hole.
  */
 export const BAY_X0 = -14.20;
 export const BAY_X1 = -4.90;
 /** Where the portal has to stand to sit behind that bay. */
 export const PORTAL_X = (BAY_X0 + BAY_X1) / 2;
-
-const FAR_Z0 = -14.6;
-const FAR_Z1 = 14.6;
 
 /**
  * Height at which carved stone stops being architecture and becomes darkness.
@@ -155,30 +151,6 @@ function sidePath(x: number, z0: number, inward: number, r: number, bendSteps: n
   return st;
 }
 
-/** The path of one shaft of the vertical far screen. */
-function farPath(z: number, x0: number, r: number, top: number): Station[] {
-  const st: Station[] = [];
-  const at = (y: number, rr: number) => st.push({ x: x0, y, z, r: rr });
-  at(0.00, r * 1.66);
-  at(0.18, r * 1.60);
-  at(0.36, r * 1.28);
-  at(0.54, r * 1.36);
-  at(0.72, r * 1.10);
-  at(1.00, r * 1.00);
-  at(2.30, r);
-  // Two banded courses. A screen of plain vertical shafts with nothing crossing it
-  // reads as hanging cloth however well it is lit; the bands are what make it masonry.
-  at(2.44, r * 1.30);
-  at(2.68, r * 1.30);
-  at(2.84, r);
-  at(5.28, r);
-  at(5.44, r * 1.42);
-  at(5.74, r * 1.42);
-  at(5.92, r);
-  at(top, r * 0.94);
-  return st;
-}
-
 export interface ScreenBuild {
   geometry: THREE.BufferGeometry;
   triangles: number;
@@ -219,52 +191,24 @@ export function buildSideScreen(
   }
 
   // The web, set back behind the shaft axes so each shaft reads as three-quarters round
-  // with a real hollow beside it. Split at the bay so the portal is not curtained off.
+  // with a real hollow beside it.
+  //
+  // It runs UNBROKEN, including across the bay, and that is a correction. Splitting it at
+  // the bay left a clear hole through the screen, and `wide-establishing` — which sits
+  // eight metres beyond the west wall and looks along the room — caught the far corner of
+  // that hole at the extreme left of frame: a hard faceted silhouette with lit ashlar and
+  // an engaged pier of the north wall showing beyond it, on one side of the frame only.
+  // The bay was placed on the assumption that the wide shot's frame edge had already cut
+  // it off; traced properly, the frame edge crosses the screen plane at x = -6.2 and the
+  // bay ends at -4.9, so it never had. The shafts still stop at the bay — it is a real
+  // recessed panel in the screen, and the portal behind it still stands — but the screen
+  // is now a surface with a bay cut into it rather than a curtain with a hole through it.
   const webPath = sidePath(0, z0 - inward * WEB_BACK, inward, 0, bendSteps)
     .map((s) => ({ x: 0, y: s.y, z: s.z }));
-  for (const [a, b] of spans) {
-    sweepWeb(m, webPath, 1, 0, a - PITCH * 0.6, b + PITCH * 0.6,
-      0, inward, (x, y, z) => {
-        const [r, g, bb] = tone(x, y, z, 1);
-        return [r * 0.40, g * 0.40, bb * 0.42];
-      });
-  }
-
-  return { geometry: m.build(), triangles: m.triangles };
-}
-
-/** The vertical screen across the end wall, behind the heap. */
-export function buildFarScreen(hi: boolean, baseTone: Tone): ScreenBuild {
-  const m = new CarvedMesh();
-  // The far end stands behind the heap, at the bottom of the room's air, and it has to
-  // be dark. It is also close enough to the kerb fires that at full albedo it took four
-  // times the irradiance of the side screens, went to a pale even curtain, and bloomed
-  // hard enough to lift the black floor of the whole frame — the render lost every pixel
-  // below four percent. Cutting it here is what gives the room its blacks back.
-  const tone: Tone = (x, y, z, fold) => {
-    const [r, g, b] = baseTone(x, y, z, fold * 1.15);
-    return [r * 0.26, g * 0.26, b * 0.28];
-  };
-  const radial = hi ? 11 : 7;
-  const arc = Math.PI * 1.80;
-  // Runs past the point it goes black, so no lit block of the wall behind ever shows
-  // over the head of the screen.
-  const top = 16.6;
-
-  const n = Math.floor((FAR_Z1 - FAR_Z0) / PITCH);
-  for (let k = 0; k <= n; k++) {
-    const z = FAR_Z0 + k * PITCH;
-    const major = k % MAJOR_EVERY === 0;
-    const r = major ? R_MAJOR : R_MINOR;
-    const x = FAR_X - (major ? 0.16 : 0);
-    sweepShaft(m, farPath(z, x, r, top), -1, 0, radial, arc, tone);
-  }
-
-  const webPath = [{ x: FAR_X + WEB_BACK, y: -0.4, z: 0 }, { x: FAR_X + WEB_BACK, y: top, z: 0 }];
-  sweepWeb(m, webPath, 0, 1, FAR_Z0 - PITCH * 0.6, FAR_Z1 + PITCH * 0.6, -1, 0,
-    (x, y, z) => {
-      const [r, g, b] = tone(x, y, z, 1);
-      return [r * 0.40, g * 0.40, b * 0.42];
+  sweepWeb(m, webPath, 1, 0, SIDE_X0 - PITCH * 0.6, SIDE_X1 + PITCH * 0.6,
+    0, inward, (x, y, z) => {
+      const [r, g, bb] = tone(x, y, z, 1);
+      return [r * 0.40, g * 0.40, bb * 0.42];
     });
 
   return { geometry: m.build(), triangles: m.triangles };

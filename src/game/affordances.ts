@@ -381,8 +381,6 @@ export function createAffordances(world: World): Affordances {
       dim.visible = !!kind;
       if (kind && king) {
         place(mate, king, Y + 0.006);
-        (mate.material as THREE.MeshBasicMaterial) =
-          kind === 'mate' ? mats.mate : mats.check;
         mate.material = kind === 'mate' ? mats.mate : mats.check;
       }
       if (!kind) dimMat.opacity = 0;
