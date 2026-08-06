@@ -59,12 +59,12 @@ const SPEC: Record<Side, StoneSpec> = {
     base: new THREE.Color().setHex(0xa8a294, THREE.SRGBColorSpace),
     // Rust-ochre. Present and identifiable, but the frame shows it as a dull mauve-brown
     // bloom in the stone, not orange paint: a saturated warm here reads instantly as CG.
-    warm: new THREE.Color().setHex(0x86603f, THREE.SRGBColorSpace),
-    warmDeep: new THREE.Color().setHex(0x4e3325, THREE.SRGBColorSpace),
+    warm: new THREE.Color().setHex(0x7d5f4a, THREE.SRGBColorSpace),
+    warmDeep: new THREE.Color().setHex(0x4a352a, THREE.SRGBColorSpace),
     // Soot / cold shadow grey the stone weathers toward.
     cool: new THREE.Color().setHex(0x5f6672, THREE.SRGBColorSpace),
     fresh: new THREE.Color().setHex(0xcdc7b8, THREE.SRGBColorSpace),
-    blotch: 0.74,
+    blotch: 0.56,
     stain: 0.34,
     mottle: 0.09,
     bedding: 0.035,
@@ -497,18 +497,23 @@ export function createStone(world: World, side: Side): Stone {
     // gradient tool.
     uBlotch: { value: new THREE.Vector3(1 / 2.1, 1 / 0.6, 1 / 0.17) },
     // threshold, half-width of the (deliberately narrow) edge, overall strength.
-    uRust: { value: new THREE.Vector3(side === 'white' ? -0.012 : 0.055, 0.022, side === 'white' ? 1.0 : 0.55) },
+    // The stain is a VALUE event first and a hue event second. The film's limestone is
+    // warm in albedo, but only just: push the saturation and the pale army turns into
+    // terracotta under the flames, which is the same mistake as painting it cold white,
+    // only louder. The luminance step at a patch edge is what makes it read as carved
+    // stained stone at four metres.
+    uRust: { value: new THREE.Vector3(side === 'white' ? 0.020 : 0.070, 0.020, side === 'white' ? 0.95 : 0.55) },
     uRustTint: {
       value:
         side === 'white'
-          ? new THREE.Vector3(1.12, 0.80, 0.56)
-          : new THREE.Vector3(1.16, 0.94, 0.72),
+          ? new THREE.Vector3(1.05, 0.88, 0.71)
+          : new THREE.Vector3(1.08, 0.98, 0.86),
     },
     uRustDeep: {
       value:
         side === 'white'
-          ? new THREE.Vector3(0.72, 0.55, 0.44)
-          : new THREE.Vector3(0.74, 0.66, 0.58),
+          ? new THREE.Vector3(0.67, 0.59, 0.52)
+          : new THREE.Vector3(0.72, 0.68, 0.62),
     },
     // Claw-chisel tooling: 1/pitch (5.4 cm strokes), albedo contrast, normal amplitude.
     uTool: { value: new THREE.Vector3(1 / 0.054, side === 'white' ? 0.085 : 0.065, side === 'white' ? 0.20 : 0.16) },

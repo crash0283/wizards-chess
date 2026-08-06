@@ -12,10 +12,14 @@
  *              harness renders, which is why it must not depend on promise ordering or
  *              frame counts — see the note at the top of timeline.ts.
  *   interactive  the player clicks a piece and a destination; the engine answers. Same
- *              animation code, driven by real input instead of a schedule.
+ *              animation code, driven by real input instead of a schedule. All of it
+ *              lives in interactive.ts and NONE of it is constructed under capture, so
+ *              the scripted path cannot be perturbed by it.
  *
- * The chess itself lives entirely in src/chess — legal move generation, search and mate
- * detection are that module's problem. Nothing here decides what is legal.
+ * This file owns the model both paths share: which carved piece stands on which square,
+ * and what happens to it when a blade lands. The chess itself lives entirely in
+ * src/chess — legal move generation, search and mate detection are that module's
+ * problem. Nothing here decides what is legal.
  */
 import * as THREE from 'three';
 import type { Game, GameDeps, GameState, PieceInstance } from '../core/api';
@@ -30,7 +34,8 @@ import {
   type DemoMove,
   type Move,
 } from '../chess';
-import { buildTimeline, lastCaptureIndex, STRIKE_CONTACT, type TimedEvent, type Timeline } from './timeline';
+import { buildTimeline, lastCaptureIndex, type TimedEvent, type Timeline } from './timeline';
+import { createInteractive, type BoardModel, type Interactive } from './interactive';
 
 /** FEN letter -> our piece type. */
 const TYPE_OF: Record<string, PieceType> = {
@@ -106,8 +111,12 @@ export function createGame(world: World, deps: GameDeps): Game {
    * and scar the marble. Everything downstream of a blade landing goes through here so
    * scripted and interactive play produce identical consequences.
    */
-  function destroyOn(file: number, rank: number, fromFile: number, fromRank: number, force = 1) {
-    const victim = pieceAt(file, rank);
+  function destroyPiece(
+    victim: PieceInstance | undefined,
+    file: number, rank: number,
+    fromFile: number, fromRank: number,
+    force = 1,
+  ) {
     if (!victim || victim.destroyed) return;
 
     const { x, z } = squareCentre(file, rank);
@@ -122,6 +131,21 @@ export function createGame(world: World, deps: GameDeps): Game {
     deps.board.markImpact(x, z, 2.4, 1.0);
 
     bySquare.delete(key(file, rank));
+  }
+
+  /** The scripted path's form: the victim is whoever is standing there right now. */
+  function destroyOn(file: number, rank: number, fromFile: number, fromRank: number, force = 1) {
+    destroyPiece(pieceAt(file, rank), file, rank, fromFile, fromRank, force);
+  }
+
+  /** Replace whatever stands on a square with a freshly carved piece of `type`. */
+  function promoteOn(file: number, rank: number, type: PieceType, side: Side) {
+    const standing = pieceAt(file, rank);
+    if (standing) standing.group.visible = false;
+    bySquare.delete(key(file, rank));
+    const inst = deps.pieces.make(type, side, `${side}-${type}-promo-${serial++}`);
+    inst.setSquare(file, rank);
+    bySquare.set(key(file, rank), inst);
   }
 
   /** Apply one scripted ply's board bookkeeping — capture, castle, promotion, relocation. */
@@ -291,72 +315,7 @@ export function createGame(world: World, deps: GameDeps): Game {
     }
   }
 
-  // --- interactive play ---------------------------------------------------------------------
-
-  let selected: { file: number; rank: number } | null = null;
-  let engineThinkAt = -1;
-
-  function boardHit(ev: PointerEvent): { file: number; rank: number } | null {
-    const el = world.renderer.domElement;
-    const r = el.getBoundingClientRect();
-    const ndc = new THREE.Vector2(
-      ((ev.clientX - r.left) / r.width) * 2 - 1,
-      -((ev.clientY - r.top) / r.height) * 2 + 1,
-    );
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(ndc, world.camera);
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const hit = new THREE.Vector3();
-    if (!ray.ray.intersectPlane(plane, hit)) return null;
-    const file = Math.round(hit.x / 2.35 + 3.5);
-    const rank = Math.round(hit.z / 2.35 + 3.5);
-    if (file < 0 || file > 7 || rank < 0 || rank > 7) return null;
-    return { file, rank };
-  }
-
-  function playerMove(from: { file: number; rank: number }, to: { file: number; rank: number }) {
-    const legal = engine.moves();
-    const match = legal.find(
-      (m: Move) => (m.from & 15) === from.file && (m.from >> 4) === from.rank &&
-                   (m.to & 15) === to.file && (m.to >> 4) === to.rank,
-    );
-    if (!match) return false;
-
-    const attacker = pieceAt(from.file, from.rank);
-    const victimSquare = match.capturedOn !== undefined
-      ? { file: match.capturedOn & 15, rank: match.capturedOn >> 4 }
-      : null;
-
-    if (victimSquare) {
-      const victim = pieceAt(victimSquare.file, victimSquare.rank);
-      if (attacker && victim) {
-        attacker.strike(victim);
-        const contactAt = world.time + STRIKE_CONTACT;
-        pending.push({
-          t: contactAt,
-          run: () => destroyOn(victimSquare.file, victimSquare.rank, from.file, from.rank),
-        });
-        pending.push({
-          t: contactAt + 0.75,
-          run: () => {
-            attacker.walkTo(to.file, to.rank, 0.5);
-            relocate(from, to);
-          },
-        });
-      }
-    } else if (attacker) {
-      attacker.walkTo(to.file, to.rank, 0.9);
-      pending.push({ t: world.time + 0.9, run: () => relocate(from, to) });
-    }
-
-    engine.move(match);
-    syncState();
-    engineThinkAt = world.time + 1.9;
-    return true;
-  }
-
-  /** Deferred work for interactive play only — never used during a deterministic capture. */
-  const pending: Array<{ t: number; run: () => void }> = [];
+  // --- shared state bookkeeping -------------------------------------------------------------
 
   function syncState() {
     state.fen = engine.fen;
@@ -365,46 +324,45 @@ export function createGame(world: World, deps: GameDeps): Game {
     state.moveNumber = engine.moveNumber;
     if (engine.isCheckmate()) {
       state.result = engine.side === 'white' ? 'checkmate-white' : 'checkmate-black';
-      const pos = parseFen(engine.fen);
-      for (let sq = 0; sq < 128; sq++) {
-        if (sq & 0x88) { sq += 7; continue; }
-        const ch = pos.board[sq];
-        if (!ch) continue;
-        if (ch.toLowerCase() !== 'k') continue;
-        const isWhite = ch === 'K';
-        if ((isWhite ? 'white' : 'black') !== engine.side) continue;
-        pieceAt(sq & 15, sq >> 4)?.surrender?.();
-      }
+      const k = kingSquareOf(engine.side);
+      if (k) pieceAt(k.file, k.rank)?.surrender?.();
     } else if (engine.isDraw()) {
       state.result = engine.isStalemate() ? 'stalemate' : 'draw';
+    } else {
+      state.result = 'playing';
     }
   }
 
-  function attachInput() {
-    if (world.capturing) return;
-    world.renderer.domElement.addEventListener('pointerdown', (ev) => {
-      if (state.result !== 'playing' || state.thinking) return;
-      const sq = boardHit(ev as PointerEvent);
-      if (!sq) return;
-      if (selected) {
-        if (!playerMove(selected, sq)) {
-          // Not a legal destination — treat it as re-selecting instead.
-          const p = pieceAt(sq.file, sq.rank);
-          selected = p && p.side === engine.side ? sq : null;
-          return;
-        }
-        selected = null;
-      } else {
-        const p = pieceAt(sq.file, sq.rank);
-        if (p && p.side === engine.side) selected = sq;
-      }
-    });
+  /** Where a king is standing, from the engine's own board rather than our map. */
+  function kingSquareOf(side: Side): { file: number; rank: number } | null {
+    const sq = engine.kingSquare(side);
+    if (sq === undefined || sq < 0 || (sq & 0x88) !== 0) return null;
+    return { file: sq & 15, rank: sq >> 4 };
   }
+
+  // --- interactive play ---------------------------------------------------------------------
+  //
+  // Everything a human touches lives in interactive.ts, and it is only ever built when we
+  // are NOT capturing. The scripted path below never consults it.
+
+  let interactive: Interactive | null = null;
+
+  const model: BoardModel = {
+    engine,
+    state,
+    pieceAt,
+    relocate,
+    forget: (file, rank) => { bySquare.delete(key(file, rank)); },
+    destroyPiece,
+    promoteOn,
+    syncState,
+    kingSquareOf,
+  };
 
   return {
     start() {
       populate(START_FEN);
-      attachInput();
+      if (!world.capturing) interactive = createInteractive(world, model);
     },
 
     stage,
@@ -418,26 +376,9 @@ export function createGame(world: World, deps: GameDeps): Game {
         }
         return;
       }
-
-      // Interactive: deferred callbacks, then the engine's reply.
-      for (let i = pending.length - 1; i >= 0; i--) {
-        if (pending[i].t <= t) {
-          pending[i].run();
-          pending.splice(i, 1);
-        }
-      }
-      if (engineThinkAt >= 0 && t >= engineThinkAt && state.result === 'playing') {
-        engineThinkAt = -1;
-        state.thinking = true;
-        const best = engine.moves().length ? engine.search?.() ?? null : null;
-        state.thinking = false;
-        if (best) {
-          playerMove(
-            { file: best.from & 15, rank: best.from >> 4 },
-            { file: best.to & 15, rank: best.to >> 4 },
-          );
-        }
-      }
+      // Interactive. `world.realTime` is the clock a person is actually waiting on;
+      // `t` is the clamped scene clock everything visual runs on.
+      interactive?.update(t, world.realTime);
     },
 
     state: () => state,
@@ -447,6 +388,7 @@ export function createGame(world: World, deps: GameDeps): Game {
       populate(fen);
       timeline = null;
       syncState();
+      interactive?.refresh();
     },
   };
 }

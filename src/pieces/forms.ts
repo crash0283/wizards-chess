@@ -304,6 +304,61 @@ function hilt(
 }
 
 // ---------------------------------------------------------------------------------------
+// Repeating courses. The one thing the reference frame has that a smooth render never
+// does is edges that run in ORIENTED FAMILIES: dentils, bead courses, rows of rivets,
+// rows of mail. Isotropic noise at any amplitude is not a substitute — it is the exact
+// signature of the thing being wrong. Everything below exists to put repeating relief
+// with real shadow lines onto surfaces that were previously unbroken.
+// ---------------------------------------------------------------------------------------
+
+/**
+ * A course of small proud blocks marching across every flat face of a polygonal solid.
+ * Dentils, a bead course, a rivet row, a string of studs on a rim — all the same move,
+ * and the cheapest carved incident there is: twelve triangles each, no subdivision, and
+ * a hard shadow under every one of them.
+ */
+function faceCourse(
+  p: Part,
+  r: number, sides: number, rot: number,
+  y: number, n: number, span: number,
+  hw: number, hh: number, hd: number,
+  tilt = 0,
+): void {
+  const apo = Math.cos(Math.PI / sides);
+  const half = Math.sin(Math.PI / sides);
+  const step = (Math.PI * 2) / sides;
+  for (let f = 0; f < sides; f++) {
+    const a = rot + (f + 0.5) * step;
+    const nx = Math.cos(a), nz = Math.sin(a);
+    const tx = Math.sin(a), tz = -Math.cos(a);
+    const q = quatFromAxes(V(tx, 0, tz), V(0, 1, 0), V(nx, 0, nz));
+    if (tilt !== 0) q.multiply(new THREE.Quaternion().setFromAxisAngle(V(1, 0, 0), tilt));
+    for (let k = 0; k < n; k++) {
+      const off = (n === 1 ? 0 : k / (n - 1) - 0.5) * span * r * half;
+      slab(p, V(nx * r * apo + tx * off, y, nz * r * apo + tz * off), V(hw, hh, hd), q);
+    }
+  }
+}
+
+/**
+ * A ring of rivet heads around a helm brim or a shield rim: proud studs on a circle,
+ * each one squared to the surface it sits on. Nine of these on a helm is the difference
+ * between a riveted iron pot and a thumb-smoothed lump of clay.
+ */
+function rivetRing(
+  p: Part,
+  cx: number, cy: number, cz: number,
+  rad: number, n: number, size: number, rise: number, rot = 0,
+): void {
+  for (let i = 0; i < n; i++) {
+    const a = rot + (i / n) * Math.PI * 2;
+    const nx = Math.cos(a), nz = Math.sin(a);
+    const q = quatFromAxes(V(-nz, 0, nx), V(0, 1, 0), V(nx, 0, nz));
+    slab(p, V(cx + nx * rad, cy, cz + nz * rad), V(size, size * 0.86, rise), q);
+  }
+}
+
+// ---------------------------------------------------------------------------------------
 // The plinth. Hexagonal, stepped, moulded, and carrying a blind arcade — in the reference
 // frame it is a full third of every piece, and it is the most obviously *carved* thing
 // on the board. It is not a disc and it is not a footnote.
@@ -348,30 +403,42 @@ function plinth(p: Part, r: number, h: number, sides: number, rng: Rng, cols: nu
       const wsh = Math.min(0.088 * r, dieR * half * 0.62 / Math.max(1, cols));
       slab(p, V(cx, (y0 + y1) * 0.5, cz),
         V(wsh, (y1 - y0) * 0.42, 0.052 * r), q);
+      // Base and capital, so the shaft is a shaft and not a stripe.
+      slab(p, V(cx, y0 + (y1 - y0) * 0.055, cz),
+        V(wsh * 1.50, (y1 - y0) * 0.052, 0.062 * r), q);
       slab(p, V(cx, y1 - (y1 - y0) * 0.06, cz),
         V(wsh * 1.45, (y1 - y0) * 0.055, 0.064 * r), q);
+      // The arch over the bay: three voussoirs and a keystone standing proud of the
+      // spandrel, which is what makes an arcade an arcade instead of a picket fence.
+      const archR = Math.min(wsh * 2.3, (dieR * half * 1.34) / Math.max(1, cols) * 0.52);
+      for (let vv = 0; vv < 3; vv++) {
+        const ang = Math.PI * (0.22 + vv * 0.28);
+        const fu = off + Math.cos(ang) * archR;
+        const fv = y1 + (y1 - y0) * 0.035 + Math.sin(ang) * archR * 0.68;
+        const qq = q.clone().multiply(
+          new THREE.Quaternion().setFromAxisAngle(V(0, 0, 1), ang - Math.PI / 2),
+        );
+        slab(
+          p,
+          V(nx * dieR * apo + tx * fu, fv, nz * dieR * apo + tz * fu),
+          V(wsh * 0.62, wsh * 0.50, 0.048 * r),
+          qq,
+        );
+      }
     }
   }
 
   // Dentil course under the cornice — small square blocks, twice the arcade's density.
-  const denR = r * 0.888;
-  const dy = h * 0.822;
-  for (let f = 0; f < sides; f++) {
-    const a = rot + (f + 0.5) * faceStep;
-    const nx = Math.cos(a), nz = Math.sin(a);
-    const tx = Math.sin(a), tz = -Math.cos(a);
-    const q = quatFromAxes(V(tx, 0, tz), V(0, 1, 0), V(nx, 0, nz));
-    const n = cols + 2;
-    for (let k = 0; k < n; k++) {
-      const off = (k / (n - 1) - 0.5) * 1.5 * denR * half;
-      slab(
-        p,
-        V(nx * denR * apo + tx * off, dy, nz * denR * apo + tz * off),
-        V(0.042 * r, h * 0.030, 0.040 * r),
-        q,
-      );
-    }
-  }
+  faceCourse(p, r * 0.888, sides, rot, h * 0.822, cols + 4, 1.58,
+    0.038 * r, h * 0.032, 0.042 * r);
+  // Bead course on the fillet below the die: a run of small studs, tighter still. Three
+  // courses at three densities on one plinth is what "carved" looks like from four metres
+  // — a single moulding profile does not survive the distance.
+  faceCourse(p, r * 0.905, sides, rot, h * 0.291, cols * 2 + 5, 1.62,
+    0.026 * r, h * 0.020, 0.030 * r);
+  // Chamfer-stop blocks on the bottom step, where the plinth meets the marble.
+  faceCourse(p, r * 0.978, sides, rot, h * 0.108, cols + 1, 1.30,
+    0.052 * r, h * 0.026, 0.028 * r);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -389,6 +456,7 @@ function drape(
   backOut: number,
   hem: number,
   rng: Rng,
+  band = 0,
 ): void {
   const prof: number[][] = [];
   const ridge: number[] = [];
@@ -404,6 +472,18 @@ function drape(
     ridge.push(rg > 0 ? 1 : 0);
   }
   const rings = st.map((s) => ringXZ(s.y, scaleProf(prof, s.sx, s.sz, s.ox ?? 0, s.oz ?? 0)));
+  // A rolled hem. Cloth that ends on a knife-edge is a sheet of glass; cloth that ends on
+  // a thickened, turned-back border has an edge you can see the shadow under, and that
+  // border is visible on every cape and tabard in the reference frame.
+  if (band > 0) {
+    const s = st[st.length - 1];
+    rings.push(
+      ringXZ(s.y - band * 0.42, scaleProf(prof, s.sx * 1.075, s.sz * 1.075, s.ox ?? 0, s.oz ?? 0)),
+    );
+    rings.push(
+      ringXZ(s.y - band, scaleProf(prof, s.sx * 0.965, s.sz * 0.965, s.ox ?? 0, s.oz ?? 0)),
+    );
+  }
   if (hem > 0) {
     const last = rings[rings.length - 1];
     for (let i = 0; i < n; i++) {
@@ -480,6 +560,13 @@ function helmCross(
   }
   stack(p, prof, st);
 
+  // A rolled rim around the bottom of the drum — the turned edge of the iron.
+  stack(p, prof, [
+    { y: cy + h * 0.016, sx: 1.02, sz: 1.02, ox: cx, oz: cz },
+    { y: cy + h * 0.058, sx: 1.20, sz: 1.20, ox: cx, oz: cz },
+    { y: cy + h * 0.100, sx: 1.03, sz: 1.03, ox: cx, oz: cz },
+  ]);
+
   // The four visor plates. The cross is the cross-shaped void they leave between them.
   const fz = cz + r * 0.90;
   const q = new THREE.Quaternion();
@@ -496,6 +583,38 @@ function helmCross(
   // A brow band and a chin band close the face off top and bottom.
   slab(p, V(cx, cy + h * 0.632, fz - r * 0.02), V(r * 0.62, h * 0.038, r * 0.048), q);
   slab(p, V(cx, cy + h * 0.272, fz - r * 0.02), V(r * 0.58, h * 0.036, r * 0.044), q);
+  // A brow RIDGE above the brow band: proud, canted, and casting the hard horizontal
+  // shadow that tells you a helm has a face under it. Without it the front of the drum
+  // is a blank cylinder wall and the cross reads as a decal.
+  slab(p, V(cx, cy + h * 0.706, fz - r * 0.06), V(r * 0.70, h * 0.052, r * 0.105),
+    new THREE.Quaternion().setFromAxisAngle(V(1, 0, 0), 0.30));
+  // Rivets: one row holding the rim on, one holding the brow band.
+  rivetRing(p, cx, cy + h * 0.058, cz, r * 1.21, 9, r * 0.062, r * 0.052, Math.PI / 9);
+  for (const sx of [-1, 1]) {
+    slab(p, V(cx + sx * r * 0.60, cy + h * 0.632, fz - r * 0.01),
+      V(r * 0.052, h * 0.036, r * 0.052), q);
+  }
+  // Vertical seam ribs up the crown — the plates the helm is made of, and one more
+  // family of oriented edges on what was a smooth drum.
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+    const bx = cx + Math.cos(a) * r * 0.97, bz = cz + Math.sin(a) * r * 0.97;
+    slab(
+      p,
+      V(bx, cy + h * (flat ? 0.52 : 0.46), bz),
+      V(r * 0.048, h * (flat ? 0.30 : 0.24), r * 0.040),
+      quatFromAxes(V(-Math.sin(a), 0, Math.cos(a)), V(0, 1, 0), V(Math.cos(a), 0, Math.sin(a))),
+    );
+  }
+  if (flat) {
+    // Flat-topped great helm: a riveted crown plate with its own rim.
+    stack(p, prof, [
+      { y: cy + h * 0.868, sx: 0.90, sz: 0.90, ox: cx, oz: cz },
+      { y: cy + h * 0.904, sx: 1.00, sz: 1.00, ox: cx, oz: cz },
+      { y: cy + h * 0.938, sx: 0.88, sz: 0.88, ox: cx, oz: cz },
+    ]);
+    rivetRing(p, cx, cy + h * 0.904, cz, r * 1.01, 7, r * 0.050, r * 0.042, 0.21);
+  }
   if (flat) {
     p.thinNow = 0.55;
     spike(p, V(cx, cy + h * 0.94, cz), V(cx, cy + h * 1.30, cz), r * 0.10, r * 0.10, V(0, 0, 0));
@@ -521,6 +640,20 @@ function kettleHelm(
     new THREE.Quaternion());
   slab(p, V(cx, cy + h * 0.19, cz + r * 0.86), V(r * 0.62, h * 0.055, r * 0.30),
     new THREE.Quaternion());
+  // A brow RIDGE over the nasal, canted forward, and eye recesses either side of it. Seen
+  // from behind — which is how most of the pawns in the frame are seen — the dome carries
+  // a medial comb and a riveted brim instead of being one unbroken white shell.
+  slab(p, V(cx, cy + h * 0.355, cz + r * 0.90), V(r * 0.60, h * 0.055, r * 0.22),
+    new THREE.Quaternion().setFromAxisAngle(V(1, 0, 0), 0.34));
+  // Medial comb, front to back over the crown.
+  for (let i = 0; i < 5; i++) {
+    const t = i / 4;
+    const zz = cz + (t - 0.5) * r * 1.62;
+    const yy = cy + h * (0.24 + 0.56 * Math.cos((t - 0.5) * 2.2));
+    slab(p, V(cx, yy, zz), V(r * 0.055, h * 0.075, r * 0.19), new THREE.Quaternion());
+  }
+  // Rivet row around the brim.
+  rivetRing(p, cx, cy + h * 0.105, cz, r * 1.15, 8, r * 0.070, r * 0.055, Math.PI / 8);
 }
 
 /** A circlet of points over a helm — the royal crown. */
@@ -616,11 +749,29 @@ function kiteShield(
     { y: thick, sx: 0.90, sz: 0.90 },
   ]);
   p.thinNow = 0;
-  // Boss and a cross band on the face.
+  // A RAISED RIM standing proud of the face all the way round the outline — a shield's
+  // most identifiable feature after its shape, and the reason a shield in the frame has a
+  // bright line around a shadowed field instead of being one flat lozenge.
+  stack(p, prof, [
+    { y: -thick * 0.85, sx: 1.075, sz: 1.075 },
+    { y: thick * 0.60, sx: 1.075, sz: 1.075 },
+    { y: thick * 1.18, sx: 1.015, sz: 1.015 },
+  ]);
+  // Rivets through the rim, at every corner of the outline.
+  for (let i = 0; i < prof.length; i++) {
+    const [px, pz] = prof[i];
+    slab(p, V(px * 1.035, thick * 1.10, pz * 1.035),
+      V(hw * 0.055, thick * 0.34, hw * 0.055), new THREE.Quaternion());
+  }
+  // Boss with its own rim, and a cross device on the face.
   dome(p, 0, thick * 0.6, up * 0.10, hw * 0.20, hw * 0.20, hw * 0.24, 7, 3);
-  slab(p, V(0, thick * 0.75, up * 0.10), V(hw * 0.86, thick * 0.30, up * 0.11),
+  stack(p, ngon(9, hw * 0.28, hw * 0.28, Math.PI / 9), [
+    { y: thick * 0.55, sx: 1.0, sz: 1.0, oz: up * 0.10 },
+    { y: thick * 1.10, sx: 0.94, sz: 0.94, oz: up * 0.10 },
+  ]);
+  slab(p, V(0, thick * 0.95, up * 0.10), V(hw * 0.86, thick * 0.34, up * 0.11),
     new THREE.Quaternion());
-  slab(p, V(0, thick * 0.75, (up - dn) * 0.08), V(up * 0.10, thick * 0.30, (up + dn) * 0.40),
+  slab(p, V(0, thick * 0.95, (up - dn) * 0.08), V(up * 0.10, thick * 0.34, (up + dn) * 0.40),
     new THREE.Quaternion());
   xform(p, from, new THREE.Matrix4().compose(at, q, V(1, 1, 1)));
 }
@@ -668,8 +819,10 @@ function pawn(rng: Rng, d: number): FormResult {
     ];
     for (let i = 0; i < key.length; i++) {
       const [y, z, hw, up, dn] = key[i];
-      // Alternating collar scale turns the sweep into banded lames for free.
-      const k = i % 2 === 0 ? 1.0 : 1.085;
+      // Alternating collar scale turns the sweep into banded lames for free. Pushed hard
+      // enough that each lame throws a real shadow onto the one below: from behind, this
+      // shell IS the pawn, and a smooth one reads as a boulder.
+      const k = i % 2 === 0 ? 1.0 : 1.135;
       spine.push(V(0, PH + y, z));
       profs.push(carapace(hw, up, dn, k));
     }
@@ -959,7 +1112,7 @@ function knight(rng: Rng, d: number): FormResult {
     { y: barrelY + 0.10, sx: 0.70, sz: 0.60, oz: -0.36 },
     { y: barrelY - 0.34, sx: 0.72, sz: 0.62, oz: -0.40 },
     { y: barrelY - 0.60, sx: 0.66, sz: 0.57, oz: -0.40 },
-  ], 16, 0.115, 0.30, 0.34, 0.20, rng);
+  ], 16, 0.130, 0.30, 0.34, 0.20, rng, 0.10);
   cowl(cape, shoY + 0.06, -0.16, 0.34, 0.30, 0.52, 0.30, rng);
   cape.mailNow = 0;
   cape.thinNow = 0;
@@ -1090,7 +1243,7 @@ function standing(body: Part[], rng: Rng, d: number, o: StandOpts): StandOut {
     { y: Y(0.440), sx: 0.104 * hf * w, sz: 0.088 * hf },
     { y: Y(o.robe ? 0.180 : 0.330), sx: 0.108 * hf * w, sz: 0.092 * hf },
     { y: Y(o.robe ? 0.026 : 0.300), sx: 0.116 * hf * w, sz: 0.098 * hf },
-  ], 14, 0.085, 0.05, 0.06, hf * 0.026, rng);
+  ], 14, 0.095, 0.05, 0.06, hf * 0.026, rng, hf * 0.020);
   torso.mailNow = 0;
   // Collar and pauldrons — the shoulders must out-measure everything above them.
   for (const s of [-1, 1]) {
@@ -1102,6 +1255,32 @@ function standing(body: Part[], rng: Rng, d: number, o: StandOpts): StandOut {
     { y: Y(0.822), sx: 0.96, sz: 0.96, oz: 0.008 * hf },
   ]);
   body.push(torso);
+
+  // --- the tabard ----------------------------------------------------------------------
+  //
+  // A surcoat hanging over the mail: a flat panel front and back, hem-banded, with an
+  // orphrey down the centre. It is the one piece of kit that gives an armoured figure
+  // straight vertical CUT EDGES from chest to thigh, and every standing figure in the
+  // reference frame has one. Carved as stone, but the cloth is the point: it breaks the
+  // torso's smooth shell into panels with shadows between them.
+  const tab = new Part();
+  tab.detail = d * 0.60;
+  // Front only: the cape already owns the whole back of the figure, and a rear panel
+  // would be a solid buried inside another one, paying for triangles nothing can see.
+  const tabProf = rrect(1, 1, 0.20);
+  stack(tab, tabProf, [
+    { y: Y(0.700), sx: 0.060 * hf * w, sz: 0.026 * hf, oz: 0.050 * hf },
+    { y: Y(0.590), sx: 0.092 * hf * w, sz: 0.036 * hf, oz: 0.062 * hf },
+    { y: Y(0.450), sx: 0.110 * hf * w, sz: 0.044 * hf, oz: 0.078 * hf },
+    { y: Y(0.348), sx: 0.116 * hf * w, sz: 0.046 * hf, oz: 0.084 * hf },
+    { y: Y(0.318), sx: 0.104 * hf * w, sz: 0.038 * hf, oz: 0.084 * hf },
+  ]);
+  // Hem band and orphrey — the borders are what carry the edge.
+  slab(tab, V(0, Y(0.362), 0.090 * hf),
+    V(0.120 * hf * w, hf * 0.019, 0.048 * hf), new THREE.Quaternion());
+  slab(tab, V(0, Y(0.520), 0.094 * hf),
+    V(0.024 * hf * w, hf * 0.155, 0.044 * hf), new THREE.Quaternion());
+  body.push(tab);
 
   // --- arms brought together at the chest ----------------------------------------------
   const arms = new Part();
@@ -1150,7 +1329,7 @@ function standing(body: Part[], rng: Rng, d: number, o: StandOpts): StandOut {
       { y: Y(0.420), sx: 0.140 * hf * w * b, sz: 0.114 * hf * b, oz: -0.066 * hf },
       { y: Y(o.hem + 0.070), sx: 0.144 * hf * w * b, sz: 0.117 * hf * b, oz: -0.070 * hf },
       { y: Y(o.hem), sx: 0.128 * hf * w * b, sz: 0.104 * hf * b, oz: -0.070 * hf },
-    ], 18, 0.150, 0.48, 0.34, hf * 0.052, rng);
+    ], 18, 0.160, 0.48, 0.34, hf * 0.052, rng, hf * 0.034);
     cape.mailNow = 0;
     cape.thinNow = 0;
     body.push(cape);
