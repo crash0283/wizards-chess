@@ -29,6 +29,34 @@ export interface CaptureRequest {
   cam?: string;
 }
 
+/**
+ * Which quality tier interactive play should get on THIS device.
+ *
+ * Capture is always 'high' — that is the frame the shots are composed for and the one
+ * every critic judges, and it must never vary. Interactive play is a different problem:
+ * this scene was built to a desktop budget (thousands of instanced blocks, full-resolution
+ * procedural textures, a planar reflection pass), and handing all of that to a phone is a
+ * reliable way to have mobile Safari kill the tab for memory.
+ *
+ * This previously returned 'high' unconditionally for interactive play, which meant a
+ * phone got the full capture budget.
+ *
+ * An explicit ?quality= always wins, so a desktop user can force either tier.
+ */
+function interactiveQuality(): 'low' | 'high' {
+  if (typeof navigator === 'undefined' || typeof matchMedia === 'undefined') return 'high';
+
+  // A coarse pointer with no hover is a touchscreen — phone or tablet.
+  const touchPrimary = matchMedia('(pointer: coarse)').matches && !matchMedia('(hover: hover)').matches;
+  // Physical screen size in CSS pixels, ignoring how the window happens to be sized.
+  const smallScreen = Math.min(screen.width, screen.height) <= 820;
+  // Both are advisory and absent on Safari, so they only ever push toward 'low'.
+  const lowCores = (navigator.hardwareConcurrency ?? 8) <= 4;
+  const lowMemory = ((navigator as { deviceMemory?: number }).deviceMemory ?? 8) <= 4;
+
+  return touchPrimary || smallScreen || lowCores || lowMemory ? 'low' : 'high';
+}
+
 export function readCaptureRequest(): CaptureRequest {
   const q = new URLSearchParams(location.search);
   const num = (k: string, d: number) => {
@@ -45,7 +73,7 @@ export function readCaptureRequest(): CaptureRequest {
     seed: num('seed', 20250811),
     width: num('w', RENDER.width),
     height: num('h', RENDER.height),
-    quality: (q.get('quality') as 'low' | 'high') ?? (capturing ? 'high' : 'high'),
+    quality: (q.get('quality') as 'low' | 'high') ?? (capturing ? 'high' : interactiveQuality()),
     capturing,
     showHud: q.get('hud') !== '0' && !capturing,
     step: num('step', 1 / 60),

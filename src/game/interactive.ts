@@ -442,16 +442,38 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   let reflDriver: THREE.Object3D | null | undefined;
 
   /**
-   * Interactive resolution, as a fraction of the display size.
+   * Interactive resolution, as a fraction of the display size — chosen by measurement.
    *
-   * This is the interactive quality tier. `world.quality` is fixed at 'high' for a live
-   * page and every module has already been built by the time the game exists, so the tier
-   * cannot be chosen at construction — but resolution can be, and on a software
-   * rasteriser it is worth more than every other saving combined. The canvas is rendered
-   * small and stretched to full size in CSS, so the framing, the camera and the pointer
-   * mapping (which reads getBoundingClientRect, i.e. CSS pixels) are all untouched.
+   * This is the interactive quality tier. `world.quality` is fixed for the life of the
+   * page and every other module has already been built by the time the game exists, so
+   * the tier cannot be picked at construction. Resolution still can, and on a software
+   * rasteriser it is worth more than everything else here combined.
+   *
+   * Rather than commit to one number, this walks a short ladder against the real frame
+   * time (`world.realTime`, the only honest clock — `world.time` is clamped and cannot
+   * tell a slow frame from a fast one). A machine with a GPU climbs to full resolution
+   * within a couple of seconds; a machine without one settles at the bottom of the ladder
+   * instead of showing a person a slideshow. The number of changes is capped, because
+   * each one reallocates the post chain's render targets.
+   *
+   * The canvas is rendered small and stretched to full size in CSS, so framing, camera
+   * and pointer mapping (which reads getBoundingClientRect — CSS pixels) are untouched.
    */
-  const INTERACTIVE_SCALE = 0.5;
+  const SCALE_LADDER = [0.4, 0.5, 0.6, 0.75, 1.0];
+  /** Start one rung below the top: good hardware climbs, bad hardware never has to fall far. */
+  let scaleIdx = 2;
+  let scaleChanges = 0;
+  const MAX_SCALE_CHANGES = 10;
+  /** Target band, in real seconds per frame: slower than 45 ms drops, faster than 22 ms climbs. */
+  const FRAME_SLOW = 0.045;
+  const FRAME_FAST = 0.022;
+  /** Real seconds of shader compilation and first-frame cost to ignore before judging. */
+  const WARMUP = 1.5;
+  let frameEma = 0;
+  let lastRealT = -1;
+  let decisionAt = 0;
+  let framesSince = 0;
+
   let cssW = 0;
 
   function fitCanvas() {
@@ -460,7 +482,7 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       320,
       Math.min(window.innerWidth || RENDER.width, Math.round((window.innerHeight || RENDER.height) * RENDER.aspect)),
     );
-    const w = Math.max(160, Math.round(wantCss * INTERACTIVE_SCALE));
+    const w = Math.max(160, Math.round(wantCss * SCALE_LADDER[scaleIdx]));
     const h = Math.max(1, Math.round(w / RENDER.aspect));
     if (el.width === w && el.height === h && cssW === wantCss) return;
     cssW = wantCss;
@@ -472,7 +494,33 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     world.camera.updateProjectionMatrix();
   }
 
-  function budget(t: number) {
+  /**
+   * Watch the real frame time and move one rung at a time.
+   *
+   * Asymmetric on purpose. Dropping is allowed after half a second, because on a renderer
+   * taking twenty seconds a frame "wait for twelve more frames" is four minutes of a
+   * person's life. Climbing needs both a run of frames and a second of real time, so a
+   * momentary lull cannot push a machine back into a resolution it cannot hold.
+   */
+  function adaptScale(realT: number) {
+    if (lastRealT < 0) { lastRealT = realT; decisionAt = realT; return; }
+    const dt = realT - lastRealT;
+    lastRealT = realT;
+    framesSince++;
+    if (!(dt > 0) || dt > 30) return;                 // first frame, or the tab was asleep
+    frameEma = frameEma === 0 ? dt : frameEma * 0.75 + dt * 0.25;
+    if (realT < WARMUP) { decisionAt = realT; framesSince = 0; return; }
+    if (scaleChanges >= MAX_SCALE_CHANGES) return;
+    const since = realT - decisionAt;
+    const step = (dir: number) => {
+      scaleIdx += dir; scaleChanges++; decisionAt = realT; framesSince = 0; frameEma = 0;
+    };
+    if (frameEma > FRAME_SLOW && scaleIdx > 0 && since > 0.5) step(-1);
+    else if (frameEma < FRAME_FAST && scaleIdx < SCALE_LADDER.length - 1 && since > 1.0 && framesSince >= 20) step(1);
+  }
+
+  function budget(t: number, realT: number) {
+    adaptScale(realT);
     fitCanvas();
     const moving = t < activeUntil;
     // The only shadow-caster in the scene is one fixed key light, so a still board's
@@ -503,7 +551,7 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
 
   return {
     update(t, realT) {
-      budget(t);
+      budget(t, realT);
 
       for (let i = pending.length - 1; i >= 0; i--) {
         if (pending[i].t <= t) {
