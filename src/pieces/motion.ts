@@ -112,6 +112,16 @@ export class Motion {
     }
   }
 
+  /**
+   * True while an animation is driving the arm off its rest pose — the strike, and the
+   * mated king's surrender. The low tier bakes arm into body for a single draw call and
+   * reads this to know when it has to come apart again.
+   */
+  armAnimating(): boolean {
+    const a = this.anim;
+    return a !== null && (a.kind === 'strike' || a.kind === 'surrender');
+  }
+
   setSquare(x: number, z: number): void {
     this.baseX = x;
     this.baseZ = z;

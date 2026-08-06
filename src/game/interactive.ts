@@ -539,7 +539,16 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     thoughtHeld = th;
     const spentMs = Math.max(0, (realNow - thinkStartedAt) * 1000);
     const settle = pending.length > 0 ? SETTLE_MS : 0;
-    arm(Math.max(MIN_THINK_MS, settle) - spentMs);
+    const wait = Math.max(MIN_THINK_MS, settle) - spentMs;
+    // Zero delay still costs a macrotask, and a macrotask cannot run while a frame is
+    // rendering — on the low tier that is a whole frame spent waiting for a timer whose
+    // whole purpose was to wait for nothing. `realNow` advancing past `thinkStartedAt`
+    // means at least one frame has already gone by with the HUD showing "thinking…", so
+    // the pause has been served and the move goes down on this turn of the event loop.
+    // (This runs from the worker's message event or from the ladder's timer — between
+    // frames either way, never on one.)
+    if (wait <= 0) playThought();
+    else arm(wait);
   }
 
   function arm(ms: number) {
@@ -728,10 +737,28 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   const FRAME_SLOW = 0.070;
   /** Real seconds of shader compilation and first-frame cost to ignore before judging. */
   const WARMUP = 1.5;
+  /**
+   * A gap this long is not a frame anybody rendered — it is a suspended tab, a laptop lid,
+   * or the very first paint. It is evidence of nothing and is not measured. What it must
+   * NOT do is look fast; see `fastRun`.
+   */
+  const SUSPEND_DT = 30;
+  /**
+   * Consecutive frames under FRAME_TARGET required to take a rung, and the far longer run
+   * required to take back a rung this machine has already failed to hold. 45 frames under
+   * 33 ms is a second and a half of genuinely smooth play; 180 is six.
+   */
+  const CLIMB_RUN = 45;
+  const RECLAIM_RUN = 180;
   let frameEma = 0;
+  /** Frames actually measured. The sentinel for "no data yet" — never `frameEma === 0`. */
+  let frameSamples = 0;
+  /** Length of the current unbroken run of frames under FRAME_TARGET. */
+  let fastRun = 0;
+  /** Highest rung this machine has not yet proved it cannot hold. */
+  let ceilingIdx = SCALE_LADDER.length - 1;
   let lastRealT = -1;
   let decisionAt = 0;
-  let framesSince = 0;
 
   let cssW = 0;
   let cssH = 0;
@@ -787,42 +814,101 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   /**
    * Watch the real frame time and pick the rung.
    *
-   * Still asymmetric, but both directions are now one rung at a time. The old version
-   * solved for the biggest rung that fitted the budget and took it in a single step, which
-   * made sense when the bottom of the ladder was 0.38 and the walk down was four frames of
-   * a person's life. With four gentle rungs above a hard floor there is nothing left to
-   * solve for: the worst case is three steps, and each one costs 15% of the picture rather
-   * than half of it. Climbing additionally needs a run of frames and a second and a half,
-   * so a momentary lull cannot push a machine into a resolution it cannot hold.
+   * Both directions move one rung at a time. The old version solved for the biggest rung
+   * that fitted the budget and took it in a single step, which made sense when the bottom
+   * of the ladder was 0.38 and the walk down was four frames of a person's life. With four
+   * gentle rungs above a hard floor there is nothing left to solve for: the worst case is
+   * three steps, and each one costs 15% of the picture rather than half of it.
+   *
+   * ── why this used to climb on a machine 66x too slow to ──────────────────────────────
+   *
+   * Instrumented at a 932x430 viewport under the software rasteriser, the buffer walked
+   * 800 -> 857 -> 932 -> 857 -> 932 across four minutes while frames were taking over two
+   * seconds each. The trace of the decision inputs shows exactly how, and it is three
+   * separate mistakes stacking:
+   *
+   *   {realT: 54.15, dt: 54.15, why: 'skip', frameEma: 0}
+   *   {realT: 54.16, dt: 0.017, ema: 0.017, idx: 1, since: 54.16, fs: 2}
+   *
+   *   1. `frameEma === 0` was doing double duty: it was the "no measurement yet" sentinel
+   *      AND a value that sails through `frameEma < FRAME_TARGET`. `commit()` set it to 0
+   *      on every rung change, and the "tab was asleep" guard returned BEFORE updating it,
+   *      so 0 survived into the next decision.
+   *   2. With the average empty, the next sample REPLACED it outright instead of being
+   *      averaged into it — and the next sample after a long stall is a catch-up rAF
+   *      callback that costs nothing. One 17 ms callback stood in for a 10-second frame.
+   *      31x over the slow threshold, measured as half the target.
+   *   3. `framesSince` and `decisionAt` were only reset when a rung actually CHANGED. At
+   *      932 CSS px the MIN_BUFFER_W floor makes rungs 0 and 1 identical, so the too-slow
+   *      branch kept returning without committing, and those two counters grew for the
+   *      whole session. After the first minute `since > 1.5 && framesSince >= 20` was
+   *      permanently true and the average was the only gate left — the one that had just
+   *      been handed a 17 ms lie.
+   *
+   * So the climb no longer trusts an average at all. It requires an unbroken RUN of frames
+   * under target: `fastRun` resets to zero on any frame over target, and on any suspended
+   * gap, so "45 fast frames" means 45 in a row. A machine at two seconds a frame cannot
+   * produce two in a row, let alone forty-five, however the browser bunches its callbacks.
+   *
+   * And a rung that had to be given up becomes a ceiling. Reclaiming it needs four times
+   * the evidence (RECLAIM_RUN), so a device that is simply slow pins to its floor and
+   * stays there — thrashing resolution is worse than sitting on a stable rung — while one
+   * that was briefly busy can still come back.
    */
   function adaptScale(realT: number) {
     if (lastRealT < 0) { lastRealT = realT; decisionAt = realT; return; }
     const dt = realT - lastRealT;
     lastRealT = realT;
-    framesSince++;
-    if (!(dt > 0) || dt > 30) return;                 // first frame, or the tab was asleep
-    frameEma = frameEma === 0 ? dt : frameEma * 0.75 + dt * 0.25;
-    if (realT < WARMUP) { decisionAt = realT; framesSince = 0; return; }
+    if (!(dt > 0)) return;
+    if (dt > SUSPEND_DT) {
+      // Not a frame anybody rendered. It says nothing about how fast this machine is —
+      // but it absolutely must not be able to masquerade as speed, so the fast run dies
+      // here and the average is left exactly as it was.
+      fastRun = 0;
+      return;
+    }
+    frameSamples++;
+    frameEma = frameSamples === 1 ? dt : frameEma * 0.75 + dt * 0.25;
+    fastRun = dt < FRAME_TARGET ? fastRun + 1 : 0;
+    if (realT < WARMUP) { decisionAt = realT; fastRun = 0; return; }
     if (scaleChanges >= MAX_SCALE_CHANGES) return;
     const since = realT - decisionAt;
 
+    const cw = cssW || viewW();
     const commit = (idx: number) => {
       if (idx === scaleIdx) return;
+      // Frame cost on this scene is very close to linear in pixel count, so the average
+      // is not thrown away across a rung change — it is carried over at the cost the new
+      // rung is expected to have. That leaves no "no data" hole for a cheap catch-up
+      // callback to fall into, which is what the climb used to be triggered by.
+      const before = scaleFor(scaleIdx, cw);
+      const after = scaleFor(idx, cw);
+      if (before > 0) frameEma *= (after * after) / (before * before);
       scaleIdx = idx;
       scaleChanges++;
       decisionAt = realT;
-      framesSince = 0;
-      frameEma = 0;
+      fastRun = 0;
     };
 
-    const cw = cssW || viewW();
-    if (frameEma > FRAME_SLOW && scaleIdx > 0 && since > 0.75) {
-      // Nothing to gain from a rung the pixel floor is already holding above it.
-      if (scaleFor(scaleIdx - 1, cw) < scaleFor(scaleIdx, cw)) commit(scaleIdx - 1);
+    if (frameEma > FRAME_SLOW && since > 0.75) {
+      // This rung is beyond this machine, whether or not there is a lower one to take.
+      // Recording that is the point: it is what stops the ladder walking back up into it.
+      if (scaleIdx > 0 && scaleFor(scaleIdx - 1, cw) < scaleFor(scaleIdx, cw)) {
+        ceilingIdx = Math.min(ceilingIdx, scaleIdx - 1);
+        commit(scaleIdx - 1);
+      } else {
+        // Nothing to gain from a rung the pixel floor is already holding above it — but
+        // the machine has still failed at this one, so it does not get climbed past.
+        ceilingIdx = Math.min(ceilingIdx, scaleIdx);
+        decisionAt = realT;
+        fastRun = 0;
+      }
       return;
     }
-    if (frameEma < FRAME_TARGET && scaleIdx < SCALE_LADDER.length - 1
-        && since > 1.5 && framesSince >= 20) {
+    const needed = scaleIdx < ceilingIdx ? CLIMB_RUN : RECLAIM_RUN;
+    if (scaleIdx < SCALE_LADDER.length - 1 && fastRun >= needed
+        && frameEma < FRAME_TARGET && since > 1.5) {
+      if (scaleIdx >= ceilingIdx) ceilingIdx = Math.min(SCALE_LADDER.length - 1, scaleIdx + 1);
       commit(scaleIdx + 1);
     }
   }
