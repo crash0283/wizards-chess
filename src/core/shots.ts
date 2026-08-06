@@ -133,7 +133,36 @@ export const SHOTS: ShotDef[] = [
   },
 ];
 
-export const SHOT_BY_ID = new Map(SHOTS.map((s) => [s.id, s]));
+/**
+ * The PLAY camera. Not a film shot — the one you actually sit behind.
+ *
+ * The cinematic shots are composed to look like the film, which means low angles, long
+ * lenses and shallow focus. All three are actively hostile to playing chess: from
+ * `wide-establishing` you cannot tell which square is which, the near pieces are enormous,
+ * and the bokeh softens exactly the things you are trying to click on.
+ *
+ * So interactive play gets its own camera: elevated behind White, looking down at about
+ * 35 degrees so ranks and files separate cleanly, the whole board inside the frame with
+ * margin, and — critically — a DEEP stop. f/11 puts the circle of confusion below a pixel
+ * across the entire board, so nothing you are trying to tap is blurred.
+ *
+ * It is deliberately NOT in SHOTS: it must never be captured or judged, because it is not
+ * trying to look like the film.
+ */
+export const PLAY_SHOT: ShotDef = {
+  id: 'play',
+  label: 'Play view',
+  eye: [0, 15.0, -21.0],
+  target: [0, 0.6, 0.5],
+  fov: 30,
+  focus: 26,
+  fstop: 11,
+  t: 0,
+  judges: [],
+  proves: 'You can see which square is which, and what you tap is sharp.',
+};
+
+export const SHOT_BY_ID = new Map([...SHOTS, PLAY_SHOT].map((s) => [s.id, s]));
 
 export function getShot(id: string): ShotDef {
   return SHOT_BY_ID.get(id) ?? SHOTS[0];

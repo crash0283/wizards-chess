@@ -334,8 +334,13 @@ export function buildWall(
       fillField(sink, rng, weather, variants, {
         u0: left, u1: right, v0: PLINTH_TOP, v1: STRING_TOP,
         faceZ: FACE_Z, depth: FACE_D,
-        courseH: 1.02 * sizeK, blockLen: 2.20 * sizeK,
-        occ: 0.10, relief: 0.075, ruin: spec.ruin,
+        courseH: 0.92 * sizeK, blockLen: 1.95 * sizeK,
+        // Heavy relief and a wide joint, which is the one place in this room that is
+        // allowed either. At forty-six metres a slab is sixty pixels across and the only
+        // thing that survives of it is the shadow down its side; without that the end wall
+        // is a flat grey card, and a flat card is exactly what reads as "the room stops
+        // here". The joints are the far end's entire structure.
+        occ: 0.10, relief: 0.155, ruin: spec.ruin, joint: 0.13,
       }, losses);
       continue;
     }

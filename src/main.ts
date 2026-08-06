@@ -97,7 +97,8 @@ async function boot() {
     game.update(t, dt);
     for (const p of pieces.all()) p.update(t, dt);
     if (req.cam) camera.free(req.cam);
-    else camera.applyShot(req.shot || 'wide-establishing', t);
+    // Interactive play uses the play camera, not a film shot — see PLAY_SHOT for why.
+    else camera.applyShot(req.shot || (req.capturing ? 'wide-establishing' : 'play'), t);
     camera.update(t, dt);
     fitFov();
   };

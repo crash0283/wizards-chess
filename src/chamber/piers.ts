@@ -112,9 +112,13 @@ export function makeNearTone(tag: string, seed: number): Tone {
       + 0.13 * fine(x * 0.55, y * 0.27, z * 0.55));
 
     // The hollow between two shafts of a cluster, and the wide slot between two piers.
-    // Cut harder than anything else in the room: with the fall into dark pushed up out of
-    // frame, this is now where every black pixel in the top third comes from.
-    v *= 1 - 0.92 * fold * fold;
+    // Cut harder, and with a sharper knee, than anything else in the room: with the fall
+    // into dark pushed up out of frame, this is where every black pixel in the top third
+    // now comes from, and the frame's deep-shadow fraction went 0.125 -> 0.042 the moment
+    // these stopped being black. A squared falloff gives a fat bright crown and a soft
+    // shoulder; this gives a narrow crown and a hard turn into the slot, which is both
+    // what a round shaft in a dark room actually does and where the edge energy is.
+    v *= 1 - 0.985 * Math.pow(fold, 1.35);
 
     // grime off the floor; nothing blooms this close to the fires
     v *= 1 - 0.30 * smooth(2.2, 0.0, y);

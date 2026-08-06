@@ -144,6 +144,11 @@ export function createChamber(world: World): Chamber {
   // is stone and not plaster, and per-vertex tone for the staining and the fall into
   // dark. One fetch over the largest surfaces in frame instead of three.
   const grain = makeGrainNormal(hashString('chamber-carved-grain') ^ world.seed, hi ? 256 : 128);
+  // Tiled twice as fine and pushed twice as hard as it was. A 2.3 m tile at twenty-five
+  // metres is over a hundred pixels across and puts nothing at all at the scale the frame
+  // is measured on; the screens came back as bare cylinders with a broad gradient down
+  // them, and the top band's edge energy sat at a third of the film's.
+  grain.repeat.set(2.1, 2.1);
   const carvedStone = new THREE.MeshStandardMaterial({
     // A shade warm in the raw albedo. The room's fill does the cooling; stone that is
     // neutral to start with lands violet once the cold ambient has had it.
@@ -152,7 +157,7 @@ export function createChamber(world: World): Chamber {
     metalness: 0.0,
     vertexColors: true,
     normalMap: grain,
-    normalScale: new THREE.Vector2(0.30, 0.30),
+    normalScale: new THREE.Vector2(0.58, 0.58),
   });
   materials.push(carvedStone);
 

@@ -77,15 +77,19 @@ export const PORTAL_X = (BAY_X0 + BAY_X1) / 2;
 /**
  * Height at which carved stone stops being architecture and becomes darkness.
  *
- * These two numbers are the whole difference between a hall and a lit tunnel, and they
- * are fixed by tracing the establishing frame. The shafts that read as lit stone at the
- * left third are standing at about four metres; the place where the two leaning screens
- * would close over the board and give the room a ceiling is at about seven and a half,
- * and the top of frame is at nine. So the fall starts just above the first and is
- * complete before the last, which keeps the arcade modelled and lets the vault go.
+ * These two numbers are the whole difference between a hall and a lit tunnel. They were
+ * fixed by tracing the establishing frame for where a hall would close over, and they were
+ * both too low by about two metres — 4.2 / 9.6 put the screens out entirely above the
+ * ranks, so the top third of frame had no modelled stone in it whatever and measured
+ * 0.0077 of edge energy against the film's 0.0201. The film's top band is not black: it is
+ * dim, fully modelled columns with black slots between them, and there is more edge in
+ * that than anywhere else in its frame.
+ *
+ * The screens now stay stone up to where the near piers stand in front of them, which is
+ * the point — a near pier is a silhouette and a silhouette needs something behind it.
  */
-const DARK_START = 4.2;
-const DARK_FULL = 9.6;
+const DARK_START = 6.0;
+const DARK_FULL = 13.2;
 
 function smooth(a: number, b: number, x: number): number {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
