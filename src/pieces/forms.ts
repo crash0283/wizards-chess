@@ -751,17 +751,23 @@ function kiteShield(
   p.thinNow = 0;
   // A RAISED RIM standing proud of the face all the way round the outline — a shield's
   // most identifiable feature after its shape, and the reason a shield in the frame has a
-  // bright line around a shadowed field instead of being one flat lozenge.
-  stack(p, prof, [
-    { y: -thick * 0.85, sx: 1.075, sz: 1.075 },
-    { y: thick * 0.60, sx: 1.075, sz: 1.075 },
-    { y: thick * 1.18, sx: 1.015, sz: 1.015 },
-  ]);
+  // bright line around a shadowed field instead of being one flat lozenge. Built as a
+  // genuine ANNULUS — a closed rectangular-section ring, not a bigger plate laid on top,
+  // which would simply bury the field, the boss and the device under itself.
+  {
+    const ry0 = thick * 0.20, ry1 = thick * 1.62;
+    const ro = 1.075, ri = 0.855;
+    const r0 = ringXZ(ry0, scaleProf(prof, ro, ro));
+    const r1 = ringXZ(ry1, scaleProf(prof, ro, ro));
+    const r2 = ringXZ(ry1, scaleProf(prof, ri, ri));
+    const r3 = ringXZ(ry0, scaleProf(prof, ri, ri));
+    loft(p, [r0, r1, r2, r3, r0.map((v) => v.clone())], false, false);
+  }
   // Rivets through the rim, at every corner of the outline.
   for (let i = 0; i < prof.length; i++) {
     const [px, pz] = prof[i];
-    slab(p, V(px * 1.035, thick * 1.10, pz * 1.035),
-      V(hw * 0.055, thick * 0.34, hw * 0.055), new THREE.Quaternion());
+    slab(p, V(px * 0.985, thick * 1.58, pz * 0.985),
+      V(hw * 0.052, thick * 0.40, hw * 0.052), new THREE.Quaternion());
   }
   // Boss with its own rim, and a cross device on the face.
   dome(p, 0, thick * 0.6, up * 0.10, hw * 0.20, hw * 0.20, hw * 0.24, 7, 3);

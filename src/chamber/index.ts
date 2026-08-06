@@ -431,29 +431,20 @@ export function createChamber(world: World): Chamber {
     panels.push({ groups: [sg], nx: 0, nz: -s.sign, d: SIDE_Z - 1.6 });
   }
 
-  // The end wall behind the heap, in the same idiom, so the far end of the room is stone
-  // and not a receding plane of blocks.
+  // The heap that has accumulated behind the far ranks. It stays where it was — hard
+  // against the board's far kerb, which is where the reference has it, with fires
+  // burning in it — even though the wall it used to bank against has gone twenty-three
+  // metres up the room. It is the last thing the eye can resolve looking down the board,
+  // and everything past it is air.
   const fg = new THREE.Group();
-  fg.name = 'chamber-screen-far';
-  const far = buildFarScreen(hi, carvedTone);
-  geometries.push(far.geometry);
-  const farMesh = new THREE.Mesh(far.geometry, carvedStone);
-  farMesh.name = 'chamber-screen-far-shafts';
-  farMesh.receiveShadow = true;
-  farMesh.castShadow = false;
-  fg.add(farMesh);
-  surfaces.push(farMesh);
-
-  // A bank of accumulated debris along the foot of the far screen. In the reference the
-  // far end of the room is a heap with fires burning in it, not a clean line of shafts
-  // meeting a clean floor — and without it the screen reads as a hanging curtain.
+  fg.name = 'chamber-far-heap';
   const farScreeSink = new InstanceSink(CHUNK_VARIANTS);
   buildScree(
     farScreeSink,
     world.rng.fork('chamber-far-scree'),
     screeWeather,
     [{
-      ax: FAR_X - 1.05, az: -14.6, bx: FAR_X - 1.05, bz: 14.6,
+      ax: 12.35, az: -14.6, bx: 12.35, bz: 14.6,
       nx: -1, nz: 0, losses: [], uMin: -14.6, uMax: 14.6,
     }],
     hi,
@@ -463,8 +454,30 @@ export function createChamber(world: World): Chamber {
   });
 
   group.add(fg);
-  panels.push({ groups: [fg], nx: -1, nz: 0, d: HW - 0.9 });
-  screenTris += far.triangles;
+  panels.push({ groups: [fg], nx: -1, nz: 0, d: 11.2 });
+
+  // --- the near-field piers ----------------------------------------------------------------
+  // The one thing the room had none of. Everything above stands BEHIND the ranks; these
+  // stand in front of them, hard outside the kerb, and they are cut by the top and the
+  // bottom of frame at once. See `piers.ts` for why that matters more than any of it.
+  const nearTone = makeNearTone('chamber-near', world.seed);
+  for (const sign of [-1, 1] as const) {
+    const pg = new THREE.Group();
+    pg.name = `chamber-piers-${sign < 0 ? 'north' : 'south'}`;
+    const built = buildNearPiers(sign, hi, nearTone);
+    geometries.push(built.geometry);
+    const pm = new THREE.Mesh(built.geometry, carvedStone);
+    pm.name = `${pg.name}-shafts`;
+    pm.receiveShadow = true;
+    pm.castShadow = false;
+    pg.add(pm);
+    surfaces.push(pm);
+    group.add(pg);
+    screenTris += built.triangles;
+    // `knight-looking-up` sits five centimetres off the south row's axis, so this cull
+    // is not a nicety — without it that shot is inside a pier.
+    panels.push({ groups: [pg], nx: 0, nz: -sign, d: NEAR_Z - 1.0 });
+  }
   void screenTris;
 
   // --- vault ---------------------------------------------------------------------------------
