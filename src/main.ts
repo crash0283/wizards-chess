@@ -77,8 +77,8 @@ async function boot() {
   if (!req.showHud) hud.classList.add('hidden');
 
   // --- the frame ---------------------------------------------------------------------
-  const frame = (t: number, dt: number) => {
-    runUpdaters(world, t, dt);
+  const frame = (t: number, dt: number, realT: number = t) => {
+    runUpdaters(world, t, dt, realT);
     game.update(t, dt);
     for (const p of pieces.all()) p.update(t, dt);
     if (req.cam) camera.free(req.cam);
@@ -100,12 +100,17 @@ async function boot() {
   } else {
     let last = 0;
     let elapsed = 0;
+    let startMs = 0;
     const loop = (ms: number) => {
       const now = ms / 1000;
+      // dt is clamped so one long frame cannot explode the physics; `elapsed` therefore
+      // runs behind the wall clock on a slow renderer. Anything a person is waiting on
+      // must use realT instead — see World.realTime.
       const dt = last === 0 ? 1 / 60 : Math.min(0.05, now - last);
       last = now;
+      if (startMs === 0) startMs = ms;
       elapsed += dt;
-      frame(elapsed, dt);
+      frame(elapsed, dt, (ms - startMs) / 1000);
       lighting.render();
       const s = game.state();
       hud.textContent =

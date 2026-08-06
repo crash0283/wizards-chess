@@ -21,6 +21,18 @@ export interface World {
   time: number;
   /** Seconds since the previous update. Fixed under capture. */
   dt: number;
+  /**
+   * Real elapsed seconds — UI timing only, never animation.
+   *
+   * `time` accumulates a CLAMPED dt so a long frame cannot explode the physics. On a slow
+   * renderer that makes scene time run far behind the wall clock, which is fine for motion
+   * but wrong for anything a person is waiting on: an engine-reply pause specified as 1.9 s
+   * of scene time became ~40 s of real time under software GL.
+   *
+   * Under capture this is exactly equal to `time`, so determinism is unaffected. Use it for
+   * "how long has the human been waiting", and `time` for everything that moves.
+   */
+  realTime: number;
   quality: Quality;
   /** Set true when running under tools/capture.mjs. Disables anything non-deterministic. */
   capturing: boolean;
@@ -50,6 +62,7 @@ export function createWorld(opts: {
     seed: opts.seed,
     time: 0,
     dt: 0,
+    realTime: 0,
     quality: opts.quality,
     capturing: opts.capturing,
     onUpdate(fn) {
@@ -66,15 +79,20 @@ export function createWorld(opts: {
     },
   };
 
-  (world as any).__runUpdaters = (t: number, dt: number) => {
+  (world as any).__runUpdaters = (t: number, dt: number, realT: number) => {
     world.time = t;
     world.dt = dt;
+    world.realTime = realT;
     for (const fn of updaters) fn(t, dt);
   };
 
   return world;
 }
 
-export function runUpdaters(world: World, t: number, dt: number) {
-  (world as any).__runUpdaters(t, dt);
+/**
+ * `realT` defaults to `t`, which is what capture mode wants: there, scene time IS real
+ * time and the two must not diverge or determinism breaks.
+ */
+export function runUpdaters(world: World, t: number, dt: number, realT: number = t) {
+  (world as any).__runUpdaters(t, dt, realT);
 }
