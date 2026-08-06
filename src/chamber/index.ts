@@ -156,6 +156,30 @@ export function createChamber(world: World): Chamber {
   });
   materials.push(carvedStone);
 
+  // The near piers get their own stone, and it is not a stylistic choice.
+  //
+  // Measured: doubling their per-vertex tone moved the left third of the frame by 0.004
+  // on 0.05. Almost none of what is on screen there is the surface — it is the veil and
+  // the print black under it — because nothing in the rig lights that corner of the room:
+  // every source is aimed either at the board or at the long walls at |z| = 19, and these
+  // stand at 12.7 with their modelled faces leaning up into empty air. Light is the
+  // lighting piece's to place and I am not going to reach into it.
+  //
+  // What IS mine is how much of the room these surfaces return. Twice the albedo and
+  // four times the environment response: the environment gradient carries its energy
+  // overhead, and a pier that leans out over the board is the one thing in this room
+  // whose modelled face is turned up into it. That is the whole reason these read at all.
+  const nearStone = new THREE.MeshStandardMaterial({
+    color: 0xa2968a,
+    roughness: 0.86,
+    metalness: 0.0,
+    vertexColors: true,
+    normalMap: grain,
+    normalScale: new THREE.Vector2(0.34, 0.34),
+    envMapIntensity: 4.0,
+  });
+  materials.push(nearStone);
+
   // --- unit geometries -------------------------------------------------------------------
   const blockRng = world.rng.fork('chamber-blocks');
   const blockGeos: THREE.BufferGeometry[] = [];
@@ -223,7 +247,7 @@ export function createChamber(world: World): Chamber {
       // the end of a room — a band of small arches, a lit recess, a capital catching the
       // wash — is a statement about where the room stops. This wall may state nothing.
       id: 'east', length: HD * 2, height: H + 8, pierAt: farPiers, pierWidth: 1.9,
-      blindArcade: false, ruin: 0.06, dim: 0.21,
+      blindArcade: false, plain: true, ruin: 0.06, dim: 0.30,
       place: (g) => { g.position.set(EAST_X, 0, 0); g.rotation.y = -Math.PI / 2; },
       panel: { nx: -1, nz: 0, d: EAST_X - 0.9 },
       foot: (uMin, uMax, losses) => ({
@@ -470,7 +494,7 @@ export function createChamber(world: World): Chamber {
     pg.name = `chamber-piers-${sign < 0 ? 'north' : 'south'}`;
     const built = buildNearPiers(sign, hi, nearTone);
     geometries.push(built.geometry);
-    const pm = new THREE.Mesh(built.geometry, carvedStone);
+    const pm = new THREE.Mesh(built.geometry, nearStone);
     pm.name = `${pg.name}-shafts`;
     pm.receiveShadow = true;
     pm.castShadow = false;

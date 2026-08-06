@@ -516,14 +516,14 @@ export function createStone(world: World, side: Side): Stone {
     uRustTint: {
       value:
         side === 'white'
-          ? new THREE.Vector3(1.05, 0.88, 0.71)
-          : new THREE.Vector3(1.08, 0.98, 0.86),
+          ? new THREE.Vector3(1.00, 0.83, 0.63)
+          : new THREE.Vector3(1.06, 0.96, 0.83),
     },
     uRustDeep: {
       value:
         side === 'white'
-          ? new THREE.Vector3(0.67, 0.59, 0.52)
-          : new THREE.Vector3(0.72, 0.68, 0.62),
+          ? new THREE.Vector3(0.57, 0.51, 0.46)
+          : new THREE.Vector3(0.66, 0.62, 0.57),
     },
     // Claw-chisel tooling: 1/pitch (5.4 cm strokes), albedo contrast, normal amplitude.
     uTool: { value: new THREE.Vector3(1 / 0.054, side === 'white' ? 0.085 : 0.065, side === 'white' ? 0.20 : 0.16) },

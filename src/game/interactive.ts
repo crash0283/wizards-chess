@@ -46,11 +46,21 @@ const PLAYER: Side = 'white';
 /** Node budget for a reply. Off-thread, so this is latency the player never feels. */
 const REPLY_NODES = 60_000;
 
-/** Real seconds the "thinking" state is held at minimum, so it is observably true. */
-const MIN_THINK = 0.5;
+/**
+ * Milliseconds the "thinking" state is held at minimum.
+ *
+ * A worker answers a 60k-node search in a fraction of a second. Slamming the reply down
+ * that fast reads as a twitch rather than a decision, and it gives the HUD's "thinking…"
+ * no time to be seen — which was one of the specific complaints. This is a timer, not a
+ * frame count, so it is the same half second whatever the renderer is doing.
+ */
+const MIN_THINK_MS = 550;
 
-/** Real seconds we will wait for the player's own move to finish animating first. */
-const REPLY_PATIENCE = 3.0;
+/** How often, in ms, we re-check whether the player's move has finished animating. */
+const SETTLE_POLL_MS = 250;
+
+/** Most times we will defer the reply waiting for that — about three seconds' worth. */
+const MAX_SETTLE_WAITS = 12;
 
 /** Seconds of grinding stone for a move of `dist` squares. Same numbers as the script. */
 const WALK_OF = (dist: number) => Math.max(WALK_MIN, dist * WALK_PER_SQUARE);
@@ -121,10 +131,10 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   /** A promotion the player has committed to except for the piece. */
   let promoPending: { from: Mark; to: Mark } | null = null;
 
-  /** Real time at which the engine should begin thinking; -1 when it should not. */
-  let replyDueAt = -1;
+  /** A finished thought waiting for its moment, and the timer that will take it. */
   let thoughtHeld: Thought | null = null;
-  let thinkStartedAt = 0;
+  let thoughtTimer: ReturnType<typeof setTimeout> | null = null;
+  let settleWaits = 0;
   /** Position the in-flight search was started from. A reply for any other is discarded. */
   let thinkFen = '';
   /** world.time until which something is visibly moving. Drives the shadow throttle. */
@@ -351,30 +361,43 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
 
   // --- the engine's turn ------------------------------------------------------------------
 
+  /**
+   * Hand the position to the engine. Called straight from the click that ended the
+   * player's move — NOT from the frame loop, so the search starts immediately however
+   * long the renderer is taking over the current frame.
+   */
   function scheduleReply() {
     if (state.result !== 'playing') return;
     if (engine.side === PLAYER) return;
-    replyDueAt = world.realTime;
-  }
-
-  function beginThinking(realT: number) {
-    replyDueAt = -1;
-    thoughtHeld = null;
-    thinkStartedAt = realT;
+    if (think.busy()) return;
     thinkFen = engine.fen;
+    thoughtHeld = null;
+    settleWaits = 0;
     state.thinking = true;
-    think.start(thinkFen, REPLY_NODES, realT);
+    think.start(thinkFen, REPLY_NODES, world.realTime, onThought);
   }
 
-  function tryPlayThought(realT: number) {
+  function onThought(th: Thought) {
+    thoughtHeld = th;
+    settleWaits = 0;
+    arm(MIN_THINK_MS);
+  }
+
+  function arm(ms: number) {
+    if (thoughtTimer !== null) clearTimeout(thoughtTimer);
+    thoughtTimer = setTimeout(() => { thoughtTimer = null; playThought(); }, ms);
+  }
+
+  function playThought() {
     const th = thoughtHeld;
     if (!th) return;
-    // Hold the reply until the player's own move has finished grinding across the board,
-    // but never longer than REPLY_PATIENCE of a person's actual time.
-    const settled = pending.length === 0;
-    if (!settled && realT - thinkStartedAt < REPLY_PATIENCE) return;
-    if (realT - thinkStartedAt < MIN_THINK) return;
-
+    // Prefer to let the player's own move finish grinding across the board first, but
+    // never at the cost of the reply: after MAX_SETTLE_WAITS the two simply overlap.
+    if (pending.length > 0 && settleWaits < MAX_SETTLE_WAITS) {
+      settleWaits++;
+      arm(SETTLE_POLL_MS);
+      return;
+    }
     thoughtHeld = null;
     state.thinking = false;
     // The board may have been replaced under the search (setPosition). A move found for
@@ -385,6 +408,14 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     const m = engine.moves().find((c) => c.uci === th.uci);
     if (!m) { model.syncState(); refreshMarks(); return; }
     applyMove(m);
+  }
+
+  function abandonThought() {
+    if (thoughtTimer !== null) { clearTimeout(thoughtTimer); thoughtTimer = null; }
+    thoughtHeld = null;
+    thinkFen = '';
+    settleWaits = 0;
+    state.thinking = false;
   }
 
   // --- interactive render budget -------------------------------------------------------
@@ -466,14 +497,13 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
         }
       }
 
+      // The worker's watchdog is the only thing the frame loop still owes the engine.
       think.tick(realT);
-      const ready = think.take();
-      if (ready) thoughtHeld = ready;
-
-      if (replyDueAt >= 0 && realT >= replyDueAt && !think.busy() && state.result === 'playing') {
-        beginThinking(realT);
+      // Backstop: if it is the engine's move and nothing is in flight (a staged position,
+      // or a search that was abandoned), get one going.
+      if (state.result === 'playing' && engine.side !== PLAYER && !think.busy() && !thoughtHeld) {
+        scheduleReply();
       }
-      tryPlayThought(realT);
 
       aff.update(t);
     },
@@ -482,14 +512,13 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       pending.length = 0;
       promoPending = null;
       aff.hidePromotion();
-      thoughtHeld = null;
-      thinkFen = '';
-      state.thinking = false;
+      abandonThought();
       refreshMarks();
       scheduleReply();
     },
 
     dispose() {
+      abandonThought();
       el.removeEventListener('pointerdown', onPointerDown);
       think.dispose();
       aff.dispose();
