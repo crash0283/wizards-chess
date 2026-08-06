@@ -157,14 +157,26 @@ export const SHOTS: ShotDef[] = [
 export const PLAY_SHOT: ShotDef = {
   id: 'play',
   label: 'Play view',
-  eye: [0, 15.0, -21.0],
-  target: [0, 0.6, 0.5],
-  fov: 30,
-  focus: 26,
+  // Near-top-down: 26 m up, 9 m behind White, a declination of about 71 degrees. The
+  // earlier 35-degree version was more cinematic but stacked the ranks on top of each
+  // other, so distant pieces overlapped and were hard to pick. Steeper separates every
+  // square cleanly and keeps just enough obliquity that the pieces still read as carved
+  // figures with height rather than as flat tokens.
+  // Steep enough to clear the chamber's near-field piers. Those piers stand hard against
+  // the board's edges and run off the top AND bottom of the cinematic frame by design — a
+  // critic demanded them, and they are right for wide-establishing. At a 71-degree
+  // declination the play camera looked straight THROUGH them and they became black bars
+  // over White's whole back rank. At 80 degrees the camera clears them.
+  eye: [0, 30.0, -5.2],
+  target: [0, 0.4, -0.6],
+  fov: 38,
+  focus: 30,
+  // f/11 keeps the circle of confusion under a pixel across the whole board. Playing is
+  // not the place for shallow focus — the cinematic shots carry that.
   fstop: 11,
   t: 0,
   judges: [],
-  proves: 'You can see which square is which, and what you tap is sharp.',
+  proves: 'Every square separates, and what you click is sharp.',
 };
 
 export const SHOT_BY_ID = new Map([...SHOTS, PLAY_SHOT].map((s) => [s.id, s]));
