@@ -66,6 +66,19 @@ export interface WallSpec {
   opening?: { centre: number; halfWidthAt(v: number): number };
   /** Fraction of blocks that have fallen out. Scaled by the decay field. */
   ruin: number;
+  /**
+   * Strip the wall down to plinth, piers and coursed field: no arched recess in the bays,
+   * no capitals, no string course.
+   *
+   * This exists for exactly one wall, the end wall, and for one reason. An arched recess
+   * catches the wash on its head and goes bright, a capital catches it on its abacus and
+   * goes brighter, and a string course rules a hard horizontal across the whole width —
+   * so a wall with all three announces, from forty-six metres, precisely where it is and
+   * how big the room is. The reference's end wall has none of it: large irregular slabs,
+   * flat, dark, with a heap in front of it, and no feature anywhere on it that the eye
+   * can measure. Every other wall in this room keeps its orders.
+   */
+  plain?: boolean;
 }
 
 export interface WallParts {
@@ -317,6 +330,16 @@ export function buildWall(
       continue;
     }
 
+    if (spec.plain) {
+      fillField(sink, rng, weather, variants, {
+        u0: left, u1: right, v0: PLINTH_TOP, v1: STRING_TOP,
+        faceZ: FACE_Z, depth: FACE_D,
+        courseH: 1.02 * sizeK, blockLen: 2.20 * sizeK,
+        occ: 0.10, relief: 0.075, ruin: spec.ruin,
+      }, losses);
+      continue;
+    }
+
     const clear = right - left;
     const open = clear * 0.84;
     const r = open / 2;
@@ -366,7 +389,7 @@ export function buildWall(
   }
 
   // --- blind arcade band + the wall behind it ---------------------------------------
-  for (const bay of bays) {
+  for (const bay of spec.plain ? [] : bays) {
     if (bay.index === spec.portalBay) continue;
     fillField(sink, rng, weather, variants, {
       u0: bay.u0, u1: bay.u1, v0: BAND0, v1: BAND1,
@@ -398,8 +421,11 @@ export function buildWall(
     // shaft, laid in courses of one or two stones
     let v = PLINTH_TOP;
     let c = 0;
-    while (v < BAND0 - 0.05) {
-      const ch = Math.min(0.78 * sizeK * rng.float(0.86, 1.16), BAND0 - v);
+    // A plain wall has no capital, so its piers run straight on up to where the ribs
+    // take over rather than stopping short and leaving a notch.
+    const shaftTop = spec.plain ? STRING_TOP : BAND0;
+    while (v < shaftTop - 0.05) {
+      const ch = Math.min(0.78 * sizeK * rng.float(0.86, 1.16), shaftTop - v);
       if (ch < 0.2) break;
       const two = rng.bool(0.68);
       const dz = rng.float(-0.04, 0.05);
@@ -419,7 +445,7 @@ export function buildWall(
       c++;
     }
     // capital: three corbelled courses
-    for (let k = 0; k < CAPITAL.length; k++) {
+    for (let k = 0; spec.plain !== true && k < CAPITAL.length; k++) {
       const cap = CAPITAL[k];
       weather.tone(px, (cap.v0 + cap.v1) * 0.5, 0.0, col);
       sink.block(940 + i * 5 + k, px, (cap.v0 + cap.v1) * 0.5, cap.proj,
@@ -447,7 +473,7 @@ export function buildWall(
         const bay = bays[spec.portalBay];
         return [[uMin, bay.u0 - 0.6], [bay.u1 + 0.6, uMax]] as [number, number][];
       })();
-  for (const [s0, s1] of stringSpans) {
+  for (const [s0, s1] of spec.plain ? [] : stringSpans) {
     if (s1 - s0 < 0.5) continue;
     for (let i = 0; i < STRING.length; i++) {
       const st = STRING[i];
