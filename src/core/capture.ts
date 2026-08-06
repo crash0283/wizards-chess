@@ -46,15 +46,20 @@ export interface CaptureRequest {
 function interactiveQuality(): 'low' | 'high' {
   if (typeof navigator === 'undefined' || typeof matchMedia === 'undefined') return 'high';
 
-  // A coarse pointer with no hover is a touchscreen — phone or tablet.
-  const touchPrimary = matchMedia('(pointer: coarse)').matches && !matchMedia('(hover: hover)').matches;
-  // Physical screen size in CSS pixels, ignoring how the window happens to be sized.
-  const smallScreen = Math.min(screen.width, screen.height) <= 820;
-  // Both are advisory and absent on Safari, so they only ever push toward 'low'.
-  const lowCores = (navigator.hardwareConcurrency ?? 8) <= 4;
-  const lowMemory = ((navigator as { deviceMemory?: number }).deviceMemory ?? 8) <= 4;
+  // A coarse pointer AND no hover is a touchscreen — phone or tablet. This is the only
+  // reliable signal, and on its own it is enough.
+  const touchPrimary =
+    matchMedia('(pointer: coarse)').matches && !matchMedia('(hover: hover)').matches;
 
-  return touchPrimary || smallScreen || lowCores || lowMemory ? 'low' : 'high';
+  // Genuinely memory-starved hardware, whatever its input. Advisory and absent on Safari,
+  // where the ?? 8 means it can never push a device DOWN a tier by being unreported.
+  const veryLowMemory = ((navigator as { deviceMemory?: number }).deviceMemory ?? 8) <= 2;
+
+  // Deliberately NOT used as signals: screen size and core count. An earlier version OR-ed
+  // in `min(screen) <= 820` and `hardwareConcurrency <= 4`, which forced the phone tier on
+  // a 1366x768 laptop and on any four-core desktop — both of which have a real GPU and
+  // should get the full scene. Neither is a proxy for graphics capability.
+  return touchPrimary || veryLowMemory ? 'low' : 'high';
 }
 
 export function readCaptureRequest(): CaptureRequest {
