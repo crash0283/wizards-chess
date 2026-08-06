@@ -106,6 +106,22 @@ export function createGame(world: World, deps: GameDeps): Game {
   // --- the violence ----------------------------------------------------------------------
 
   /**
+   * Interactive-only dials on the consequences of a blade landing.
+   *
+   * Both of these are durations expressed in SCENE seconds, and scene time is clamped —
+   * on a renderer taking a second a frame it runs ~20x behind the wall clock. A flare
+   * specified to decay over 0.55 s therefore sat on the room for the best part of a
+   * minute, and by the tenth capture the middle of the board was a white bloom you could
+   * not read pieces through. `interactive.ts` measures how far behind scene time actually
+   * is and scales these so the flash lasts about the second and a half it was meant to.
+   *
+   * They are 1 here and NOTHING but interactive.ts ever writes them, so under capture the
+   * arguments handed to lighting.flare() and camera.shake() are bit-for-bit what they were
+   * before this existed.
+   */
+  const tuning = { flareDecay: 1, shake: 1 };
+
+  /**
    * Destroy the piece standing on a square: shatter it, flash the room, shake the camera
    * and scar the marble. Everything downstream of a blade landing goes through here so
    * scripted and interactive play produce identical consequences.
@@ -125,11 +141,25 @@ export function createGame(world: World, deps: GameDeps): Game {
     impact.normalize();
 
     deps.destruction.shatter(victim, impact, force);
-    deps.lighting.flare(new THREE.Vector3(x, victim.height * 0.45, z), 1.15 * force, 0.55);
-    deps.camera.shake(0.85 * force);
+    deps.lighting.flare(
+      new THREE.Vector3(x, victim.height * 0.45, z), 1.15 * force, 0.55 * tuning.flareDecay);
+    deps.camera.shake(0.85 * force * tuning.shake);
     deps.board.markImpact(x, z, 2.4, 1.0);
 
-    bySquare.delete(key(file, rank));
+    /**
+     * Clear the square ONLY if the victim is still what is standing on it.
+     *
+     * The scripted path destroys and then relocates, so the victim always is, and this is
+     * the plain delete it has always been. Interactive play is the other way round: the
+     * board model is settled the instant the click lands and the blade falls half a second
+     * of animation later, by which time the ATTACKER is standing here. An unconditional
+     * delete therefore erased the piece that had just won the square — it stayed on screen
+     * and stayed on the engine's board, but the map no longer knew it was there, so
+     * clicking it did nothing and it could never move again. That is a whole capturing
+     * piece lost per capture, and it is why a game that had gone through a recapture on c3
+     * could not then play c3-c4.
+     */
+    if (bySquare.get(key(file, rank)) === victim) bySquare.delete(key(file, rank));
   }
 
   /** The scripted path's form: the victim is whoever is standing there right now. */
@@ -349,7 +379,16 @@ export function createGame(world: World, deps: GameDeps): Game {
   const model: BoardModel = {
     engine,
     state,
+    tuning,
     pieceAt,
+    occupied() {
+      const out: Array<{ file: number; rank: number; piece: PieceInstance }> = [];
+      for (const [k, piece] of bySquare) {
+        const comma = k.indexOf(',');
+        out.push({ file: +k.slice(0, comma), rank: +k.slice(comma + 1), piece });
+      }
+      return out;
+    },
     relocate,
     forget: (file, rank) => { bySquare.delete(key(file, rank)); },
     destroyPiece,
