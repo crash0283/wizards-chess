@@ -52,6 +52,13 @@ float gRough;
 float gReflMask;
 float gReflJitter;
 vec3 gNormalPert;
+/**
+ * Cavity term, multiplied into the FINAL colour after the reflection has been added.
+ * 1.0 is a surface out in the open. Anything that lives at the bottom of a cut — the
+ * mortar bed down inside a joint above all — sets this below 1 and can then only lose
+ * light, whatever the key and the mirror are doing to it.
+ */
+float gCavity;
 `;
 
 const FRAG_ROUGH = /* glsl */ `
@@ -68,6 +75,7 @@ const FRAG_OUT = /* glsl */ `
     vec3 nWorld = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
     gl_FragColor.rgb += boardReflection(vReflUV, nWorld, gRough, gReflMask, gReflJitter)
                       * fres * uReflStrength;
+    gl_FragColor.rgb *= gCavity;
   }
 `;
 
@@ -143,27 +151,63 @@ uniform vec3 uAggregate;
 uniform vec3 uGrime;
 `;
 
+/**
+ * THE JOINT'S POLARITY LIVES HERE, not in the marble shader.
+ *
+ * The critique was that every square joint on the board was a blown white glowing
+ * hairline, so the field read as a wireframe grid laid over stone. Painting the joint
+ * band on the slab tops darker did almost nothing, and a diagnostic render — joint band
+ * flat red, chamfer flat blue, bed flat green — said why in one frame: the grid was
+ * SOLID GREEN. What the camera sees between two slabs is not the mortar run worked into
+ * their edges, which is a fraction of a pixel wide at that distance. It is this plane,
+ * the bed, straight down the 24 mm physical gap between them.
+ *
+ * And it was a pale lime mortar (0x716d66) with a paler aggregate (0x9a968c) in it,
+ * lifted further by a bright dust wash, lit as if it were out in the open, and with the
+ * room's environment specular at full strength on it. It came back at L≈220 against a
+ * cream square at L204 and a navy at L23 — the brightest thing on the board — and bright
+ * enough to be over the bloom threshold, which is where the *glow* around every joint in
+ * the render came from. Nothing else on the board was doing that.
+ *
+ * A bed is the bottom of a slot 24 mm wide and 9.5 mm deep. It sees a sliver of sky and
+ * two walls of stone; it is the one part of a floor that never gets swept, never gets
+ * polished and never gets direct light. So: a dark, dirty mortar to begin with, the
+ * aggregate only a little lighter than the matrix rather than three times it, the dust
+ * wash cut right back, the environment lobe cut back on the material, and finally a hard
+ * cavity term on the FINAL colour so that no amount of key can push it above the stone
+ * either side of it. The grain stays — it is what keeps the joint a granular run rather
+ * than a drawn line — it just no longer arrives as contrast in the brightest direction.
+ */
 const BED_FRAG = /* glsl */ `
   vec2 w = vWPos.xz;
   vec4 wear = boardWear(w);
 
-  // Lime mortar with a coarse aggregate: pale chips of stone in a darker, dirtier matrix.
+  // Dirty lime mortar with a coarse aggregate: chips of stone a little lighter than the
+  // matrix they are set in. The spread between uMortar and uAggregate is now small on
+  // purpose — a wide one reads as glitter at this scale, and glitter down a hairline is
+  // exactly the stippled high-band energy the reference does not have.
   float grain = bNoise(w * 46.0);
   float chips = smoothstep(0.62, 0.86, bNoise(w * 88.0 + 13.0));
   float dirt = bFbm(w * 6.0, 3);
 
-  vec3 albedo = mix(uMortar, uGrime, dirt * 0.75);
-  albedo = mix(albedo, uAggregate, chips * 0.8);
-  albedo *= 0.80 + 0.34 * grain;
+  vec3 albedo = mix(uMortar, uGrime, dirt * 0.80);
+  albedo = mix(albedo, uAggregate, chips * 0.7);
+  albedo *= 0.84 + 0.26 * grain;
   // Grit and dust drift into the joints and stay there — this is the deepest, dirtiest
-  // part of the floor and it should read that way.
-  float dust = clamp(wear.x * 1.5 + 0.18, 0.0, 1.0);
-  albedo = mix(albedo, uDust * 0.85, dust * 0.55);
+  // part of the floor and it should read that way. Which means the dust down here is
+  // trodden-in dirt, not the pale powder that lies on top of the polish.
+  float dust = clamp(wear.x * 1.4, 0.0, 1.0);
+  albedo = mix(albedo, uDust * 0.30, dust * 0.40);
 
   diffuseColor.rgb *= albedo;
-  gRough = clamp(0.86 + 0.10 * grain - chips * 0.12, 0.3, 1.0);
+  gRough = clamp(0.90 + 0.08 * grain - chips * 0.08, 0.3, 1.0);
   gReflMask = 0.0;
   gReflJitter = 0.0;
+  // The bottom of a 24 mm slot between two 9.5 mm walls of stone subtends very little
+  // sky. This is the term that guarantees the joint is darker than the marble on either
+  // side of it at every distance from the near kerb to the back rank, because it is
+  // applied last and it can only subtract.
+  gCavity = 0.42;
 
   const float ee = 0.008;
   float h0 = bNoise(w * 46.0) + 0.5 * bNoise(w * 130.0);
@@ -247,7 +291,12 @@ const BORDER_FRAG = /* glsl */ `
   float edgeIn = bRule(t, uBandT0, 0.016, aaT);
   float edgeOut = bRule(t, uBandT1, 0.016, aaT);
   float rules = clamp(edgeIn + edgeOut, 0.0, 1.0);
-  albedo = mix(albedo, uTessPale * 1.06, rules * 0.55);
+  // Worn cut edges, not chrome trim. At 0.55 towards a near-white tessera colour these
+  // two rules were rendering as a pair of bright rails either side of the band — the same
+  // wireframe tell the field's joints had, and directly beside them. In the reference the
+  // arrises are only just legible: the band reads as one dark strip carrying a row of
+  // fine dentils, and its edges are where the strip stops, not lines in their own right.
+  albedo = mix(albedo, uTessPale * 0.86, rules * 0.28);
   albedo = mix(albedo, uLine, bRule(t, uBandT0 - 0.055, 0.012, aaT) * 0.7);
   albedo = mix(albedo, uLine, bRule(t, uBandT1 + 0.055, 0.012, aaT) * 0.7);
   float inlay = clamp(cham * inBand + rules, 0.0, 1.0);
@@ -267,6 +316,9 @@ const BORDER_FRAG = /* glsl */ `
   albedo = mix(albedo, uDust, dust * 0.85);
 
   diffuseColor.rgb *= albedo;
+  // The band is sunk 30 mm between two cut arrises, so it does sit in its own shade —
+  // but it is an open channel, not a slot, and the kerb flames stand right over it.
+  gCavity = 0.86;
   gRough = clamp(0.40 + slope * 0.18 + lost * 0.40
                  + wear.z * 0.26 + dust * 0.55 + (grain - 0.5) * 0.14, 0.08, 1.0);
   gReflMask = clamp((1.0 - dust * 1.4) * (1.0 - lost) * (0.40 + 0.34 * (1.0 - inlay)), 0.0, 1.0);
@@ -396,6 +448,7 @@ const KERB_FRAG = /* glsl */ `
   albedo = mix(albedo, uDust, dust * 0.8);
 
   diffuseColor.rgb *= albedo;
+  gCavity = 1.0;
   gRough = clamp(0.78 + 0.12 * grain + joint * 0.12 + dust * 0.15 + pit * 0.10 - scorch * 0.06
                  + sand * 0.14 + spall * 0.10 + tooling * 0.08, 0.3, 1.0);
   gReflMask = 0.0;
@@ -465,14 +518,21 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
     BED_HEAD,
     BED_FRAG,
     {
-      uMortar: { value: c(0x716d66) },
-      uAggregate: { value: c(0x9a968c) },
-      uGrime: { value: c(0x322f2a) },
+      // Chosen from the rendered pixel back, not from what a mortar looks like in
+      // daylight. See BED_FRAG: this plane is what the camera actually sees down every
+      // joint on the board, so its value IS the joint's value.
+      uMortar: { value: c(0x2e2b26) },
+      uAggregate: { value: c(0x413d35) },
+      uGrime: { value: c(0x141310) },
     },
     shared,
     0,
     false,
   );
+  // The room's environment lobe is added on top of the albedo, so on a near-black mortar
+  // it is most of what you see. Down a 24 mm slot there is almost no environment to
+  // gather; leaving this at the ring's 0.9 put a grey floor back under the joint.
+  bedMat.envMapIntensity = 0.12;
   // Stops just past the field: the border band and the kerb cover everything beyond it,
   // so the bed never pokes out over the chamber floor.
   const bedGeo = new THREE.PlaneGeometry((R.filletIn + 0.12) * 2, (R.filletIn + 0.12) * 2, 24, 24);
@@ -517,17 +577,25 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
       // strip was landing at 20/255 while the marble beside it sat at 110 — the marble
       // is reflection-dominated at this grazing angle and the strip was not, so a dark
       // bed put the frame's finest detail below the point where anything is legible.
-      uField: { value: c(0x7c7b74) },
-      uTessDark: { value: c(0x44464d) },
-      uTessPale: { value: c(0xe4dfd0) },
-      uTessMean: { value: c(0x8d8b81) },
-      uLine: { value: c(0x2b2e34) },
-      uGrime: { value: c(0x4d4a41) },
-      // One lozenge per cell, its pitch a whole number of divisions of a side so the
-      // chain closes cleanly at every mitre. The cell is set to the width of the sunk
-      // floor, which is what puts the lozenges on point rather than stretching them.
+      uField: { value: c(0x605e57) },
+      uTessDark: { value: c(0x2d2f34) },
+      uTessPale: { value: c(0xb4ad9d) },
+      uTessMean: { value: c(0x6c6a62) },
+      uLine: { value: c(0x202227) },
+      uGrime: { value: c(0x3a3831) },
+      // One element per cell, its pitch a whole number of divisions of a side so the
+      // chain closes cleanly at every mitre.
+      //
+      // The pitch was the width of the sunk floor, 34 cm, which put 56 elements down a
+      // side. Measured off the near edge of `wide-establishing` — where the board's front
+      // rank spans about 900 px for 18.8 m — the film's run repeats every 4 to 5 px, i.e.
+      // roughly every 9 cm: three to four times finer than this was, which is the
+      // difference between "a row of fine dark dentils" and a row of big lozenges. Set to
+      // half the sunk floor's width, so the elements are twice as many and read as teeth
+      // across the band rather than as diamonds sitting in it, and still coarse enough
+      // that `tf` is not fading the whole chain out to its mean by the middle distance.
       uCell: {
-        value: (2 * R.bandIn) / Math.round((2 * R.bandIn) / (R.bandOut - R.bandIn)),
+        value: (2 * R.bandIn) / Math.round((2 * R.bandIn) / ((R.bandOut - R.bandIn) * 0.5)),
       },
       uBandHalf: { value: bandHalf },
       uBandT0: { value: bandT0 },

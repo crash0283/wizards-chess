@@ -155,29 +155,42 @@ vec4 bMarbleFigure(vec2 p, float w, float px, float hairW){
 }
 
 /**
- * The joint between two slabs: a narrow run of pale grit and mortar, granular, with the
- * hairline where the two stones actually meet running down its centre.
+ * The joint between two slabs: a RECESSED GROOVE, and the darkest thing on the board.
  *
- * It is emphatically NOT a run of alternating tesserae. The previous build drew a
- * two-row inlaid chequer along every one of the 112 joints in the field, which from the
- * judging camera resolves to a dashed line — a marching-ants marquee round every square,
- * flat, with no relief, and nothing like the film, where the inlaid work is ONE carved
- * band between the field and the kerb and the internal joints are simply joints.
+ * POLARITY — the whole point of this function. The previous build returned a *pale* grit
+ * whose caller mixed it towards a mortar lighter than the light marble's own ground, gave
+ * it no cavity term and left the mirror and the microfacet lobe running across it. Every
+ * one of the 112 internal joints therefore came back as a blown white hairline and the
+ * field read as a wireframe grid laid over stone. There is no joint anywhere in the
+ * reference that is brighter than the light square beside it: at 4x on \`wide-establishing\`
+ * the run between two slabs measures L≈95 against a cream square's L≈140, and it is a
+ * granular *shadow*, not a rule of light. It is a cut recess — 24 mm open, 9.5 mm deep —
+ * and everything down inside it is in its own shade.
  *
- *   t   0 at the slab's outer arris, 1 at the inner edge of the joint band
+ * So the grit here is deliberately LOW-CONTRAST. It says which parts of the mortar are
+ * coarse, not which parts are bright; the value comes from the caller's dark mortar and
+ * from the cavity term. Its old ±1.75 swing was also most of the glitter along the joint:
+ * a full-range noise at 26–190 cycles/metre on a strip a pixel or two wide is the
+ * definition of stippling, and stippling is what puts a render's edge energy in the wrong
+ * band. Flat and coherent beats spiky.
+ *
+ *   t   0 at the slab's outer arris (the deepest point of the groove), 1 at the inner
+ *       edge of the mortar run
  *   w   world position, for the grain
  *   px  world size of a pixel
  *
- * Returns  x = pale grit, y = the dark meeting line, z = relief height (-1..1).
+ * Returns  x = grit coarseness, y = the shadowed seam where the two stones meet,
+ *          z = relief height (-1..1), mostly the surface turning down into the seam.
  */
 vec3 bJoint(float t, vec2 w, float px){
   float g1 = bNoise(w * 26.0);
   float g2 = bNoise(w * 74.0) * bFade(0.014, px) + 0.5 * (1.0 - bFade(0.014, px));
   float g3 = bNoise(w * 190.0) * bFade(0.0055, px) + 0.5 * (1.0 - bFade(0.0055, px));
-  float grit = clamp(0.38 + 1.75 * (g1 - 0.46) + 1.00 * (g2 - 0.5) + 0.6 * (g3 - 0.5), 0.0, 1.0);
-  // The stones meet at t = 0. Grime has run into that line for five hundred years.
-  float seam = 1.0 - smoothstep(0.0, 0.34, t);
-  return vec3(grit, seam, (grit - 0.5) * 2.6 * bFade(0.014, px) - seam * 0.9);
+  float grit = clamp(0.44 + 1.00 * (g1 - 0.46) + 0.46 * (g2 - 0.5) + 0.24 * (g3 - 0.5), 0.0, 1.0);
+  // The stones meet at t = 0 and that is the bottom of the cut. Grime has run into it for
+  // five hundred years and no light reaches it.
+  float seam = 1.0 - smoothstep(0.0, 0.46, t);
+  return vec3(grit, seam, (grit - 0.5) * 0.55 * bFade(0.014, px) - seam * 1.25);
 }
 
 /** A hard-edged line across a band, centred at \`at\` with half-width \`hw\` in t units. */

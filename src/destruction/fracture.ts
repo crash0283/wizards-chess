@@ -83,9 +83,18 @@ const SKIN_CEIL = 0.34;
  * Brightness of a fresh break relative to the weathered skin it is exposed under. The
  * ratio is what the eye reads, and the ceiling is what keeps it out of the clip.
  */
-const FRESH_GAIN = 1.95;
+const FRESH_GAIN = 1.60;
 const FRESH_FLOOR = 0.030;
-const FRESH_CEIL = 0.60;
+/**
+ * Ceiling on a fresh face. Down from 0.60, which was a near-white albedo: against a
+ * weathered skin capped at 0.34 that is a 1.8:1 step across every single facet of every
+ * single shard, and a hundred shards each carrying that step is a large amount of
+ * high-frequency energy in the bottom third of the frame — measured, 23 % more than the
+ * film has there. The RELATIONSHIP is what the brief asks for and it survives: a fresh
+ * break still reads clearly brighter than the weathered surface it broke out of. It just
+ * no longer does it by being the brightest thing on the board.
+ */
+const FRESH_CEIL = 0.44;
 
 /** Weather the outer shell down, in place, before anything is cut out of it. */
 function weather(soup: Soup): void {

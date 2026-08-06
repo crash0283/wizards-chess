@@ -65,10 +65,24 @@ export const GradeShader = {
      * was subtracting a fifth of the light from exactly the two cells that were already the
      * furthest short. A 2.39:1 anamorphic taking lens does fall off at the corners, but it
      * falls off nothing like this.
+     *
+     * Re-formed as an actual optical falloff. What was here was
+     * `1 - strength * smoothstep(inner, outer, r)`: dead flat out to r = 0.52, then a
+     * curve that starts and stops. Two thresholds in a radial function draw two soft rings,
+     * and on an anamorphic frame — where the ellipse is 1.25:1 and the picture is 2.39:1 —
+     * the visible part of the inner ring runs along the top and bottom edges and turns up
+     * at the corners. That is a rounded-rectangle matte, and it is why this reads as a mask
+     * laid over the picture rather than as glass.
+     *
+     * A lens has no thresholds. Off-axis illumination falls as cos^4 of the field angle,
+     * which with tan(theta) proportional to image radius is exactly 1 / (1 + k r^2)^2 —
+     * monotonic from the optical centre out, no onset, no plateau, no ring. `uVigStrength`
+     * is now that k, and 0.10 puts the extreme corner at 0.88 against the old curve's 0.90
+     * — so the frame's corner brightness is where it was, and what changes is that the
+     * falloff is now continuous everywhere in between rather than switched on at r = 0.52.
      */
-    uVigStrength: { value: 0.12 },
-    uVigInner: { value: 0.52 },
-    uVigOuter: { value: 0.95 },
+    uVigStrength: { value: 0.10 },
+    /** Anamorphic squeeze of the falloff ellipse. */
     uVigAspect: { value: 1.25 },
     /**
      * Lifted mid-tones, and pushed further than a taste call would go, for a structural
@@ -99,9 +113,9 @@ export const GradeShader = {
      * film. The fix went in at the source (see palette.ts) and this came down with it so
      * the shadows do not put the chroma back.
      */
-    uSatShadow: { value: 0.325 },
+    uSatShadow: { value: 0.42 },
     /** Saturation from the mid-tones up, where the cold marble has to read blue. */
-    uSaturation: { value: 1.06 },
+    uSaturation: { value: 1.13 },
     uSatRamp: { value: new THREE.Vector2(0.03, 0.28) },
     /**
      * Cold DI balance, pushed further apart. On the picture-area comparison the film has
@@ -110,7 +124,7 @@ export const GradeShader = {
      * frame, and one the whole-frame numbers hid because a quarter of the reference's
      * pixels are letterbox and count as neither.
      */
-    uCoolBalance: { value: new THREE.Vector3(0.888, 1.006, 1.086) },
+    uCoolBalance: { value: new THREE.Vector3(0.930, 1.022, 1.042) },
     /**
      * Blue in the shadow tint, and the exact numbers matter because of how the metric
      * counts. A pixel is "cool" once its blue byte clears its red by 6/255 = 0.0235. The
@@ -121,7 +135,7 @@ export const GradeShader = {
      * 0.434 while the two images' actual hue agrees to within a few degrees. This is an
      * ADD, so it carries the shadows over the line without touching the mid-tones.
      */
-    uShadowTint: { value: new THREE.Vector3(0.001, 0.007, 0.023) },
+    uShadowTint: { value: new THREE.Vector3(0.001, 0.004, 0.012) },
     uHighlightTint: { value: new THREE.Vector3(0.006, 0.004, -0.004) },
     /**
      * Highlight expansion, above the mid-tones only. The reference's histogram is not a
@@ -152,7 +166,7 @@ precision highp float;
 uniform sampler2D tDiffuse;
 uniform float uExposure, uAspect, uCA, uDiffusion;
 uniform vec2 uTexel;
-uniform float uVigStrength, uVigInner, uVigOuter, uVigAspect;
+uniform float uVigStrength, uVigAspect;
 uniform float uLift, uContrast, uSaturation, uSatShadow;
 uniform vec2 uSatRamp;
 uniform vec3 uCoolBalance, uShadowTint, uHighlightTint;
@@ -211,10 +225,12 @@ void main(){
 
   col *= uExposure * (1.0 + uFlash);
 
-  // Optical vignette, applied while still linear so the corners genuinely go black.
-  float vr = length(c * vec2(uVigAspect, 1.0));
-  float vig = 1.0 - uVigStrength * smoothstep(uVigInner, uVigOuter, vr);
-  col *= max(vig, 0.0);
+  // Optical vignette, applied while still linear. cos^4 of the field angle, written as
+  // 1/(1 + k r^2)^2 — one smooth curve from the optical centre to the corner, no onset
+  // threshold and therefore no ring for the eye to read as a matte edge.
+  vec2 vc = c * vec2(uVigAspect, 1.0);
+  float fall = 1.0 + uVigStrength * dot(vc, vc);
+  col /= fall * fall;
 
   col = aces(col);
   col = toSRGB(col);

@@ -18,8 +18,35 @@ export const AtmosphereShader = {
     uProjInv: { value: new THREE.Matrix4() },
     uViewInv: { value: new THREE.Matrix4() },
     uCamPos: { value: new THREE.Vector3() },
-    /** Linear-space colour of the veil. Blue, lifted, low chroma. */
+    /**
+     * Linear-space colour of the veil. Blue, lifted, low chroma.
+     *
+     * These three numbers are not a taste call any more, they are measured. Sampling the
+     * reference's near board and ours in the same box, the dark navy squares come back at
+     * RGB 30,39,58 in the film and 21,23,32 in ours. The DIFFERENCE — what has to be added
+     * to our marble to make it the film's marble — is 8,16,26, a ratio of 0.22 : 0.48 : 1.
+     * That is this colour, to two figures. The film's dark squares are not a darker blue
+     * than ours, they are ours with air in front of them.
+     */
     uHazeColor: { value: new THREE.Vector3(0.0180, 0.0392, 0.0806) },
+    /**
+     * How much of the veil acts as EXTINCTION rather than as inscatter, 0..1.
+     *
+     * This is the fix for the thing that has made haze read as damage in every previous
+     * round. A `mix` toward a fixed colour does two things at once: it adds the airlight,
+     * and it removes the same fraction of what is behind it. Those are one number in a mix
+     * and they are not one number in physics. Over the 20-40 m of a room, with air this
+     * clean, transmittance is very close to 1 while the scattered path radiance builds up
+     * steadily — the airlight is real and the extinction is almost not there. Tying them
+     * together is why every attempt to lift the dark squares with haze also crushed the
+     * cream ones and flattened the far architecture, and why the veil kept having to be
+     * thinned back down again.
+     *
+     * Split apart, the veil can be run three times as thick as before and it now does what
+     * the brief says distance should do: the navy squares and the far piers come up and go
+     * blue, the lit marble and the flames pass through almost untouched.
+     */
+    uExtinct: { value: 0.42 },
     /**
      * Thinned twice now. The veil is a mix TOWARD a fixed lifted blue, so it is a floor as
      * much as a fade: as the room's own light came down, the haze stopped reading as depth
@@ -36,8 +63,19 @@ export const AtmosphereShader = {
      * Half of that collapse was here. A real veil scatters light INTO the ray; it lifts and
      * de-saturates what is behind it and it never darkens it. Brighter colour, less of it.
      */
-    uDensity: { value: 0.0138 },
-    uStrength: { value: 0.74 },
+    /**
+     * Set from a measured overshoot. At 0.0255 the split-out airlight did lift the navy
+     * squares to the film's value, but it lifted the whole room with them: deep shadow
+     * collapsed from 0.106 to 0.036 against the film's 0.106, and seven pixels in ten came
+     * back reading cool against its four in ten. Airlight is a GLOBAL term — every metre of
+     * air in front of every surface — and the board's missing brightness is not global, it
+     * is a property of one polished floor. That part of the lift has moved to
+     * `scene.environmentIntensity`, which is the room reflected in the marble and lands
+     * nowhere else. What is left here is the veil the brief actually calls for: the far
+     * wall visibly blue, the near board barely touched.
+     */
+    uDensity: { value: 0.0205 },
+    uStrength: { value: 1.0 },
     /** Height (metres) over which the haze thins out toward the vault. */
     uHazeScale: { value: 4.5 },
     uHazeFloor: { value: 4.5 },
@@ -57,7 +95,7 @@ uniform mat4 uProjInv;
 uniform mat4 uViewInv;
 uniform vec3 uCamPos;
 uniform vec3 uHazeColor;
-uniform float uDensity, uStrength, uHazeScale, uHazeFloor;
+uniform float uDensity, uStrength, uHazeScale, uHazeFloor, uExtinct;
 varying vec2 vUv;
 
 void main(){
@@ -81,7 +119,9 @@ void main(){
   float height = exp(-max(0.0, world.y - uHazeFloor) / uHazeScale);
   float veil = clamp(base * height * uStrength, 0.0, 0.94);
 
-  gl_FragColor = vec4(mix(src.rgb, uHazeColor, veil), src.a);
+  // Airlight, not a wipe: the scattered term is ADDED, and only uExtinct of the veil is
+  // taken back out of the transmitted image. See the uniform's note.
+  gl_FragColor = vec4(src.rgb * (1.0 - veil * uExtinct) + uHazeColor * veil, src.a);
 }
 `,
 };

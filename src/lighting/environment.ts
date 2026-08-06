@@ -116,10 +116,18 @@ export function createEnvironment(world: World): Environment {
   // frame needs, which is a bright board in a dark room. The armies were measuring 0.177
   // against the film's 0.119 and this is most of the reason. The room does not go darker
   // overall: what it loses here the marble more than makes back from the aisle and sheen.
+  //
+  // Eased again, and this time on army evidence rather than on whole-frame numbers. In a
+  // 6x3 grid over the picture area the two cells that hold the ranked armies measure 0.183
+  // and 0.292 against the film's 0.110 and 0.204 — the pale limestone is a third to two
+  // thirds too bright — while the board between them is 0.11-0.13 too DARK. A hemisphere
+  // light is the one source in the rig that cannot tell those apart: it is the armies'
+  // dominant light and it does almost nothing for the marble. Taking it down is the only
+  // move that closes the army gap without touching the board.
   const hemi = new THREE.HemisphereLight(
     new THREE.Color(COLD.sky),
     new THREE.Color(COLD.ground),
-    0.42,
+    0.29,
   );
   hemi.position.set(0, 18, 0);
   group.add(hemi);
@@ -144,7 +152,7 @@ export function createEnvironment(world: World): Environment {
   // three rounds — only 0.357 of the frame reading cool against 0.434, because a pixel
   // under luminance 0.06 counts as neither warm nor cool however blue it is. Lifting the
   // black stone to where its own colour is visible converts all four.
-  const ambient = new THREE.AmbientLight(new THREE.Color(COLD.ambient), 0.16);
+  const ambient = new THREE.AmbientLight(new THREE.Color(COLD.ambient), 0.20);
   group.add(ambient);
 
   // Not a key in the dramatic sense — an enormous soft pool of cold light hanging over
@@ -200,16 +208,40 @@ export function createEnvironment(world: World): Environment {
   // near — because the room's light hangs over the far end and grazes back toward the lens.
   // Ours fell from 0.227 to 0.184 across the same span, which reads as a lit foreground on
   // a dark floor rather than as a luminous field running away to a vanishing point.
+  //
+  // Re-hung, and the reason is the standing note that the board reads as a lightbox rather
+  // than as a lit floor. Four spots at nineteen metres, all on the centre line, all aimed
+  // straight down, is a softbox: every square gets the same irradiance from the same angle
+  // and the marble comes back at one value from the near kerb to the far rank. Whatever
+  // else is wrong with such a board, it can never have a gradient in it, because nothing
+  // in the rig varies across it.
+  //
+  // So they come DOWN to eleven metres and OUT to alternate sides, staggered near-kerb /
+  // far-kerb along the length of the room. Each now lays an elliptical pool that is hot
+  // near one kerb and falls away across the board, and the four of them alternate — which
+  // is what puts a slow zig-zag of brighter and dimmer stone down the long axis instead of
+  // a plane. Lower also means more grazing, and a grazing lobe is Fresnel-boosted: the same
+  // watts buy far more specular off polished stone than they did from directly overhead.
+  //
+  // Levels are set from a box measurement rather than by eye. Sampling the cream squares in
+  // the same patch of board, the film runs 139 near / 153 far and ours ran 105 near / 93
+  // far: not only a third short, but sloping the wrong way. The multipliers below carry
+  // that correction — about 1.5x at the near end rising to 2.2x at the far, so the board
+  // gets brighter as it recedes the way the reference's does.
   const aisle: THREE.SpotLight[] = [];
-  for (const [ax, mul] of [
-    [-9.2, 1.45],
-    [-3.1, 0.94],
-    [3.1, 0.95],
-    [9.2, 2.55],
+  // The cone is narrow and the offsets are small for one reason: the ranked armies stand at
+  // |z| = 8.2 and they are the one thing in the frame that is already too bright. Opened to
+  // 0.46 rad the pools reached them and the near-left rank came back with 4.5% of its cell
+  // clipped against the film's 1.5%. 0.37 keeps the useful light inboard of the kerb.
+  for (const [ax, az, mul] of [
+    [-9.4, -2.4, 1.62],
+    [-3.1, 2.5, 1.22],
+    [3.1, -2.5, 1.38],
+    [9.4, 2.4, 2.80],
   ] as const) {
-    const s = new THREE.SpotLight(new THREE.Color(COLD.key), 318 * mul, 0, 0.30, 0.86, 1.0);
-    s.position.set(ax, 19, 0);
-    s.target.position.set(ax, 0, 0);
+    const s = new THREE.SpotLight(new THREE.Color(COLD.key), 318 * mul, 0, 0.37, 0.88, 1.0);
+    s.position.set(ax, 11.4, az);
+    s.target.position.set(ax, 0, az * 0.35);
     s.castShadow = false;
     group.add(s);
     group.add(s.target);
@@ -251,7 +283,19 @@ export function createEnvironment(world: World): Environment {
     // blow its whole length out into one continuous white band. The film's near kerb is
     // dark stone with discrete fires standing on it. 30 m puts the sheen's last useful
     // light around the middle of the board and nothing on the kerb.
-    const s = new THREE.SpotLight(new THREE.Color(COLD.sheen), 132 * si, 30, 0.30, 0.92, 1.0);
+    //
+    // Up, and the discipline above still stands — what changed is the evidence about which
+    // way the chequer is wrong. It said a grazing lobe "erases the chequer because it lifts
+    // the dark squares by the same absolute amount as the light ones". True, and the board
+    // now needs exactly that: measured in one box, the film's navy squares sit at RGB
+    // 30,39,58 and the cream at 139,144,165, a range of about 4:1, while ours were 21,23,32
+    // against 105,113,123 — nearly 5:1 with the dark end sitting on the floor. Our chequer
+    // is not being erased, it is over-separated, because our two marbles differ by 80:1 in
+    // albedo where the film's differ by about 8:1. A polished floor is not only its albedo:
+    // at this angle of view a dark stone returns most of what you see off its surface, not
+    // out of its body. This is that term, and it is the only lever in the rig that lifts a
+    // navy square without touching a cream one in proportion.
+    const s = new THREE.SpotLight(new THREE.Color(COLD.sheen), 186 * si, 34, 0.34, 0.92, 1.0);
     s.position.set(sx, sy, sz);
     s.target.position.set(-5.0, 0, sz * 0.35);
     s.castShadow = false;
@@ -314,7 +358,11 @@ export function createEnvironment(world: World): Environment {
     // between them, and none of that exists as an image unless something skims across it.
     // This one is aimed high and nearly along the wall, so it catches the arrises and
     // leaves the recesses black — modelling, not more wash.
-    const crown = new THREE.SpotLight(new THREE.Color(COLD.sky), 1450, 30.0, 0.34, 0.72, 2.0);
+    //
+    // Up by half. In the 6x3 grid the top band's two right-hand cells come back at 0.071
+    // and 0.038 against the film's 0.171 and 0.103, with a quarter of its structure — the
+    // "flat black cardboard" note, and this is the only source that reaches that stone.
+    const crown = new THREE.SpotLight(new THREE.Color(COLD.sky), 2150, 32.0, 0.36, 0.72, 2.0);
     crown.position.set(-9.0, 13.6, sz * 15.0);
     crown.target.position.set(11.0, 9.6, sz * 18.4);
     crown.castShadow = false;
@@ -342,7 +390,7 @@ export function createEnvironment(world: World): Environment {
     // the report is that the frame edges cannot come up until that material does. This
     // light stays because it does model the parts of the near screen that are NOT void
     // stone, and it is cheap.
-    const nearEnd = new THREE.SpotLight(new THREE.Color(COLD.sky), 880, 15.0, 0.52, 0.82, 2.0);
+    const nearEnd = new THREE.SpotLight(new THREE.Color(COLD.sky), 300, 15.0, 0.52, 0.82, 2.0);
     nearEnd.position.set(-12.6, 9.4, sz * 5.6);
     nearEnd.target.position.set(-16.4, 5.6, sz * 13.4);
     nearEnd.castShadow = false;
@@ -404,9 +452,9 @@ export function createEnvironment(world: World): Environment {
   // the pair of them.
   const wash: THREE.SpotLight[] = [];
   for (const [wx, wy, wz, tx, ty, tz, wi, wa] of [
-    [12.8, 6.2, -13.8, CHAMBER.halfWidth - 0.3, 5.0, -2.5, 2050, 0.42],
-    [12.8, 7.9, 13.8, CHAMBER.halfWidth - 0.3, 6.4, 1.5, 1720, 0.42],
-    [7.2, 10.4, 0.0, CHAMBER.halfWidth, 6.4, 0.0, 1400, 0.64],
+    [12.8, 6.2, -13.8, CHAMBER.halfWidth - 0.3, 5.0, -2.5, 2500, 0.42],
+    [12.8, 7.9, 13.8, CHAMBER.halfWidth - 0.3, 6.4, 1.5, 2100, 0.42],
+    [7.2, 10.4, 0.0, CHAMBER.halfWidth, 6.4, 0.0, 1850, 0.66],
   ] as const) {
     const s = new THREE.SpotLight(new THREE.Color(COLD.sky), wi, 24, wa, 0.62, 2.0);
     s.position.set(wx, wy, wz);
@@ -439,11 +487,23 @@ export function createEnvironment(world: World): Environment {
       if (scene.background !== background) scene.background = background;
       if (envTexture && scene.environment !== envTexture) {
         scene.environment = envTexture;
-        // Third of what it was. An IBL is another light with no falloff — it was
-        // contributing diffuse to the far piers at full strength and helping hold the
-        // whole frame off the floor. Kept only for the broad specular the polished marble
-        // needs, which is what it is actually here for.
-        scene.environmentIntensity = 0.16;
+        // Back up, for the reason set out on the sheen: the frame's problem is no longer a
+        // room held off the floor by a flat IBL, it is a polished floor that is not
+        // reflecting anything. This is the broad mirror term — the whole cold room seen in
+        // the marble — and it is the part of a navy square's brightness that has no albedo
+        // in it at all. The energy in the gradient sits OVERHEAD (see COLD.envTop), so from
+        // a camera looking down at the board it lands on the stone and barely on a wall.
+        // Four times what it was, and it is now the single biggest lever on the board.
+        // Three things the frame needed all turn out to be the same number: the navy
+        // squares are 40x too dark, the ink-black veining in the cream squares carries four
+        // times the film's local contrast, and the board is the reason the mid and fine
+        // detail bands run half again over. An additive term on a polished floor fixes all
+        // three at once — it lifts a navy square and a black vein by the same absolute
+        // amount it lifts a cream one, so the range compresses from our 5:1 toward the
+        // film's 4:1 and the veins stop reading as ink. It is also the honest description of
+        // what a polished floor at this angle of view is doing: most of what the lens sees
+        // off a dark square comes off its surface, not out of its body.
+        scene.environmentIntensity = 0.72;
       }
     },
     dispose() {

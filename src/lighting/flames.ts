@@ -532,7 +532,10 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const bodyMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 4.6 },
+      // Down. A flame body this hot clips over a large area, and the frame's clipped
+      // budget is small and belongs mostly to the stone: ours put 0.049 of the lower-right
+      // cell over 0.92 against the film's 0.012 there. Smaller white cores, same fires.
+      uIntensity: { value: 3.85 },
       uCore: { value: new THREE.Color(FIRE.core).convertSRGBToLinear() },
       uMid: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
       uEdge: { value: new THREE.Color(FIRE.edge).convertSRGBToLinear() },
@@ -595,7 +598,7 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
   const glowMat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uIntensity: { value: 0.045 },
+      uIntensity: { value: 0.036 },
       uColor: { value: new THREE.Color(FIRE.mid).convertSRGBToLinear() },
     },
     vertexShader: GLOW_VERT,
@@ -662,7 +665,12 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
       // the frame's warm fraction to 0.197 against the film's 0.139.
       // Tighter and brighter rather than broad and faint: the pool has to be a legible hot
       // spot on the stone at the fire's foot, and area is what costs warm pixels, not peak.
-      uIntensity: { value: 0.46 },
+      // Up a third. The blown pixels in this frame are in the wrong places: measured cell
+      // by cell the film spreads its clipped highlights evenly along the bottom band
+      // (0.016 / 0.015 / 0.016 / 0.016) while ours were dumped on two clumps of flame
+      // (0.031 and 0.049) with the marble between them at 0.002. The film's are the fires'
+      // CONTACT with the stone and their reflections in it, not the fires themselves.
+      uIntensity: { value: 0.62 },
       uColor: { value: new THREE.Color(FIRE.light).convertSRGBToLinear() },
     },
     vertexShader: POOL_VERT,
@@ -801,8 +809,18 @@ export function createFlames(world: World, opts: { lightCount: number }): FlameS
         // intact while gutting the 2-6 m tail. That tail was the problem — thirty-odd
         // overlapping tails is a warm ambient by another name, and it was what put the
         // ranked armies at hue 8-16 when the reference has them cold.
-        l.distance = 1.40 + f.size * 0.90;
-        l.intensity = (1.95 + f.size * 4.1) * (0.60 + 0.72 * f.flicker);
+        //
+        // Lengthened again, deliberately, and this is the reversal of the note above. That
+        // note was written when the tail was the problem; the standing note now is the
+        // opposite one — that the marble "holds one near-uniform value from the near kerb
+        // to the far rank" because nothing about a flame reaches it. A range of 1.4 m on a
+        // fire standing 0.8 m off a kerb that is 0.8 m outside the board means the light
+        // dies before it crosses the border strip: geometrically it could never have put a
+        // mark on the marble. At two and a half to four metres each fire lays a grazing
+        // pool a square or two deep into the board and is gone by the third, which is what
+        // both makes the near marble hotter than the far and keeps the pools discrete.
+        l.distance = 2.35 + f.size * 2.0;
+        l.intensity = (1.85 + f.size * 3.9) * (0.60 + 0.72 * f.flicker);
         l.color.copy(f.tint);
       }
     },

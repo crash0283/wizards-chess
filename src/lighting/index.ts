@@ -116,6 +116,16 @@ export function createLighting(
 
   // Bloom thresholded well above anything the cold ambient can reach, so it only ever
   // touches flame cores, the specular bloom off the marble and a dust burst.
+  //
+  // TRIED AND REVERTED, worth recording: dropping this threshold to 0.42 with the radius
+  // opened to 0.85, to get a film-print halation across the whole picture. It does soften
+  // the board's ink-black veining — the mid and fine detail bands each came down about
+  // 0.003 — but a global bright-pass in a room lit by thirty fires is a machine for
+  // warming the room. The frame's warm fraction went from 0.146 to 0.233 against the
+  // film's 0.139, the median rose 0.05, and two thirds of the shadow population
+  // disappeared. Halation is the right idea; a bloom pass is the wrong instrument for it,
+  // because it is symmetric and unbounded and the flames dominate it. It now happens in
+  // the grade instead, one-sided and at a few texels (see `uHalation`).
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(width, height),
     high ? 0.13 : 0.11,

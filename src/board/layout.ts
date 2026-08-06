@@ -45,10 +45,18 @@ export const CHAMFER = 0.016;
  *
  * 30 mm each side plus the 24 mm physical gap gives an 84 mm run across a joint — 3.6 %
  * of a 2.35 m square. Measured off `low-across-board`, which is the closest any camera
- * gets to the floor: there the joint is plainly a chunky granular BEAD RUN, not a hairline,
+ * gets to the floor: there the joint is plainly a chunky granular run, not a hairline,
  * and eight of them stacked across the field are a large part of that frame's directional
  * gradient energy. Narrower than this and the floor loses the horizontal structure the
  * film's has; wider and it starts to look inlaid again, which it is not.
+ *
+ * POLARITY. What is drawn in that run is a SHADOW. Every joint on the board is darker
+ * than the marble either side of it, at every distance — that is true of the reference
+ * without exception and it was not true of this build until the round that added
+ * `gCavity` to the bed and `uJointAO` to the marble. Note also, if you come here to widen
+ * this number: from any of the judging cameras the mortar run worked into the slab tops
+ * is a fraction of a pixel, and what the frame actually shows down a joint is the BED
+ * (see surround.ts). Tuning JOINT_W will not change what colour a joint is.
  */
 export const JOINT_W = 0.030;
 /** Top of the kerb the fires burn on (lighting puts its kerb flames at y = 0.30). */

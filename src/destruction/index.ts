@@ -108,7 +108,7 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
     const frags = fracture(soup, {
       rng: rng.fork('cells'),
       cells: staged ? (high ? 16 : 9) : high ? 58 : 24,
-      chips: staged ? (high ? 4 : 2) : high ? 20 : 8,
+      chips: staged ? (high ? 2 : 1) : high ? 10 : 5,
       impact: dir,
       base,
       height: target.height,
