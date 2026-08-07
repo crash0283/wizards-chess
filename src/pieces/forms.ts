@@ -64,6 +64,13 @@ export interface FormResult {
   comY: number;
   /** Candidate places for the one significant, pre-existing break. */
   breaks: BreakSite[];
+  /**
+   * Height of the plinth's top face, authored metres — the `h` handed to `plinth()`.
+   * Only device.ts reads these; they describe geometry that was always here.
+   */
+  plinthTop: number;
+  /** Radius of the plinth's widest course, authored metres — the `r` handed to `plinth()`. */
+  plinthR: number;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -789,10 +796,11 @@ function kiteShield(
 function pawn(rng: Rng, d: number): FormResult {
   const body: Part[] = [];
   const PH = 0.72;
+  const PR = 0.80;
 
   const base = new Part();
   base.detail = d * 1.15;
-  plinth(base, 0.80, PH, 6, rng, 3);
+  plinth(base, PR, PH, 6, rng, 3);
   body.push(base);
 
   // The hunched back: a carapace curling from a low, wide rear up over the shoulders and
@@ -906,6 +914,8 @@ function pawn(rng: Rng, d: number): FormResult {
 
   return {
     body,
+    plinthTop: PH,
+    plinthR: PR,
     arm: [arm],
     armPivot: V(0.40, PH + 0.42, -0.08),
     tip: V(0.34, PH + 1.16, 0.60),
@@ -927,10 +937,11 @@ function pawn(rng: Rng, d: number): FormResult {
 function knight(rng: Rng, d: number): FormResult {
   const body: Part[] = [];
   const PH = 1.10;
+  const PR = 1.36;
 
   const base = new Part();
   base.detail = d * 1.15;
-  plinth(base, 1.36, PH, 6, rng, 3);
+  plinth(base, PR, PH, 6, rng, 3);
   body.push(base);
 
   // --- the horse ------------------------------------------------------------------
@@ -1153,6 +1164,8 @@ function knight(rng: Rng, d: number): FormResult {
 
   return {
     body,
+    plinthTop: PH,
+    plinthR: PR,
     arm: [arm],
     armPivot: V(0.30, shoY - 0.02, 0.10),
     tip: V(0.62, shoY + 0.44, 1.46),
@@ -1351,11 +1364,12 @@ function standing(body: Part[], rng: Rng, d: number, o: StandOpts): StandOut {
 function bishop(rng: Rng, d: number): FormResult {
   const body: Part[] = [];
   const PH = 0.98;
+  const PR = 1.10;
   const HF = 2.62;
 
   const base = new Part();
   base.detail = d * 1.15;
-  plinth(base, 1.10, PH, 6, rng, 3);
+  plinth(base, PR, PH, 6, rng, 3);
   body.push(base);
 
   const s = standing(body, rng, d, {
@@ -1380,6 +1394,8 @@ function bishop(rng: Rng, d: number): FormResult {
 
   return {
     body,
+    plinthTop: PH,
+    plinthR: PR,
     arm: null,
     armPivot: V(0, PH + HF * 0.760, 0.10),
     tip: V(0, s.handY, s.handZ + 0.06),
@@ -1401,10 +1417,11 @@ function bishop(rng: Rng, d: number): FormResult {
 function rook(rng: Rng, d: number): FormResult {
   const body: Part[] = [];
   const PH = 0.86;
+  const PR = 1.10;
 
   const base = new Part();
   base.detail = d * 1.15;
-  plinth(base, 1.10, PH, 6, rng, 3);
+  plinth(base, PR, PH, 6, rng, 3);
   body.push(base);
 
   const shaft = new Part();
@@ -1481,6 +1498,8 @@ function rook(rng: Rng, d: number): FormResult {
 
   return {
     body,
+    plinthTop: PH,
+    plinthR: PR,
     arm: null,
     armPivot: V(0, PH + 0.9, 0.6),
     tip: V(0, my, 0.7),
@@ -1501,12 +1520,13 @@ function rook(rng: Rng, d: number): FormResult {
 function royal(rng: Rng, d: number, isKing: boolean): FormResult {
   const body: Part[] = [];
   const PH = isKing ? 1.14 : 1.06;
+  const PR = isKing ? 1.12 : 1.06;
   const HF = isKing ? 3.46 : 3.14;
   const w = isKing ? 1.02 : 0.94;
 
   const base = new Part();
   base.detail = d * 1.15;
-  plinth(base, isKing ? 1.12 : 1.06, PH, 6, rng, 3);
+  plinth(base, PR, PH, 6, rng, 3);
   body.push(base);
 
   const s = standing(body, rng, d, {
@@ -1558,6 +1578,8 @@ function royal(rng: Rng, d: number, isKing: boolean): FormResult {
 
   return {
     body,
+    plinthTop: PH,
+    plinthR: PR,
     arm: [arm],
     armPivot: pivot,
     tip,

@@ -31,7 +31,7 @@
  */
 import * as THREE from 'three';
 import type { World } from '../core/world';
-import { PIECE_HEIGHT, type PieceType } from '../core/constants';
+import { PIECE_HEIGHT, type PieceType, type Side } from '../core/constants';
 import type { Rng } from '../core/rng';
 import { buildForm } from './forms';
 import {
@@ -47,6 +47,7 @@ import {
 } from './mesh';
 import { applyPlanes, chipPlanes, planeIsLocal } from './carve';
 import { decimate } from './decimate';
+import { buildDevice, deviceFit } from './device';
 import type { Stone } from './stone';
 import { makeWeather } from './weather';
 
@@ -107,6 +108,13 @@ export interface CarvedLevels {
   tip: THREE.Vector3;
   comY: number;
   baseHalf: number;
+  /**
+   * The carved plinth device — interactive only, null under capture. It carries no LOD
+   * ladder: it is a few hundred triangles and it is the ONLY thing that tells the six
+   * types apart from the play camera, so it is the last geometry on a chessman that
+   * should ever be coarsened.
+   */
+  deviceGeo: THREE.BufferGeometry | null;
   /** Built on first use; shares `levels[SPLIT_LEVEL]`'s attribute buffers. */
   split: { body: THREE.BufferGeometry; arm: THREE.BufferGeometry } | null;
 }
@@ -177,11 +185,13 @@ function concat(a: Float32Array, b: Float32Array): Float32Array {
 export function carveLevels(
   world: World,
   stone: Stone,
+  side: Side,
   type: PieceType,
   key: string,
   detail: number,
   floor: number,
   lods: readonly LodLevel[],
+  devices: boolean,
 ): CarvedLevels {
   const rng = world.rng.fork(key);
   const form = buildForm(type, rng.fork('form'), detail);
@@ -294,6 +304,11 @@ export function carveLevels(
     tip,
     comY,
     baseHalf,
+    // Forked on side+type, not on this pooled variant: every rook carries the same device,
+    // cut and stained the same way. See buildDevice.
+    deviceGeo: devices
+      ? buildDevice(type, side, deviceFit(form, s), stone.spec, world.rng, detail)
+      : null,
     split: null,
   };
 }

@@ -15,8 +15,18 @@
  */
 import * as THREE from 'three';
 import type { World } from '../core/world';
+import {
+  BAND_CHAIN_GLSL,
+  BAND_RULE_FRAG,
+  COORD_FRAG,
+  COORD_HEAD,
+  PLAY_BAND,
+  coordUniforms,
+  playBandProfile,
+} from './coords';
 import { NOISE_GLSL, REFLECT_GLSL, WEAR_GLSL } from './glsl';
 import { BED_Y, BORDER_SINK, KERB_Y, R, TOP_Y, sweepRing, type ProfilePoint } from './layout';
+import { isPlayView } from './playview';
 
 export interface SharedMaps {
   wear: THREE.Texture;
@@ -569,6 +579,14 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
    */
   const segs = world.quality === 'high' ? 64 : 4;
 
+  /**
+   * Play view only: the band is opened out and carries the carved rank and file marks.
+   * Decided once, from which shot is aimed — see playview.ts. When this is false not a
+   * character of coords.ts reaches the shader and the profile below is the one every
+   * reference frame was rendered against.
+   */
+  const coords = isPlayView(world);
+
   // --- mortar bed -----------------------------------------------------------------------
   const bedMat = baseMaterial(
     'board-bed',
@@ -611,17 +629,29 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
   // a short fall, the sunk floor the lozenges are cut into, then back up to the kerb foot.
   // Every one of those steps is a `hard` point, so the sweep duplicates the ring and the
   // arrises stay sharp instead of being smoothed into a ramp.
-  const bandHalf = (R.filletOut - R.filletIn) / 2;
-  const borderPts = profile([
-    [R.filletIn, TOP_Y],
-    [R.bandIn - 0.026, TOP_Y, true],
-    [R.bandIn - 0.004, TOP_Y - BORDER_SINK * 0.72],
-    [R.bandIn, TOP_Y - BORDER_SINK, true],
-    [R.bandOut, TOP_Y - BORDER_SINK, true],
-    [R.bandOut + 0.004, TOP_Y - BORDER_SINK * 0.72],
-    [R.bandOut + 0.026, TOP_Y, true],
-    [R.filletOut, TOP_Y],
-  ]);
+  //
+  // In the play build the same section is opened out — same steps, same fall, same sunk
+  // floor, 0.53 m wide instead of 0.34 — because that width is the cap height of the
+  // carved marks and 0.34 m only buys a 13 px letter. See coords.ts for the measurements.
+  const bandIn = coords ? PLAY_BAND.in : R.bandIn;
+  const bandOut = coords ? PLAY_BAND.out : R.bandOut;
+  const bandHalf = coords
+    ? (PLAY_BAND.to - PLAY_BAND.from) / 2
+    : (R.filletOut - R.filletIn) / 2;
+  const borderPts = profile(
+    coords
+      ? playBandProfile()
+      : [
+          [R.filletIn, TOP_Y],
+          [R.bandIn - 0.026, TOP_Y, true],
+          [R.bandIn - 0.004, TOP_Y - BORDER_SINK * 0.72],
+          [R.bandIn, TOP_Y - BORDER_SINK, true],
+          [R.bandOut, TOP_Y - BORDER_SINK, true],
+          [R.bandOut + 0.004, TOP_Y - BORDER_SINK * 0.72],
+          [R.bandOut + 0.026, TOP_Y, true],
+          [R.filletOut, TOP_Y],
+        ],
+  );
   const borderLen = borderPts[borderPts.length - 1].u;
   // Normalise the across-band coordinate to 0..1 over the whole profile, and hand the
   // shader where within it the sunk floor begins and ends.
@@ -631,7 +661,15 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
   const borderMat = baseMaterial(
     'board-border',
     BORDER_HEAD,
-    BORDER_FRAG,
+    // The film path passes BORDER_FRAG itself, untouched and unconcatenated — the string
+    // the six judged frames have always compiled. The play path weights the chain back
+    // where it is mixed and appends the two continuous rules at the end.
+    coords
+      ? BORDER_FRAG.replace(
+          '  vec3 albedo = uField;',
+          BAND_CHAIN_GLSL + '  vec3 albedo = uField;',
+        ) + BAND_RULE_FRAG
+      : BORDER_FRAG,
     {
       // A mid slate bed, not near-black. Probed off the render: between the flames the
       // strip was landing at 20/255 while the marble beside it sat at 110 — the marble
@@ -655,7 +693,7 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
       // across the band rather than as diamonds sitting in it, and still coarse enough
       // that `tf` is not fading the whole chain out to its mean by the middle distance.
       uCell: {
-        value: (2 * R.bandIn) / Math.round((2 * R.bandIn) / ((R.bandOut - R.bandIn) * 0.5)),
+        value: (2 * bandIn) / Math.round((2 * bandIn) / ((bandOut - bandIn) * 0.5)),
       },
       uBandHalf: { value: bandHalf },
       uBandT0: { value: bandT0 },
@@ -695,10 +733,14 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
   ]);
   const topU = kerbProfile[5].u;
   const topEndU = kerbProfile[6].u;
+  // The kerb's top face is where the carved rank and file marks go in the play build —
+  // nothing stands in front of it and the fires burn on it. See coords.ts for the two
+  // placements that were measured and rejected first. The film path passes KERB_FRAG
+  // itself, unconcatenated: the string the six judged frames have always compiled.
   const kerbMat = baseMaterial(
     'board-kerb',
-    KERB_HEAD,
-    KERB_FRAG,
+    coords ? KERB_HEAD + COORD_HEAD : KERB_HEAD,
+    coords ? KERB_FRAG + COORD_FRAG : KERB_FRAG,
     {
       uStone: { value: c(0xa6a29a) },
       uStoneB: { value: c(0x86847e) },
@@ -707,6 +749,7 @@ export function createSurround(world: World, shared: SharedMaps): Surround {
       uCourse: { value: (2 * R.kerbTopIn) / Math.round((2 * R.kerbTopIn) / 0.98) },
       uTopU: { value: topU },
       uTopEndU: { value: topEndU },
+      ...(coords ? coordUniforms() : {}),
     },
     shared,
     0,

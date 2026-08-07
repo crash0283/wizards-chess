@@ -30,6 +30,20 @@
  * searches and replies all now happen between frames. Only the animation is frame-bound,
  * because animation has to be.
  *
+ * ── and the third thing, which is what a player actually complained about ────────────
+ *
+ * A capture used to fire the strike from the attacker's ORIGINAL square: strike at t,
+ * contact at t + 0.62, and only then a walk. Nothing travelled first, so a rook taking a
+ * man six squares away detonated him from across the board and strolled over afterwards.
+ * A capture is now travel → arrive adjacent → poise → strike → contact → shatter →
+ * follow-through → step in, and the victim is whole and standing until the blade lands.
+ * The geometry and the pacing of that live in choreography.ts; `choreograph` below is
+ * what runs it, and `beat` is why its steps cannot arrive early.
+ *
+ * The SCRIPTED timeline is untouched by all of this. `piece-mid-strike` is captured at
+ * exactly t = STRIKE_CONTACT and the film's framing IS that number; none of it is
+ * imported here any more.
+ *
  * ── the interactive quality tier ─────────────────────────────────────────────────────
  *
  * A live page gets `world.quality === 'high'` and every other module has already been
@@ -74,9 +88,11 @@ import {
 } from '../core/constants';
 import { PLAY_SHOT } from '../core/shots';
 import type { Engine, Move } from '../chess';
-import { STRIKE_CONTACT, STRIKE_RECOVER, WALK_MIN, WALK_PER_SQUARE } from './timeline';
 import { createAffordances, type Affordances, type Mark } from './affordances';
 import { createThinker, type Thought } from './thinker';
+import {
+  CONTACT, FOLLOW, WALK_SETTLE, planMove, quietSeconds, type Leg, type MovePlan,
+} from './choreography';
 
 /** The human plays White. The engine answers as Black. */
 export const PLAYER: Side = 'white';
@@ -97,19 +113,23 @@ const REPLY_NODES = 60_000;
 const MIN_THINK_MS = 500;
 
 /**
- * Milliseconds of REAL time the reply will wait for the player's own move to stop moving.
+ * Milliseconds of REAL time the reply will wait, at MOST, for the player's move to finish.
  *
- * It reads better when the two do not overlap, but it is worth exactly one short pause and
- * no more. The previous version polled `pending.length` up to twelve times at 250 ms —
- * except a timer cannot fire while a frame is rendering, so on a renderer taking seconds a
- * frame each poll cost a whole frame and twelve of them cost half a minute. That, not the
- * chess, is where the critic's 36-second replies came from: the same 60k-node search runs
- * in ~230 ms. One deadline in real time, and then the reply goes in regardless.
+ * It reads better when the two do not overlap — a capture is a beat, and two beats played
+ * over each other is noise — so the reply now waits for the actual end of the player's
+ * animation rather than a flat 700 ms. What it must not do is wait for it in SCENE time,
+ * or on a chain of polls. The previous version polled `pending.length` up to twelve times
+ * at 250 ms — except a timer cannot fire while a frame is rendering, so on a renderer
+ * taking seconds a frame each poll cost a whole frame and twelve of them cost half a
+ * minute. That, not the chess, is where the critic's 36-second replies came from: the same
+ * 60k-node search runs in ~230 ms.
+ *
+ * So: ONE timer, computed once, off a real-time deadline recorded when the move was made,
+ * and hard-capped here. The longest capture this module choreographs is ~3.3 s and the
+ * cap is well under it on purpose — a full move and answer has to stay inside about six
+ * seconds, and 2.2 + 3.3 does.
  */
-const SETTLE_MS = 700;
-
-/** Seconds of grinding stone for a move of `dist` squares. Same numbers as the script. */
-const WALK_OF = (dist: number) => Math.max(WALK_MIN, dist * WALK_PER_SQUARE);
+const MAX_SETTLE_MS = 2200;
 
 /** Board bookkeeping the interactive controller needs from the game module. */
 export interface BoardModel {
@@ -204,6 +224,43 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   const later = (dt: number, run: () => void) =>
     pending.push({ t: world.time + dt, real: realNow + dt, run });
 
+  /**
+   * A step of a CHOREOGRAPHED sequence — where landing early is worse than landing late.
+   *
+   * `later` fires on whichever of its two deadlines arrives first, and that is right for a
+   * consequence: a flare the renderer is too slow to have reached should still expire on
+   * the player's clock. It is exactly wrong for the ORDER of a capture. The whole bug the
+   * player reported is a shatter arriving before the blade, and a real-time deadline that
+   * outruns a slow animation reintroduces it: the victim would explode while the attacker
+   * was still visibly walking.
+   *
+   * So a beat is driven by SCENE time, the clock its animation is actually running on, and
+   * the wall clock is only a watchdog against a sequence that can never finish at all (a
+   * `walkTo` promise dropped by a `setSquare`, a tab that was suspended mid-strike). The
+   * watchdog is sized from `sceneRate` — the measured ratio of scene time to real time,
+   * which this module already keeps for the flare decay — so on a machine running at a
+   * quarter speed it sits at a quarter speed too, plus a second and a half of slack. On a
+   * machine keeping up, scene time always wins and the watchdog never fires.
+   */
+  const beat = (dt: number, run: () => void) => pending.push({
+    t: world.time + dt,
+    real: realNow + dt / Math.max(0.08, sceneRate) + 1.5,
+    run,
+  });
+
+  /** Wrap a job so it runs at most once, whichever deadline or promise gets there first. */
+  function once(run: () => void): () => void {
+    let done = false;
+    return () => { if (!done) { done = true; run(); } };
+  }
+
+  /**
+   * Bumped whenever the board is replaced under a sequence in flight (`refresh`). Every
+   * step of a choreography checks it, so a half-finished capture cannot shatter a piece
+   * that belongs to the position that replaced it.
+   */
+  let epoch = 0;
+
   let selected: Mark | null = null;
   /** A promotion the player has committed to except for the piece. */
   let promoPending: { from: Mark; to: Mark } | null = null;
@@ -218,6 +275,8 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   /** Clocks until which something is visibly moving. Drives the shadow throttle. */
   let activeUntil = 0;
   let activeUntilReal = 0;
+  /** Real time by which the move currently animating should have finished its last beat. */
+  let animUntilReal = 0;
 
   const markActive = (seconds: number) => {
     activeUntil = Math.max(activeUntil, world.time + seconds);
@@ -368,6 +427,75 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   // --- applying a move ------------------------------------------------------------------
 
   /**
+   * Walk a piece through a planned route, the first leg now and the rest on their beats.
+   * Returns the seconds the whole route takes.
+   */
+  function walkLegs(p: PieceInstance, legs: Leg[], startAt: number, mine: number): number {
+    let at = startAt;
+    for (const leg of legs) {
+      const when = at;
+      if (when <= 0) p.walkTo(leg.file, leg.rank, leg.seconds);
+      else {
+        beat(when, () => {
+          if (epoch !== mine || p.destroyed) return;
+          p.walkTo(leg.file, leg.rank, leg.seconds);
+        });
+      }
+      at += leg.seconds;
+    }
+    return at - startAt;
+  }
+
+  /**
+   * The capture, in the order a capture happens.
+   *
+   *   1. the attacker leaves its square and TRAVELS, over the real distance
+   *   2. it ARRIVES adjacent — beside the victim, not on top of it — and holds
+   *   3. it STRIKES
+   *   4. ON CONTACT, and not one frame before, the victim shatters
+   *   5. it holds the follow-through, then steps onto the square it cleared
+   *
+   * Step 4 is hung off the promise `strike()` returns, which resolves inside the piece's
+   * own `update()` on the frame the weapon arrives — so the shatter, the flare, the camera
+   * shake and the scar on the marble all fire together, one microtask after the pose that
+   * earns them, and never before it. `beat` carries a backstop at CONTACT + a frame in
+   * case that promise is ever dropped (a `setSquare` clears `Motion`'s pending list), and
+   * `once` makes sure only whichever arrives first is the one that counts.
+   *
+   * The blow is credited to the STATION, not to the attacker's original square, so the
+   * debris flies away from where the blade actually was rather than from across the board.
+   */
+  function choreograph(
+    plan: MovePlan,
+    attacker: PieceInstance,
+    victim: PieceInstance | undefined,
+    capSq: Mark | null,
+  ) {
+    const mine = epoch;
+    walkLegs(attacker, plan.approach, 0, mine);
+
+    if (!victim || !capSq || plan.strikeAt < 0) return;
+
+    const fire = once(() => {
+      if (epoch !== mine) return;
+      model.destroyPiece(victim, capSq.file, capSq.rank, plan.station.file, plan.station.rank);
+    });
+
+    const swing = () => {
+      if (epoch !== mine) return;
+      if (attacker.destroyed || victim.destroyed) { fire(); return; }
+      attacker.strike(victim).then(fire, fire);
+      // One clamped frame of grace past the promise, so the promise is what normally wins.
+      beat(CONTACT + 0.06, fire);
+    };
+
+    if (plan.strikeAt <= 0) swing();
+    else beat(plan.strikeAt, swing);
+
+    walkLegs(attacker, plan.finish, plan.strikeAt + CONTACT + FOLLOW, mine);
+  }
+
+  /**
    * Play one legal move: board model first and immediately, animation afterwards.
    *
    * Doing the bookkeeping up front is what makes castling, en passant and promotion work
@@ -375,6 +503,10 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
    * engine and the FEN agree the instant the move is made, and the several seconds of
    * grinding stone that follow are pure decoration on top of a position that is already
    * settled.
+   *
+   * The choreography is planned BEFORE that bookkeeping, because it has to ask what is
+   * standing where — a knight routing its L around an occupied square wants the board as
+   * the player sees it, not the board as it will be.
    */
   function applyMove(m: Move) {
     const from: Mark = { file: m.from & 15, rank: m.from >> 4 };
@@ -399,6 +531,20 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     }
     const rook = rookFrom ? model.pieceAt(rookFrom.file, rookFrom.rank) : undefined;
 
+    // --- the choreography, off the board as it stands right now ---
+    const plan = attacker
+      ? planMove({
+          from,
+          to,
+          capSq: victim ? capSq : null,
+          knight: attacker.type === 'knight',
+          occupied: (file, rank) => {
+            const p = model.pieceAt(file, rank);
+            return !!p && !p.destroyed && p !== attacker && p !== victim;
+          },
+        })
+      : null;
+
     // --- bookkeeping, now ---
     // The tray is scored the instant the move is made, not when the blade lands half a
     // second of animation later, so it can never disagree with the material balance
@@ -412,32 +558,40 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     model.syncState();
 
     // --- animation, over the next couple of seconds ---
-    const dist = Math.max(Math.abs(to.file - from.file), Math.abs(to.rank - from.rank));
-    const walk = WALK_OF(dist);
     let arriveAt: number;
 
-    if (victim && attacker) {
-      attacker.strike(victim);
-      later(STRIKE_CONTACT, () =>
-        model.destroyPiece(victim, capSq!.file, capSq!.rank, from.file, from.rank));
-      later(STRIKE_CONTACT + STRIKE_RECOVER, () => attacker.walkTo(to.file, to.rank, 0.5));
-      arriveAt = STRIKE_CONTACT + STRIKE_RECOVER + 0.5;
+    if (attacker && plan) {
+      choreograph(plan, attacker, victim, capSq);
+      arriveAt = plan.duration;
     } else {
-      if (victim) {
-        // No attacker instance to swing (should not happen) — still remove the victim.
-        later(0, () => model.destroyPiece(victim, capSq!.file, capSq!.rank, from.file, from.rank));
+      // No carved attacker to swing or to walk (should not happen) — but the victim still
+      // has to leave the board, or the position and the picture stop agreeing.
+      if (victim && capSq) {
+        later(0, () => model.destroyPiece(victim, capSq.file, capSq.rank, from.file, from.rank));
       }
-      attacker?.walkTo(to.file, to.rank, walk);
-      arriveAt = walk;
+      arriveAt = quietSeconds(
+        Math.max(Math.abs(to.file - from.file), Math.abs(to.rank - from.rank)));
     }
-    if (rook && rookTo) rook.walkTo(rookTo.file, rookTo.rank, 0.9);
+
+    if (rook && rookTo) {
+      // The castling rook keeps pace with its king rather than running to a flat 0.9 s.
+      const span = Math.max(Math.abs(rookTo.file - rookFrom!.file),
+                            Math.abs(rookTo.rank - rookFrom!.rank));
+      rook.walkTo(rookTo.file, rookTo.rank, Math.min(arriveAt, quietSeconds(span)));
+    }
 
     if (m.promo) {
       const type = TYPE_OF_PROMO[m.promo] ?? 'queen';
-      later(arriveAt, () => model.promoteOn(to.file, to.rank, type, mover));
+      // On the beat, not on the wall clock: the new piece must not appear on a square the
+      // pawn is still visibly walking onto.
+      beat(arriveAt, () => model.promoteOn(to.file, to.rank, type, mover));
     }
 
-    markActive(arriveAt + 1.2);
+    // The stone is still rocking for `WALK_SETTLE` after the last leg lands.
+    markActive(arriveAt + WALK_SETTLE + 0.6);
+    // What the engine's reply waits for. Real time, because that is the clock the person
+    // waiting on it is using — and capped where it is read, not here.
+    animUntilReal = realNow + arriveAt + WALK_SETTLE * 0.5;
     refreshMarks();
   }
 
@@ -553,7 +707,9 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   function onThought(th: Thought) {
     thoughtHeld = th;
     const spentMs = Math.max(0, (realNow - thinkStartedAt) * 1000);
-    const settle = pending.length > 0 ? SETTLE_MS : 0;
+    // Let the player's own move finish its beat first — but only up to the cap, and only
+    // ever as ONE deadline measured from the moment the search started.
+    const settle = Math.min(MAX_SETTLE_MS, Math.max(0, (animUntilReal - thinkStartedAt) * 1000));
     const wait = Math.max(MIN_THINK_MS, settle) - spentMs;
     // Zero delay still costs a macrotask, and a macrotask cannot run while a frame is
     // rendering — on the low tier that is a whole frame spent waiting for a timer whose
@@ -1026,7 +1182,12 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     },
 
     refresh() {
+      // A choreography in flight belongs to a board that no longer exists. Dropping the
+      // queue is not enough on its own — a strike promise is already out there and will
+      // still resolve — so the epoch moves and every step of it becomes a no-op.
+      epoch++;
       pending.length = 0;
+      animUntilReal = 0;
       promoPending = null;
       aff.hidePromotion();
       abandonThought();
@@ -1035,6 +1196,8 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     },
 
     dispose() {
+      epoch++;
+      pending.length = 0;
       abandonThought();
       el.removeEventListener('pointerdown', onPointerDown);
       think.dispose();

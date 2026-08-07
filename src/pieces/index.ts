@@ -14,6 +14,8 @@
  *               moulding still has edges
  *   stone.ts    triplanar mm-grain in normal and roughness, two genuinely different stones
  *   motion.ts   heavy grinding walk, committed strike, the king's blade falling
+ *   play.ts     the same three, re-shaped for interactive play — see the note on
+ *               `playMode` below for which one runs when, and why
  *
  * Heights land exactly on PIECE_HEIGHT; the base sits on FLOOR_Y.
  *
@@ -64,8 +66,23 @@ import {
   type CarvedLevels,
 } from './lod';
 import { createStone, type Stone } from './stone';
+import { buildDevice, deviceFit, isPlayView } from './device';
 import { Motion } from './motion';
+import { PLAY_CONTACT } from './play';
 import { makeWeather } from './weather';
+
+/**
+ * The device hangs off the piece's own group, so it walks, rocks and topples with the
+ * plinth it is cut into, and the destruction piece harvests it along with everything else
+ * when the man is shattered.
+ */
+function deviceMesh(geo: THREE.BufferGeometry, stone: Stone): THREE.Mesh {
+  const m = new THREE.Mesh(geo, stone.material);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  m.name = 'device';
+  return m;
+}
 
 /** Knock chips off convex arrises. Planes are chosen up front, then applied in sequence. */
 function chip(
@@ -87,12 +104,50 @@ export function createPieceFactory(world: World): PieceFactory {
     black: createStone(world, 'black'),
   };
   const hi = world.quality === 'high';
+
+  /**
+   * INTERACTIVE vs FILM.
+   *
+   * `world.capturing` is the only switch. Under capture the motion module runs the frozen
+   * film curves off `world.time`, because the shot framing IS the scripted timing — the
+   * `piece-mid-strike` frame is taken at exactly STRIKE_CONTACT and `king-surrender` has to
+   * keep hashing to the same file. In play it runs the curves in play.ts off `world.realTime`,
+   * because `world.time` accumulates a CLAMPED dt and therefore drifts behind the wall clock
+   * on a slow frame, while the game's own deferred visuals (the shatter above all) fire on
+   * real seconds. Running the animation on the other clock is what let the destruction
+   * arrive before the animation that was supposed to cause it.
+   */
+  const playMode = !world.capturing;
+  const clock = () => (playMode ? world.realTime : world.time);
+  /** So an attacker can reach its victim's motion and have it flinch. */
+  const motions = new WeakMap<PieceInstance, Motion>();
+
+  /** The blow direction, attacker -> victim, and the moment it lands. */
+  function warnVictim(attacker: THREE.Object3D, target: PieceInstance, now: number): void {
+    if (!playMode) return;
+    const tm = motions.get(target);
+    if (!tm) return;
+    tm.braceFor(
+      now + PLAY_CONTACT,
+      target.group.position.x - attacker.position.x,
+      target.group.position.z - attacker.position.z,
+    );
+  }
+
   // Triangle budget, not a quality dial. The figuration is now explicit geometry — limbs,
   // mouldings, colonnettes — so refinement only buys smoother *weathering*, and the
   // reference frame has markedly LESS high-frequency energy than a finely tessellated
   // stand-in. Refining past this spends memory to make the render worse.
   const detail = hi ? 0.215 : 0.345;
   const floor = hi ? 0.126 : 0.160;
+
+  /**
+   * Carve a heraldic device into each plinth top — the play view's only way of telling a
+   * rook from a bishop. See device.ts for the measurement this answers and for why the
+   * switch is the SHOT and not `world.capturing`. Off for the six film frames, so not one
+   * triangle of this reaches a judged render.
+   */
+  const devices = isPlayView(world);
 
   function carve(type: PieceType, side: Side, id: string) {
     const rng = world.rng.fork(id);
@@ -183,7 +238,15 @@ export function createPieceFactory(world: World): PieceFactory {
       if (r > baseHalf) baseHalf = r;
     }
 
-    return { bodyGeo, armGeo, armPivot, tip, comY, baseHalf, stone };
+    // The plinth device, cut from the same block: same weather instance, same shader, same
+    // material. Interactive only — `devices` is false for every judged frame.
+    let deviceGeo: THREE.BufferGeometry | null = null;
+    if (devices) {
+      deviceGeo = buildDevice(type, side, deviceFit(form, s), stone.spec, world.rng, detail);
+      if (deviceGeo) geos.push(deviceGeo);
+    }
+
+    return { bodyGeo, armGeo, deviceGeo, armPivot, tip, comY, baseHalf, stone };
   }
 
   // -------------------------------------------------------------------------------------
@@ -200,9 +263,10 @@ export function createPieceFactory(world: World): PieceFactory {
     const key = `pool:${side}:${type}:${n % LOW_VARIANTS[type]}`;
     let c = pool.get(key);
     if (!c) {
-      c = carveLevels(world, stones[side], type, key, detail, floor, LOW_LODS);
+      c = carveLevels(world, stones[side], side, type, key, detail, floor, LOW_LODS, devices);
       pool.set(key, c);
       for (const g of c.levels) geos.push(g);
+      if (c.deviceGeo) geos.push(c.deviceGeo);
     }
     return c;
   }
@@ -236,6 +300,7 @@ export function createPieceFactory(world: World): PieceFactory {
     // So a cost harness can read the ladder back out of a live scene.
     bodyMesh.userData.lodLevels = c.levels;
     group.add(bodyMesh);
+    if (c.deviceGeo) group.add(deviceMesh(c.deviceGeo, stone));
 
     // The pivot exists from the start — Motion reads its rest transform — but it carries
     // no mesh and is not in the scene graph until an arm animation actually needs it.
@@ -284,6 +349,7 @@ export function createPieceFactory(world: World): PieceFactory {
         rng: world.rng.fork(`${id}:motion`),
         emit: (e, p) => world.emit(e, p),
         id,
+        interactive: playMode,
       },
       c.armPivot,
       c.tip,
@@ -305,14 +371,16 @@ export function createPieceFactory(world: World): PieceFactory {
       },
       walkTo(f, r, seconds) {
         const { x, z } = squareCentre(f, r);
-        return motion.walkTo(x + jit.dx, z + jit.dz, seconds, world.time);
+        return motion.walkTo(x + jit.dx, z + jit.dz, seconds, clock());
       },
       strike(target) {
-        return motion.strike(target.group.position.x, target.group.position.z, world.time);
+        const now = clock();
+        warnVictim(group, target, now);
+        return motion.strike(target.group.position.x, target.group.position.z, now);
       },
       update(t) {
         if (inst.destroyed) return;
-        motion.update(t);
+        motion.update(playMode ? world.realTime : t);
         setSplit(motion.armAnimating());
         // While the arm is out the piece is pinned to the level the split views address.
         if (split) return;
@@ -335,7 +403,8 @@ export function createPieceFactory(world: World): PieceFactory {
         }
       },
     };
-    if (type === 'king') inst.surrender = () => motion.surrender(world.time);
+    if (type === 'king') inst.surrender = () => motion.surrender(clock());
+    motions.set(inst, motion);
 
     pins.push((x, z, until) => {
       if (inst.destroyed) return;
@@ -354,8 +423,38 @@ export function createPieceFactory(world: World): PieceFactory {
     return inst;
   }
 
+  /**
+   * PLAY ONLY: one carving per type per side, shared by every man of that type.
+   *
+   * Under capture each of the 32 men is carved from its own `world.rng.fork(id)`, so no two
+   * are broken in the same place or stained in the same places, and that variety is a
+   * large part of what the six film frames are. It is also, measured, a large part of why
+   * this scene's own critic could not tell a rook from a bishop: two white rooks are two
+   * DIFFERENT carvings, and their 80x80 crops differ by more than a rook's crop differs
+   * from a bishop's.
+   *
+   * A real chess set is not like that. The eight pawns came out of one mould; the two rooks
+   * are the same carving twice. So in play — and only in play, the gate is the same
+   * `isPlayView` as the device's — the carve is memoised on side+type. Two rooks become the
+   * same geometry, which is also 12 carves instead of 32 at start-up.
+   */
+  const carved = new Map<string, ReturnType<typeof carve>>();
+  function carveShared(type: PieceType, side: Side, id: string) {
+    if (!devices) return carve(type, side, id);
+    const key = `${side}:${type}`;
+    let c = carved.get(key);
+    if (!c) {
+      // Carve off a stable per-type stream, not off this particular man's id, or which of
+      // the two rooks happened to be made first would decide what both of them look like.
+      c = carve(type, side, `set:${key}`);
+      carved.set(key, c);
+    }
+    return c;
+  }
+
   function makeHigh(type: PieceType, side: Side, id: string): PieceInstance {
-    const { bodyGeo, armGeo, armPivot, tip, comY, baseHalf, stone } = carve(type, side, id);
+    const { bodyGeo, armGeo, deviceGeo, armPivot, tip, comY, baseHalf, stone } =
+      carveShared(type, side, id);
 
     const group = new THREE.Group();
     group.name = id;
@@ -363,6 +462,7 @@ export function createPieceFactory(world: World): PieceFactory {
     bodyMesh.castShadow = true;
     bodyMesh.receiveShadow = true;
     group.add(bodyMesh);
+    if (deviceGeo) group.add(deviceMesh(deviceGeo, stone));
 
     let armNode: THREE.Object3D | null = null;
     if (armGeo) {
@@ -389,6 +489,7 @@ export function createPieceFactory(world: World): PieceFactory {
         rng: world.rng.fork(`${id}:motion`),
         emit: (e, p) => world.emit(e, p),
         id,
+        interactive: playMode,
       },
       armPivot,
       tip,
@@ -409,17 +510,20 @@ export function createPieceFactory(world: World): PieceFactory {
       },
       walkTo(f, r, seconds) {
         const { x, z } = squareCentre(f, r);
-        return motion.walkTo(x, z, seconds, world.time);
+        return motion.walkTo(x, z, seconds, clock());
       },
       strike(target) {
-        return motion.strike(target.group.position.x, target.group.position.z, world.time);
+        const now = clock();
+        warnVictim(group, target, now);
+        return motion.strike(target.group.position.x, target.group.position.z, now);
       },
       update(t) {
         if (inst.destroyed) return;
-        motion.update(t);
+        motion.update(playMode ? world.realTime : t);
       },
     };
-    if (type === 'king') inst.surrender = () => motion.surrender(world.time);
+    if (type === 'king') inst.surrender = () => motion.surrender(clock());
+    motions.set(inst, motion);
 
     live.push(inst);
     world.scene.add(group);
