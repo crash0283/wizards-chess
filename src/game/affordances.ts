@@ -404,7 +404,10 @@ export function createAffordances(world: World): Affordances {
       });
       promoGroup.visible = true;
       promoActive = true;
-      promoBorn = world.time;
+      // Real time, like everything else interactive.ts hands `update()`. These markers are
+      // built only when `world.capturing` is false and they animate beside the pieces, so
+      // they belong on the pieces' clock — see the ONE CLOCK note in interactive.ts.
+      promoBorn = world.realTime;
       return tablets.map((t) => ({ promo: t.holder.userData.promo as 'q' | 'r' | 'b' | 'n', object: t.stone }));
     },
 

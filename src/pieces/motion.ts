@@ -35,6 +35,7 @@ import {
   playWalk,
   smoother,
   turnDelta,
+  walkSeconds,
   PLAY_BRACE,
   PLAY_CONTACT,
   PLAY_STRIKE_TOTAL,
@@ -125,6 +126,11 @@ interface Strike {
   fired: boolean;
   /** Play path only. Null on the film path. */
   spec: PlayStrikeSpec | null;
+  /**
+   * Play path only. Ground the piece still had to cover when the blow was ordered, run
+   * underneath the strike so the strike poses off a MOVING base. See `strike()`.
+   */
+  carry: { spec: PlayWalkSpec; dur: number } | null;
 }
 interface Surrender {
   kind: 'surrender';
@@ -236,9 +242,23 @@ export class Motion {
       const dz = z - this.baseZ;
       const heading = dist > 1e-4 ? Math.atan2(dx, dz) : this.face;
       const turnBack = Math.abs(turnDelta(heading, this.rig.facing));
+      /**
+       * THE PIECE, NOT THE CALLER, DECIDES HOW FAST STONE MOVES.
+       *
+       * `seconds` is a request, and a caller that clamps it — `chargeSeconds` in
+       * game/choreography.ts ceilings at 1.55 s — asks a long move to be covered in the
+       * same time as a medium one, which is not a slower animation, it is a faster piece.
+       * Measured on the shipped pricing: 6.53 m/s at two to five squares, 7.79 at six,
+       * 9.31 at seven, peaking at 19.93 m/s. So the request is a FLOOR only. Ask for
+       * longer and the piece takes longer; ask for shorter than `walkSeconds` and it
+       * simply does not go faster.
+       *
+       * The film path below is untouched by this. It is frozen and it must stay frozen.
+       */
+      const pdur = Math.max(dur, walkSeconds(dist));
       // A stone body cannot pivot instantly, and 180 degrees costs more than 20.
       const turnIn = Math.min(
-        dur * 0.60,
+        pdur * 0.60,
         Math.min(0.62, 0.20 + Math.abs(turnDelta(this.face, heading)) * 0.30),
       );
       // The settle is where it squares back up to face the enemy, so it lasts as long as
@@ -247,10 +267,10 @@ export class Motion {
       this.anim = {
         kind: 'walk',
         fx: this.baseX, fz: this.baseZ, tx: x, tz: z,
-        t0: now, dur, settle, shoves,
+        t0: now, dur: pdur, settle, shoves,
         spec: {
           fx: this.baseX, fz: this.baseZ, tx: x, tz: z,
-          dur, settle, shoves,
+          dur: pdur, settle, shoves,
           baseHalf: this.rig.baseHalf,
           yaw0: this.face, yawTravel: heading, yawRest: this.rig.facing,
           turnIn: Math.max(0.12, turnIn),
@@ -263,7 +283,7 @@ export class Motion {
       this.baseX = x;
       this.baseZ = z;
       return new Promise<void>((res) => {
-        this.pending.push({ at: now + dur + settle, fn: res });
+        this.pending.push({ at: now + pdur + settle, fn: res });
       });
     }
 
@@ -286,9 +306,56 @@ export class Motion {
     const dz = tz - this.baseZ;
     const want = Math.atan2(dx, dz);
     const len = Math.hypot(dx, dz) || 1;
+    const prev = this.anim;
 
     if (this.play) {
       const delta = Math.abs(turnDelta(this.face, want));
+      /**
+       * SAFETY VALVE — a blow ordered while the piece is still on its way.
+       *
+       * `walkTo` takes as long as the distance needs now, so a scheduler that fires the
+       * strike at ITS OWN predicted arrival time (game/choreography.ts prices the approach
+       * with `chargeSeconds`, which ceilings at 1.55 s) can order the blow with ground
+       * still to cover. The strike pose is written relative to `baseX/baseZ`, which
+       * `walkTo` has already moved to the destination, so doing nothing would teleport the
+       * piece onto its station — a cross-fade dragging it twelve metres in a fifth of a
+       * second, which is far worse than the speed this whole change exists to fix.
+       *
+       * So the walk is not thrown away: what is left of it is re-run underneath the
+       * strike, from where the piece is actually drawn to where it must stand, timed to
+       * land just before the blade does. The piece is visibly still travelling through the
+       * wind-up and comes to rest as it swings — a charge, and never a jump. It is hard
+       * running, but it is the same order of speed the clamped pricing produced anyway,
+       * and it is bounded by the strike's own length rather than by a blend.
+       *
+       * Priced correctly — `walkSeconds` from ./play, re-exported by ../pieces — the
+       * approach finished long ago and `carry` is null.
+       */
+      let carry: Strike['carry'] = null;
+      if (prev !== null && prev.kind === 'walk' && prev.spec !== null && this.posed) {
+        const cx = this.posePos.x;
+        const cz = this.posePos.z;
+        const left = Math.hypot(this.baseX - cx, this.baseZ - cz);
+        const owed = prev.t0 + prev.dur - now;
+        if (left > 0.05 && owed > 0) {
+          // Never longer than the wind-up plus most of the swing: the piece has to be
+          // standing where it strikes from BEFORE the blade arrives, not as it arrives.
+          const cdur = Math.max(0.20, Math.min(PLAY_CONTACT * 0.92, owed));
+          carry = {
+            dur: cdur,
+            spec: {
+              fx: cx, fz: cz, tx: this.baseX, tz: this.baseZ,
+              dur: cdur, settle: 0,
+              shoves: Math.max(2, Math.round(left / 0.62)),
+              baseHalf: this.rig.baseHalf,
+              // Facing is the strike's business; the carry only supplies ground position.
+              yaw0: this.face, yawTravel: this.face, yawRest: this.face,
+              turnIn: 0.12, turnOut: 0.25,
+              ph: this.ph,
+            },
+          };
+        }
+      }
       this.anim = {
         kind: 'strike',
         t0: now,
@@ -309,6 +376,7 @@ export class Motion {
           armSwing: this.armSwing,
           ph: this.ph,
         },
+        carry,
       };
       this.startBlend(now, 0.22);
       return new Promise<void>((res) => {
@@ -335,6 +403,7 @@ export class Motion {
       dirX: dx / len, dirZ: dz / len,
       fired: false,
       spec: null,
+      carry: null,
     };
     return new Promise<void>((res) => {
       this.pending.push({ at: now + windup + swing, fn: res });
@@ -674,11 +743,25 @@ export class Motion {
         z: this.baseZ + a.dirZ * a.lunge,
       });
     }
+    // Ground the piece was still owed when the blow was ordered — normally none. It runs
+    // underneath the strike, so the pose is written off a base that is still moving and
+    // the piece is never picked up and put down. It ends exactly on baseX/baseZ, so the
+    // hand-over to the line below is continuous in position.
+    let bx = this.baseX;
+    let bz = this.baseZ;
+    let by = 0;
+    if (a.carry !== null) {
+      if (tt >= a.carry.dur) a.carry = null;
+      else {
+        const w = playWalk(a.carry.spec, tt < 0 ? 0 : tt, this.walkPose);
+        bx = w.x; bz = w.z; by = w.y;
+      }
+    }
     this.place(
       t,
-      this.baseX + a.dirX * s.push,
-      0,
-      this.baseZ + a.dirZ * s.push,
+      bx + a.dirX * s.push,
+      by,
+      bz + a.dirZ * s.push,
       s.face, s.pitch, s.roll, s.arm,
     );
   }

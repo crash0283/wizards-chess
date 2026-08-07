@@ -6,20 +6,50 @@
  * constructed only when `world.capturing` is false, so the deterministic shots cannot be
  * affected by anything here.
  *
- * ── the two things that were broken ──────────────────────────────────────────────────
+ * ── ONE CLOCK ────────────────────────────────────────────────────────────────────────
  *
- * 1. The engine never replied. The reply was scheduled 1.9 seconds into `world.time`, and
- *    world.time accumulates a CLAMPED dt — on a software rasteriser running a fifth of a
- *    frame per second, 1.9 s of scene time is several minutes of a person's life. Every
- *    deadline a human waits on is now measured in `world.realTime`; `world.time` is still
- *    what drives every animation, because animations must stay tied to the clamped clock
- *    or they tear.
+ * Interactive play runs on `world.realTime` and on nothing else. Not the beats, not the
+ * deadlines, not the markers. That sentence used to have an exception in it — "every
+ * deadline a human waits on is realTime; world.time still drives every animation" — and
+ * the exception was a bug, because the two halves of a capture ended up on different
+ * clocks and the order the code guaranteed was not the order that reached the screen.
  *
- * 2. The frame loop died. `Engine.search()` at 120,000 nodes is a synchronous hole in the
- *    main thread, so each reply stopped rAF outright and the tab was killed mid-render.
- *    The search now happens in a Worker (thinker.ts) and the loop never blocks. Because
- *    the search really does span real seconds now, `state.thinking` is a state the HUD can
- *    actually show, rather than something set and cleared inside one call.
+ * `world.time` accumulates a dt clamped at 0.05 s, so it runs behind the wall clock the
+ * moment a frame takes longer than 50 ms. pieces/motion.ts plays its INTERACTIVE curves on
+ * `world.realTime` (its own header says so, and pieces/index.ts picks the clock with
+ * `playMode ? world.realTime : world.time`). So the walk ran at wall speed while the beat
+ * that fired the strike ran on the clamped clock, floored by a watchdog at
+ * `Math.max(0.08, sceneRate)` — a fixed 12.5x + 1.5 s stretch of every beat with the
+ * travel underneath it still at 1x. Measured at 0.32 fps: a rook arrived beside its victim
+ * and stood there for 23.1 real seconds against a designed POISE of 0.16.
+ *
+ * There is no correct pair of clocks here. There is one animation, and it belongs to the
+ * clock the person is watching. `world.time` does not appear in this file any more.
+ *
+ * ── and a beat may not elapse between two frames ──────────────────────────────────────
+ *
+ * One clock is necessary and not sufficient. A phase shorter than a frame completes
+ * without ever being drawn: the pawn's 0.40 s walk and 0.42 s settle both expired inside
+ * one 3.07 s frame, so not one frame of the approach was rasterised and the pawn was
+ * drawn on d4 in the same frame its victim shattered 1.4 squares away.
+ *
+ * So a choreography is no longer a bag of independent deadlines. It is a SEQUENCE (see
+ * `runSequence`), and a sequence has two guarantees. Its phases are stretched at schedule
+ * time to at least `PHASE_FRAMES` measured frames, so the walk the renderer is given is
+ * long enough for the renderer to draw some of it. And it advances at most ONE step per
+ * frame: if a frame runs so long that two steps come due inside it, the second is rebased
+ * to now rather than fired in the same frame, so every step of a capture gets a frame of
+ * its own no matter how slow the machine is. At 60 fps a frame is 16.7 ms, the shortest
+ * phase in a capture is POISE at 160 ms, and neither guarantee ever binds — the desktop
+ * path is arithmetically unchanged.
+ *
+ * ── the other thing that was broken ──────────────────────────────────────────────────
+ *
+ * The frame loop died. `Engine.search()` at 120,000 nodes is a synchronous hole in the
+ * main thread, so each reply stopped rAF outright and the tab was killed mid-render. The
+ * search now happens in a Worker (thinker.ts) and the loop never blocks. Because the search
+ * really does span real seconds now, `state.thinking` is a state the HUD can actually show,
+ * rather than something set and cleared inside one call.
  *
  * ── and the consequence of both: nothing waits for a frame ───────────────────────────
  *
@@ -38,7 +68,15 @@
  * A capture is now travel → arrive adjacent → poise → strike → contact → shatter →
  * follow-through → step in, and the victim is whole and standing until the blade lands.
  * The geometry and the pacing of that live in choreography.ts; `choreograph` below is
- * what runs it, and `beat` is why its steps cannot arrive early.
+ * what runs it, and `runSequence` is why its steps cannot arrive early — or all at once.
+ *
+ * The residue that survived that fix, and is fixed now, was the SHORTEST capture in chess.
+ * A station placed on the straight line to an orthogonally adjacent victim left 0.14 of a
+ * square to walk, which fell under choreography's shuffle threshold, so the approach was
+ * dropped and a rook took the man beside it without moving: 2.222 m of gap at the swing and
+ * the same 2.222 m when the victim shattered. `standoffStation` there now guarantees every
+ * capture a real walk; see its note for why the answer is a bearing and not a shorter
+ * standoff.
  *
  * The SCRIPTED timeline is untouched by all of this. `piece-mid-strike` is captured at
  * exactly t = STRIKE_CONTACT and the film's framing IS that number; none of it is
@@ -91,7 +129,7 @@ import type { Engine, Move } from '../chess';
 import { createAffordances, type Affordances, type Mark } from './affordances';
 import { createThinker, type Thought } from './thinker';
 import {
-  CONTACT, FOLLOW, WALK_SETTLE, planMove, quietSeconds, type Leg, type MovePlan,
+  CONTACT, FOLLOW, POISE, WALK_SETTLE, planMove, quietSeconds, type Leg, type MovePlan,
 } from './choreography';
 
 /** The human plays White. The engine answers as Black. */
@@ -204,49 +242,99 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   }
   const think = createThinker();
 
-  /** Real seconds elapsed, as of the last frame. Set by update(); see `later` below. */
+  /** Real seconds elapsed, as of the last frame. THE clock. Set by update(). */
   let realNow = 0;
 
   /**
-   * Deferred VISUALS. Board bookkeeping is always immediate; this is the shatter, the
-   * attacker stepping into the square it just cleared, the promoted piece appearing.
+   * Smoothed real seconds per rendered frame. The only thing the frame rate is used for.
    *
-   * Each job carries TWO deadlines and fires on whichever arrives first. `t` is scene
-   * time, which is what the animation it belongs to is running on, and is the one that
-   * fires on any machine keeping up. `real` is the wall clock, and it exists because
-   * scene time is clamped: at a second a frame, a 0.62 s deferred contact is twelve frames
-   * and most of a minute away, which is why the critic watched a blade land and saw no
-   * debris in the scene graph two and a half seconds later. The animation may still be
-   * grinding through it slowly — nothing here can make another module's tween run at wall
-   * speed — but the CONSEQUENCE lands when it was supposed to.
+   * An EMA rather than the last frame, because one hitch should not stretch a whole
+   * capture, and clamped at both ends: a 240 Hz display must not drive the floor to zero
+   * and a five-second stall must not drive it to a minute.
    */
-  const pending: Array<{ t: number; real: number; run: () => void }> = [];
-  const later = (dt: number, run: () => void) =>
-    pending.push({ t: world.time + dt, real: realNow + dt, run });
+  let framePeriod = 1 / 60;
+  const FRAME_MIN = 1 / 240;
+  const FRAME_MAX = 2.5;
 
   /**
-   * A step of a CHOREOGRAPHED sequence — where landing early is worse than landing late.
+   * Frames a choreographed phase must be long enough to cover.
    *
-   * `later` fires on whichever of its two deadlines arrives first, and that is right for a
-   * consequence: a flare the renderer is too slow to have reached should still expire on
-   * the player's clock. It is exactly wrong for the ORDER of a capture. The whole bug the
-   * player reported is a shatter arriving before the blade, and a real-time deadline that
-   * outruns a slow animation reintroduces it: the victim would explode while the attacker
-   * was still visibly walking.
-   *
-   * So a beat is driven by SCENE time, the clock its animation is actually running on, and
-   * the wall clock is only a watchdog against a sequence that can never finish at all (a
-   * `walkTo` promise dropped by a `setSquare`, a tab that was suspended mid-strike). The
-   * watchdog is sized from `sceneRate` — the measured ratio of scene time to real time,
-   * which this module already keeps for the flare decay — so on a machine running at a
-   * quarter speed it sits at a quarter speed too, plus a second and a half of slack. On a
-   * machine keeping up, scene time always wins and the watchdog never fires.
+   * Two, not one. A phase of exactly one frame period can begin and end between two
+   * rasters and still never be drawn in progress; two guarantees at least one frame lands
+   * strictly inside it, which is the difference between a walk you can see and a
+   * teleport. At 60 fps this floor is 33 ms and nothing in a capture is near it.
    */
-  const beat = (dt: number, run: () => void) => pending.push({
-    t: world.time + dt,
-    real: realNow + dt / Math.max(0.08, sceneRate) + 1.5,
-    run,
-  });
+  const PHASE_FRAMES = 2;
+
+  /** A phase's duration, floored so the renderer gets a chance to draw inside it. */
+  const phase = (seconds: number) => Math.max(seconds, framePeriod * PHASE_FRAMES);
+
+  /**
+   * Deferred CONSEQUENCES: a shatter whose promise was dropped, a victim that has to leave
+   * a board it is no longer on. One deadline, on the one clock.
+   *
+   * These are not ordered against anything, which is what separates them from a sequence.
+   */
+  const pending: Array<{ at: number; run: () => void }> = [];
+  const later = (dt: number, run: () => void) => pending.push({ at: realNow + dt, run });
+
+  /**
+   * One choreographed move: an ordered list of steps at offsets from the move's start.
+   *
+   * `at` is real seconds from `t0`. The steps are the beats of a capture — leave, close,
+   * poise, swing, shatter, step in — and their ORDER is the whole point, so a sequence is
+   * drained differently from `pending`:
+   *
+   *   - at most one step runs per frame. Two steps in one frame is two beats the player
+   *     sees as one, and at the bottom of the frame-rate range it was six beats in one:
+   *     the attacker's whole approach completed between two rasters and it was drawn on
+   *     its starting square in the frame its victim exploded.
+   *   - when a frame IS long enough to make the next step due as well, the rest of the
+   *     sequence is rebased off now, so it stretches rather than compressing. A move on a
+   *     machine drawing a frame every three seconds takes as many frames as it has beats,
+   *     and every beat is on screen.
+   */
+  interface Step { at: number; run: () => void }
+  interface Sequence { epoch: number; t0: number; i: number; steps: Step[] }
+  const sequences: Sequence[] = [];
+
+  function runSequence(steps: Step[]): void {
+    if (!steps.length) return;
+    steps.sort((a, b) => a.at - b.at);
+    // t0 is set by the FIRST FRAME that drains this sequence, not here. A move is applied
+    // between frames — from a click, or from the worker's reply — and `realNow` is the
+    // clock as of the LAST frame, which on a slow or stalled renderer can be seconds old.
+    // Dating the sequence from that stale value makes half its beats due the instant the
+    // next frame arrives, which is precisely the failure this scheduler exists to stop.
+    // Dating it from the first frame instead costs nothing on a machine keeping up and is
+    // exactly right on one that is not: the sequence starts when it is first drawn.
+    const seq: Sequence = { epoch, t0: -1, i: 0, steps };
+    // Anything due at zero belongs to the click that caused it, not to the next frame:
+    // a first leg held back to the frame boundary is a whole frame of dead air on a
+    // renderer where a frame is seconds long.
+    while (seq.i < steps.length && steps[seq.i].at <= 0) steps[seq.i++].run();
+    if (seq.i < steps.length) sequences.push(seq);
+  }
+
+  function driveSequences(realT: number): void {
+    for (let s = sequences.length - 1; s >= 0; s--) {
+      const seq = sequences[s];
+      if (seq.epoch !== epoch || seq.i >= seq.steps.length) {
+        sequences.splice(s, 1);
+        continue;
+      }
+      if (seq.t0 < 0) seq.t0 = realT;
+      const step = seq.steps[seq.i];
+      if (realT < seq.t0 + step.at) continue;
+      seq.i++;
+      const next = seq.steps[seq.i];
+      // This frame swallowed the next beat as well. Push the remainder out so it gets a
+      // frame of its own instead of firing on top of this one.
+      if (next && realT >= seq.t0 + next.at) seq.t0 = realT - step.at;
+      step.run();
+      if (seq.i >= seq.steps.length) sequences.splice(s, 1);
+    }
+  }
 
   /** Wrap a job so it runs at most once, whichever deadline or promise gets there first. */
   function once(run: () => void): () => void {
@@ -272,15 +360,13 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   let thinkStartedAt = 0;
   /** Position the in-flight search was started from. A reply for any other is discarded. */
   let thinkFen = '';
-  /** Clocks until which something is visibly moving. Drives the shadow throttle. */
+  /** Real time until which something is visibly moving. Drives the shadow throttle. */
   let activeUntil = 0;
-  let activeUntilReal = 0;
   /** Real time by which the move currently animating should have finished its last beat. */
   let animUntilReal = 0;
 
   const markActive = (seconds: number) => {
-    activeUntil = Math.max(activeUntil, world.time + seconds);
-    activeUntilReal = Math.max(activeUntilReal, realNow + seconds);
+    activeUntil = Math.max(activeUntil, realNow + seconds);
   };
 
   // --- picking ---------------------------------------------------------------------
@@ -421,27 +507,33 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   }
 
   function refuse(sq: Mark | null) {
-    if (sq) aff.refuse(sq, world.time);
+    if (sq) aff.refuse(sq, realNow);
   }
 
   // --- applying a move ------------------------------------------------------------------
 
   /**
-   * Walk a piece through a planned route, the first leg now and the rest on their beats.
-   * Returns the seconds the whole route takes.
+   * Add a planned route to a sequence as one step per leg. Returns the seconds it takes.
+   *
+   * Each leg's duration goes through `phase`, so a walk is never shorter than the frames
+   * available to draw it. That floor is what the leg is HANDED to `walkTo`, not just what
+   * the schedule assumes — motion.ts plays the curve over the seconds it is given, and a
+   * curve given 0.40 s on a renderer taking 3 s a frame is a curve nobody sees.
    */
-  function walkLegs(p: PieceInstance, legs: Leg[], startAt: number, mine: number): number {
+  function walkLegs(
+    steps: Step[], p: PieceInstance, legs: Leg[], startAt: number, mine: number,
+  ): number {
     let at = startAt;
     for (const leg of legs) {
-      const when = at;
-      if (when <= 0) p.walkTo(leg.file, leg.rank, leg.seconds);
-      else {
-        beat(when, () => {
+      const seconds = phase(leg.seconds);
+      steps.push({
+        at,
+        run: () => {
           if (epoch !== mine || p.destroyed) return;
-          p.walkTo(leg.file, leg.rank, leg.seconds);
-        });
-      }
-      at += leg.seconds;
+          p.walkTo(leg.file, leg.rank, seconds);
+        },
+      });
+      at += seconds;
     }
     return at - startAt;
   }
@@ -458,9 +550,14 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
    * Step 4 is hung off the promise `strike()` returns, which resolves inside the piece's
    * own `update()` on the frame the weapon arrives — so the shatter, the flare, the camera
    * shake and the scar on the marble all fire together, one microtask after the pose that
-   * earns them, and never before it. `beat` carries a backstop at CONTACT + a frame in
-   * case that promise is ever dropped (a `setSquare` clears `Motion`'s pending list), and
-   * `once` makes sure only whichever arrives first is the one that counts.
+   * earns them, and never before it. The sequence carries a backstop step at CONTACT + a
+   * frame in case that promise is ever dropped (a `setSquare` clears `Motion`'s pending
+   * list), and `once` makes sure only whichever arrives first is the one that counts.
+   *
+   * The timings are the plan's, put through `phase` so no beat can be shorter than the
+   * frames available to draw it. `plan.strikeAt` is therefore RECOMPUTED here rather than
+   * read: it is the approach as actually scheduled plus the poise, and the approach as
+   * actually scheduled is the only thing the attacker is really walking.
    *
    * The blow is credited to the STATION, not to the attacker's original square, so the
    * debris flies away from where the blade actually was rather than from across the board.
@@ -470,29 +567,33 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     attacker: PieceInstance,
     victim: PieceInstance | undefined,
     capSq: Mark | null,
-  ) {
+  ): { steps: Step[]; duration: number } {
     const mine = epoch;
-    walkLegs(attacker, plan.approach, 0, mine);
+    const steps: Step[] = [];
+    const approach = walkLegs(steps, attacker, plan.approach, 0, mine);
 
-    if (!victim || !capSq || plan.strikeAt < 0) return;
+    if (!victim || !capSq || plan.strikeAt < 0) return { steps, duration: approach };
 
     const fire = once(() => {
       if (epoch !== mine) return;
       model.destroyPiece(victim, capSq.file, capSq.rank, plan.station.file, plan.station.rank);
     });
 
-    const swing = () => {
-      if (epoch !== mine) return;
-      if (attacker.destroyed || victim.destroyed) { fire(); return; }
-      attacker.strike(victim).then(fire, fire);
-      // One clamped frame of grace past the promise, so the promise is what normally wins.
-      beat(CONTACT + 0.06, fire);
-    };
+    const strikeAt = approach + phase(POISE);
+    steps.push({
+      at: strikeAt,
+      run: () => {
+        if (epoch !== mine) return;
+        if (attacker.destroyed || victim.destroyed) { fire(); return; }
+        attacker.strike(victim).then(fire, fire);
+      },
+    });
+    // A frame of grace past the promise, so the promise is what normally wins.
+    steps.push({ at: strikeAt + phase(CONTACT + 0.06), run: fire });
 
-    if (plan.strikeAt <= 0) swing();
-    else beat(plan.strikeAt, swing);
-
-    walkLegs(attacker, plan.finish, plan.strikeAt + CONTACT + FOLLOW, mine);
+    const finishAt = strikeAt + phase(CONTACT) + phase(FOLLOW);
+    const finish = walkLegs(steps, attacker, plan.finish, finishAt, mine);
+    return { steps, duration: finishAt + finish };
   }
 
   /**
@@ -559,33 +660,41 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
 
     // --- animation, over the next couple of seconds ---
     let arriveAt: number;
+    let steps: Step[] = [];
 
     if (attacker && plan) {
-      choreograph(plan, attacker, victim, capSq);
-      arriveAt = plan.duration;
+      const seq = choreograph(plan, attacker, victim, capSq);
+      steps = seq.steps;
+      arriveAt = seq.duration;
     } else {
       // No carved attacker to swing or to walk (should not happen) — but the victim still
       // has to leave the board, or the position and the picture stop agreeing.
       if (victim && capSq) {
         later(0, () => model.destroyPiece(victim, capSq.file, capSq.rank, from.file, from.rank));
       }
-      arriveAt = quietSeconds(
-        Math.max(Math.abs(to.file - from.file), Math.abs(to.rank - from.rank)));
+      arriveAt = phase(quietSeconds(
+        Math.max(Math.abs(to.file - from.file), Math.abs(to.rank - from.rank))));
     }
 
     if (rook && rookTo) {
       // The castling rook keeps pace with its king rather than running to a flat 0.9 s.
       const span = Math.max(Math.abs(rookTo.file - rookFrom!.file),
                             Math.abs(rookTo.rank - rookFrom!.rank));
-      rook.walkTo(rookTo.file, rookTo.rank, Math.min(arriveAt, quietSeconds(span)));
+      rook.walkTo(rookTo.file, rookTo.rank, phase(Math.min(arriveAt, quietSeconds(span))));
     }
 
     if (m.promo) {
       const type = TYPE_OF_PROMO[m.promo] ?? 'queen';
-      // On the beat, not on the wall clock: the new piece must not appear on a square the
-      // pawn is still visibly walking onto.
-      beat(arriveAt, () => model.promoteOn(to.file, to.rank, type, mover));
+      // A step of the same sequence, so the new piece cannot appear on a square the pawn
+      // is still visibly walking onto — and cannot appear in the same frame it arrives.
+      const mine = epoch;
+      steps.push({
+        at: arriveAt,
+        run: () => { if (epoch === mine) model.promoteOn(to.file, to.rank, type, mover); },
+      });
     }
+
+    runSequence(steps);
 
     // The stone is still rocking for `WALK_SETTLE` after the last leg lands.
     markActive(arriveAt + WALK_SETTLE + 0.6);
@@ -604,9 +713,9 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       const mated = state.result === 'checkmate-white' ? 'white'
         : state.result === 'checkmate-black' ? 'black' : null;
       const king = model.kingSquareOf(mated ?? engine.side);
-      aff.setGameOver(mated ? 'mate' : 'draw', king, world.time);
+      aff.setGameOver(mated ? 'mate' : 'draw', king, realNow);
     } else {
-      aff.setGameOver(null, null, world.time);
+      aff.setGameOver(null, null, realNow);
     }
   }
 
@@ -759,7 +868,7 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   /** Rendered frames between planar-reflection refreshes: while moving, and while idle. */
   const REFL_MOVING = 3;
   const REFL_IDLE = 24;
-  /** Scene seconds between shadow-map refreshes while nothing is moving. */
+  /** Real seconds between shadow-map refreshes while nothing is moving. */
   const SHADOW_IDLE = 2.0;
   let reflDriver: THREE.Object3D | null | undefined;
 
@@ -1084,19 +1193,20 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     }
   }
 
-  function budget(t: number, realT: number) {
+  function budget(realT: number) {
     adaptScale(realT);
     fitCanvas();
-    // Both clocks have to agree that something is still moving. `activeUntil` alone is
-    // scene time, which on a slow renderer stays "moving" for tens of real seconds after
-    // the stone has come to rest, and that is the expensive state.
-    const moving = t < activeUntil && realT < activeUntilReal;
+    // One clock, here too. `activeUntil` used to be kept twice, in scene time and in real
+    // time, and both had to agree — because scene time on a slow renderer stays "moving"
+    // for tens of real seconds after the stone has come to rest, and that is the expensive
+    // state. There is nothing left to disagree with: the animation IS on this clock.
+    const moving = realT < activeUntil;
     // The only shadow-caster in the scene is one fixed key light, so a still board's
     // shadow map is still correct many frames later. Refresh it every frame while a piece
     // is walking or rubble is settling, and rarely otherwise.
-    if (moving || lastShadow < 0 || t - lastShadow > SHADOW_IDLE) {
+    if (moving || lastShadow < 0 || realT - lastShadow > SHADOW_IDLE) {
       renderer.shadowMap.needsUpdate = true;
-      lastShadow = t;
+      lastShadow = realT;
     }
     // The marble's planar reflection is a SECOND full scene render, at high quality a
     // larger one than the interactive frame itself. What it shows is the room, which
@@ -1111,6 +1221,10 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
 
   /**
    * How fast scene time is running compared with the wall clock, and what to do about it.
+   *
+   * This is the ONE place `world.time` still matters here, and it matters because it is
+   * somebody else's clock: lighting's flare decay and the camera rig's shake both run on
+   * it, and neither is this module's to change. Nothing below schedules anything.
    *
    * `world.time` accumulates a dt clamped at 0.05 s, so on a renderer taking a second a
    * frame it advances at a twentieth of real speed. Anything specified as a DURATION IN
@@ -1127,6 +1241,9 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   let sceneRate = 1;
 
   function tune(dtScene: number, dtReal: number) {
+    if (dtReal > 1e-4 && dtReal < 30) {
+      framePeriod = Math.min(FRAME_MAX, Math.max(FRAME_MIN, framePeriod * 0.8 + dtReal * 0.2));
+    }
     if (dtReal > 1e-4 && dtScene > 0 && dtReal < 30) {
       const r = Math.min(1, dtScene / dtReal);
       sceneRate = sceneRate * 0.8 + r * 0.2;
@@ -1147,24 +1264,23 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   scheduleReply();
 
   return {
-    update(t, realT) {
+    update(_t, realT) {
       const dtReal = realNow > 0 ? realT - realNow : world.dt;
       realNow = realT;
       tune(world.dt, dtReal);
-      budget(t, realT);
+      budget(realT);
 
-      // Whichever deadline arrives first — see `later`. Scene time on a machine keeping
-      // up, the wall clock on one that is not.
-      //
-      // In SCHEDULE order, and pulled out of the queue before any of them runs. A slow
-      // frame now routinely makes several jobs due at once, and they are the steps of one
-      // capture: clear the victim, step the attacker into the square, put the promoted
-      // piece down. Running them backwards puts the new queen on the board before the pawn
-      // has walked there.
+      // The beats of every move in flight — one per sequence per frame, in order. See
+      // `runSequence` for why that limit is the fix and not a throttle.
+      driveSequences(realT);
+
+      // Loose consequences, in SCHEDULE order and pulled out of the queue before any of
+      // them runs, so a slow frame that makes several due at once cannot run them
+      // backwards.
       if (pending.length) {
         const due: Array<() => void> = [];
         for (let i = 0; i < pending.length; ) {
-          if (pending[i].t <= t || pending[i].real <= realT) due.push(pending.splice(i, 1)[0].run);
+          if (pending[i].at <= realT) due.push(pending.splice(i, 1)[0].run);
           else i++;
         }
         for (const run of due) run();
@@ -1178,7 +1294,7 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
         scheduleReply();
       }
 
-      aff.update(t);
+      aff.update(realT);
     },
 
     refresh() {
@@ -1187,6 +1303,7 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       // still resolve — so the epoch moves and every step of it becomes a no-op.
       epoch++;
       pending.length = 0;
+      sequences.length = 0;
       animUntilReal = 0;
       promoPending = null;
       aff.hidePromotion();
@@ -1198,6 +1315,7 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     dispose() {
       epoch++;
       pending.length = 0;
+      sequences.length = 0;
       abandonThought();
       el.removeEventListener('pointerdown', onPointerDown);
       think.dispose();

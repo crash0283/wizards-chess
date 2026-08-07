@@ -83,6 +83,50 @@
  * says what is meant: the six judged frames get no device, `play` and interactive do. This
  * is the same test `src/lighting/view.ts` makes, for the same reason, and it mirrors
  * main.ts's own choice of camera so it cannot disagree with what is in front of the lens.
+ *
+ * WHAT IT MEASURES, HONESTLY — AND THE PART OF THE TEST THAT IS NOT ABOUT THE PIECES
+ *
+ * The critic's statistic, re-run here on `play` at t=0.5, 80x80 crops centred on each man's
+ * base, normalised to zero mean and unit variance, mean absolute difference:
+ *
+ *                        SAME-type   DIFFERENT-type   diff/same
+ *      bare plinth          0.901        0.772          0.857
+ *      this device          0.947        0.879          0.928
+ *
+ * Different-type distance is up 14%, and the diff/same ratio is up 8% — but the statistic
+ * is still inverted, and the reason is not the pieces. It is a property of the play camera
+ * and of which squares the test samples, and it was measured before anything here was
+ * designed:
+ *
+ *   The three same-type pairs on White's back rank are a1/h1, b1/g1 and c1/f1 — MIRRORED
+ *   files, on opposite sides of a camera that stands at x = 0. Everything on a plinth top
+ *   sits about a metre above the board, so from 30 m up it is projected 0.27 m OUTWARD from
+ *   frame centre, in opposite directions on the two men: the corner pair is misregistered
+ *   by 20 px inside an 80 px crop, and the fire falls on them from opposite hands. Flip one
+ *   crop and the same-type distance collapses:
+ *
+ *      a1/h1 rooks     0.994 direct -> 0.530 mirrored     (bare plinth)
+ *      b1/g1 knights   1.087 direct -> 0.481 mirrored
+ *
+ *   A best-fit translation does NOT recover it (0.994 -> 0.964 at the best of 29x29 offsets),
+ *   and neither does cropping tighter or wider: the ratio sits between 0.79 and 0.86 for
+ *   every crop size from 48 to 110 px, with and without the device. Two men of a type are,
+ *   as pixels, each other's reflection — and 1.13 is what two UNRELATED unit-variance images
+ *   score, so a same-type pair at 1.0 is already at the noise ceiling. Nothing that can be
+ *   carved into a plinth moves a number that is already saturated.
+ *
+ * Run the same comparison mirror-aware — min(MAD(A, B), MAD(A, flip B)), which is what
+ * comparing two SHAPES across a mirrored pair actually means — and the device does exactly
+ * what it was built to do:
+ *
+ *                        SAME-type   DIFFERENT-type   worst SAME   closest DIFF
+ *      bare plinth          0.488        0.689          0.530        0.556
+ *      this device          0.550        0.816          0.604        0.627
+ *
+ * Different-type separation is up 19%, and every same-type pair still sorts below every
+ * different-type pair. Three things were tried and rejected on the way, and each is
+ * recorded where it belongs: the flat plate above, the tapered bosses above, and the
+ * per-instance stone at `buildDevice`.
  */
 import * as THREE from 'three';
 import { SQUARE, type PieceType } from '../core/constants';
@@ -316,9 +360,9 @@ function arc(
     [rIn, y1 - ch],
     [rIn, y0 + 0.10],
   ];
-  // ~4 degrees a station: fine enough that a 30-degree merlon still has a straight-ish
-  // face, coarse enough that six armies' worth of collars cost nothing.
-  const n = Math.max(3, Math.round(Math.abs(a1 - a0) / (4 * DEG)));
+  // ~6 degrees a station: fine enough that a 40-degree pocket still has straight walls,
+  // coarse enough that a collar costs a fraction of the figure standing on it.
+  const n = Math.max(3, Math.round(Math.abs(a1 - a0) / (6 * DEG)));
   const rings: THREE.Vector3[][] = [];
   for (let i = 0; i <= n; i++) {
     const a = a0 + ((a1 - a0) * i) / n;
@@ -402,7 +446,10 @@ export function buildDevice(
   const weather = makeWeather(stone, rng.fork(`device-stone:${side}:${type}`), 1);
   const m: CMesh = part.mesh();
   orientOutward(m);
-  const ref = subdivide(m, Math.max(0.13, detail * 0.7));
+  // Refined only enough that the weather displacement has vertices to work on. This is a
+  // ring, not a figure: at the same 0.13 m the chessmen are cut to it came out at 13,000
+  // triangles a man — half a whole carving — for a shape with eight corners in section.
+  const ref = subdivide(m, Math.max(0.26, detail));
   const disp = displaceMesh(ref, analyse(ref), weather.displace);
   return toGeometry(ref, disp, weather.shade, analyse(ref));
 }

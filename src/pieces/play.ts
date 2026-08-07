@@ -18,6 +18,13 @@
  *   the joins), so position is C2 and the piece eases out of rest and grinds into rest.
  *   The weight is kept: the shoves are still there, they just fade in and out.
  *
+ *   SPEED.  A traverse is priced by DISTANCE at a fixed cruise, not by a clamped duration.
+ *   `walkSeconds` below is the law; `Motion.walkTo` takes it as a floor on whatever the
+ *   caller asked for, so a piece can be told to take longer but never to move faster than
+ *   stone moves. Before this, a seven-square charge ran at 9.31 m/s mean and 19.93 m/s
+ *   peak and was 43% quicker than a two-square one, because the only thing that grew with
+ *   distance was the distance.
+ *
  *   FACING.  A play walk turns to face where it is going as it breaks loose, and squares
  *   back up to its side's facing as it settles. A play strike turns fully onto its victim
  *   during the wind-up instead of the film path's 78% of the way.
@@ -70,7 +77,7 @@ export function turnDelta(a: number, b: number): number {
  */
 const IN_A = 0.30;
 const OUT_A = 0.28;
-const AREA = 1 - 0.5 * IN_A - 0.5 * OUT_A;
+export const AREA = 1 - 0.5 * IN_A - 0.5 * OUT_A;
 /** max |d(speed)/dp| — smoother'(k) = 30k²(1−k)² peaks at 1.875. */
 const ACC_PEAK = 1.875 / Math.min(IN_A, OUT_A);
 
@@ -103,6 +110,51 @@ export function playAccel(p: number): number {
 }
 
 // -----------------------------------------------------------------------------------------
+// How long a traverse takes — the speed law
+// -----------------------------------------------------------------------------------------
+
+/**
+ * CRUISE SPEED, metres per second, and it is the whole point of this section.
+ *
+ * A duration handed to `walkTo` prices a move in SECONDS, and a caller that clamps that
+ * price makes a long move FASTER: at a ceiling of 1.55 s, a rook crossing 14.43 m averaged
+ * 9.31 m/s and peaked at 19.93 — 72 km/h for a four-tonne block of stone, and 43% quicker
+ * than the same rook covering two squares. Speed cannot be a function of how far there is
+ * to go. So the piece sets its own pace and the DURATION follows the distance:
+ *
+ *     duration = distance / cruise        (never shorter than the caller asked for)
+ *
+ * 2.50 m/s is a shade over one square a second. A 3.07 m rook covers its own height in
+ * 1.23 s; a 1.8 m person walking at 1.4 m/s covers theirs in 1.29 s. So this is a walking
+ * pace in body-lengths for a body this size — which is what a Froude-scaled walk of
+ * something three metres tall and made of granite actually is.
+ *
+ * CRUISE_LONG is what it drops to once the traverse is long enough to be work. A long
+ * haul should look HEAVIER, not lighter, so speed sags 12% across the board rather than
+ * rising: nothing on the board ever moves faster than the one-square cruise.
+ */
+export const CRUISE = 2.50;
+export const CRUISE_LONG = 2.20;
+/** Metres of traverse at which the load is fully felt. Roughly five squares. */
+const LONG_TRAVEL = 12.0;
+
+/**
+ * Ceiling on a single traverse, for playability alone — the one thing here that is not
+ * physics. It binds only on the very longest walk in chess, a queen or bishop running the
+ * whole a1–h8 diagonal (23.26 m), and it is set high enough that even there the piece is
+ * doing 2.47 m/s: still under CRUISE, so the ceiling can never make a long move quicker
+ * than a short one. Every other move on the board is uncapped.
+ */
+const MAX_TRAVEL = 9.4;
+
+/** Seconds a carved man takes to cover `metres` on its own two feet. Monotonic in metres. */
+export function walkSeconds(metres: number): number {
+  if (!(metres > 0)) return 0;
+  const cruise = CRUISE + (CRUISE_LONG - CRUISE) * smoother(clamp01(metres / LONG_TRAVEL));
+  return Math.min(MAX_TRAVEL, metres / cruise);
+}
+
+// -----------------------------------------------------------------------------------------
 // Walk
 // -----------------------------------------------------------------------------------------
 
@@ -111,11 +163,16 @@ export function playAccel(p: number): number {
  *
  * Because the modulation multiplies the speed rather than being added to the position,
  * forward velocity is `speed × (1 − GRIND·cos φ)` — never negative for GRIND < 1, and
- * exactly zero whenever the piece is standing still. The film path uses 0.85, which
- * means each shove is a 1.85× lurch; the player asked for smoother, and 0.52 is still
- * unmistakably a heavy body shoving itself along rather than a token sliding.
+ * exactly zero whenever the piece is standing still. The film path uses 0.85, a 12.3×
+ * peak-to-trough lurch.
+ *
+ * 0.52 was still a 3.17× swing, and at the speeds a clamped charge used to run at, one
+ * shove cycle was FOUR FRAMES at 60 fps — the ripple stopped reading as weight and started
+ * reading as a strobe. Most of that is fixed by the cruise law above, which makes the shove
+ * rate a constant ~4 Hz instead of 14.8; 0.28 does the rest. The swing is 1.78× now, which
+ * is a body shoving itself along, and it lasts sixteen frames instead of four.
  */
-const GRIND = 0.52;
+const GRIND = 0.28;
 
 export interface PlayWalkSpec {
   fx: number; fz: number; tx: number; tz: number;

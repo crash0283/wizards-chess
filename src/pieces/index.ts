@@ -72,6 +72,22 @@ import { PLAY_CONTACT } from './play';
 import { makeWeather } from './weather';
 
 /**
+ * How long stone takes to cross ground, in seconds per metre of traverse.
+ *
+ * Re-exported here because it is the one number a CALLER needs. `walkTo(file, rank,
+ * seconds)` lets a scheduler price a move, and a scheduler that clamps that price makes a
+ * long move faster rather than a long move longer — which is how a rook came to cross the
+ * board at 19.93 m/s. `Motion` now treats the requested seconds as a floor and takes
+ * `walkSeconds(metres)` if that is longer, so the speed is right whatever it is handed;
+ * but anything scheduling a BEAT against a walk (a strike on arrival, a piece appearing on
+ * the square a pawn is still walking onto) wants to price it with the same function, or
+ * its beat lands while the piece is still on the way.
+ *
+ * `import { walkSeconds } from '../pieces'` and price legs with it.
+ */
+export { walkSeconds, CRUISE, CRUISE_LONG } from './play';
+
+/**
  * The device hangs off the piece's own group, so it walks, rocks and topples with the
  * plinth it is cut into, and the destruction piece harvests it along with everything else
  * when the man is shattered.
