@@ -41,6 +41,8 @@ export function createCameraRig(world: World): CameraRig {
   let baseFov = 40;
   let baseFocus = 0;
   let baseFstop = 2.8;
+  /** True while the play view is aimed: the operator is bypassed entirely. */
+  let locked = false;
 
   const fwd = new THREE.Vector3();
   const right = new THREE.Vector3();
@@ -70,8 +72,24 @@ export function createCameraRig(world: World): CameraRig {
     return shotId === PLAY_SHOT.id && !world.capturing;
   }
 
+  /**
+   * The play view is LOCKED OFF, and deliberately.
+   *
+   * The operator — inertia, drift, correction, the flinch on an impact — is what stops the
+   * six film frames reading as CG, and it stays exactly as it is for them. But a player is
+   * pointing at 90-pixel targets on a board that fills the screen, and a rig that sways and
+   * kicks under them is a rig that moves the thing they are aiming at. It also fights the
+   * parallel projection: the whole point of orthographic here is that a piece photographs
+   * identically wherever it stands, which a moving camera quietly undoes.
+   *
+   * So in play the pose is the identity: no sway, no drift, no shake. shake() still accepts
+   * its impulse and still feeds the lighting flash — the room reacts to a blow — the LENS
+   * simply does not.
+   */
+  const STILL = { dx: 0, dy: 0, dz: 0, yaw: 0, pitch: 0, roll: 0, fovScale: 1, focusScale: 1 };
+
   function compose(t: number, dt: number) {
-    const pose = operator.update(t, dt, baseFov);
+    const pose = locked ? STILL : operator.update(t, dt, baseFov);
 
     fwd.copy(target).sub(eye);
     const dist = Math.max(0.05, fwd.length());
@@ -118,6 +136,7 @@ export function createCameraRig(world: World): CameraRig {
       baseFov = s.fov;
       baseFocus = s.focus;
       baseFstop = s.fstop;
+      locked = wantsOrtho(s.id);
       if (wantsOrtho(s.id)) {
         ortho.enable();
         // f/11 already puts the circle of confusion under a pixel across the board, and a
