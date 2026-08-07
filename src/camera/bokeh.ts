@@ -267,6 +267,19 @@ void main(){ gl_FragColor = texture2D(tSrc, vUv); }
 export interface Bokeh {
   /** Lens state for the next frame. */
   set(focus: number, fstop: number, fovDeg: number): void;
+  /**
+   * Take the glass out of the light path entirely for the next frame.
+   *
+   * Two reasons, and the first alone would be enough. Depth of field must not soften what
+   * a player is trying to click: the play shot already specifies f/11 so the circle of
+   * confusion is under a pixel everywhere on the board, and a pass that exists to prove
+   * something is sharp is a pass worth not running. The second is arithmetic. Every
+   * `cocAt` above starts by turning a depth-buffer sample into metres through the
+   * PERSPECTIVE relation `(n·f)/(f−(f−n)·d)`; a parallel projection writes linear depth
+   * instead, so that reconstruction is simply the wrong function and would hand the
+   * gather a blur radius bearing no relation to where anything is.
+   */
+  bypass(on: boolean): void;
   dispose(): void;
 }
 
@@ -339,6 +352,7 @@ export function createBokeh(world: World): Bokeh {
   let fov = 40;
 
   let busy = false;
+  let bypassed = false;
 
   const renderer = world.renderer;
   const prevAfter = world.scene.onAfterRender;
@@ -353,7 +367,7 @@ export function createBokeh(world: World): Bokeh {
     // Chain, never replace: another piece may have wanted this hook first.
     prevAfter?.apply(this, args);
     const cam = args[2];
-    if (busy) return;
+    if (busy || bypassed) return;
     // Only the real frame. The board's reflection pass renders this same scene from a
     // mirrored camera into its own buffer; that one has no depth texture and no lens.
     if (cam !== world.camera) return;
@@ -436,6 +450,9 @@ export function createBokeh(world: World): Bokeh {
       focus = Math.max(0.05, f);
       fstop = n;
       fov = fovDeg;
+    },
+    bypass(on: boolean) {
+      bypassed = on;
     },
     dispose() {
       world.scene.onAfterRender = prevAfter;

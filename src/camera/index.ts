@@ -11,6 +11,7 @@
  *   `bokeh.ts`     that circle gathered into anamorphic bokeh, before bloom and grain
  *   `operator.ts`  a body holding the rig — inertia, drift, correction, and the flinch
  *   `noise.ts`     the broadband, non-repeating noise all of the above is driven by
+ *   `ortho.ts`     the PLAY view's parallel projection — interactive only, never a film shot
  *
  * The division of labour with the lighting piece: lighting owns the GRADE — tone curve,
  * vignette, chromatic aberration, grain. This owns the GLASS and the OPERATOR. Nothing
@@ -22,14 +23,16 @@
 import * as THREE from 'three';
 import type { CameraRig } from '../core/api';
 import type { World } from '../core/world';
-import { getShot } from '../core/shots';
+import { PLAY_SHOT, getShot } from '../core/shots';
 import { createBokeh } from './bokeh';
 import { createOperator } from './operator';
+import { createOrthoView } from './ortho';
 
 export function createCameraRig(world: World): CameraRig {
   const cam = world.camera;
   const operator = createOperator(world.rng.fork('camera-operator').int(0, 0x7fffffff));
   const bokeh = createBokeh(world);
+  const ortho = createOrthoView(world);
 
   // The nominal shot, held separately from the camera so the operator's offsets are
   // always applied to the frozen framing rather than accumulating on top of themselves.
@@ -52,6 +55,19 @@ export function createCameraRig(world: World): CameraRig {
     cam.up.copy(WORLD_UP);
     cam.updateProjectionMatrix();
     cam.lookAt(target);
+  }
+
+  /**
+   * The play view, and only when a human is actually behind it.
+   *
+   * Switched on the shot ID rather than on a global, because both halves of that matter:
+   * `world.capturing` false is not enough — a live page opened with `?shot=` and no `?t=`
+   * is somebody sitting behind a FILM camera, whose framing is a frozen contract — and the
+   * shot ID alone is not enough either, since the capture harness must never see anything
+   * but the perspective rig it has always seen.
+   */
+  function wantsOrtho(shotId: string): boolean {
+    return shotId === PLAY_SHOT.id && !world.capturing;
   }
 
   function compose(t: number, dt: number) {
@@ -81,6 +97,11 @@ export function createCameraRig(world: World): CameraRig {
     cam.rotateZ(pose.roll);
 
     cam.fov = baseFov * pose.fovScale;
+    // Under the parallel projection `fov` describes nothing, so the flinch's slight zoom
+    // is handed to the frustum instead — same gesture, expressed in metres of frame rather
+    // than degrees of cone. `fov` itself is still kept current above, because the game's
+    // full-frame overlay sizes itself off it.
+    ortho.setScale(pose.fovScale);
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld();
 
@@ -97,12 +118,24 @@ export function createCameraRig(world: World): CameraRig {
       baseFov = s.fov;
       baseFocus = s.focus;
       baseFstop = s.fstop;
+      if (wantsOrtho(s.id)) {
+        ortho.enable();
+        // f/11 already puts the circle of confusion under a pixel across the board, and a
+        // parallel projection does not write the depth the gather's reconstruction assumes.
+        bokeh.bypass(true);
+      } else {
+        ortho.disable();
+        bokeh.bypass(false);
+      }
       nominal();
     },
 
     free(spec) {
       const n = spec.split(',').map(Number);
       if (n.length < 6 || n.slice(0, 6).some((v) => !Number.isFinite(v))) return;
+      // A free camera is a debug pinhole wherever it is pointed — never the play frustum.
+      ortho.disable();
+      bokeh.bypass(false);
       eye.set(n[0], n[1], n[2]);
       target.set(n[3], n[4], n[5]);
       if (Number.isFinite(n[6]) && n[6] > 0) baseFov = n[6];

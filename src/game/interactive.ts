@@ -122,7 +122,7 @@ import * as THREE from 'three';
 import type { GameDeps, GameState, PieceInstance } from '../core/api';
 import type { World } from '../core/world';
 import {
-  PIECE_HEIGHT, RENDER, SQUARE, squareCentre, type PieceType, type Side,
+  PIECE_HEIGHT, RENDER, SQUARE, squareAt, squareCentre, type PieceType, type Side,
 } from '../core/constants';
 import { PLAY_SHOT } from '../core/shots';
 import type { Engine, Move } from '../chess';
@@ -457,8 +457,12 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
    */
   function boardSquare(): Mark | null {
     if (ray.ray.intersectPlane(plane, hitPoint)) {
-      const file = Math.round(hitPoint.x / SQUARE + 3.5);
-      const rank = Math.round(hitPoint.z / SQUARE + 3.5);
+      // squareAt(), never a hand-rolled inverse. This line hard-coded the file axis's old
+      // sign and survived the fix to squareCentre(), so for a while the board rendered
+      // one way and the hit test read the other: clicking the rendered a2 selected h2 and
+      // painted its markers on the far side of the board. The column-pick fallback below
+      // already went through squareCentre(), so this one function disagreed with itself.
+      const { file, rank } = squareAt(hitPoint.x, hitPoint.z);
       if (file >= 0 && file <= 7 && rank >= 0 && rank <= 7) return { file, rank };
     }
 

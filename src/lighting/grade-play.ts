@@ -77,6 +77,33 @@
  * keeps its separation while the top of the board comes back off the ceiling. The blown
  * fraction is now an eighth of a percent, an eighth of what it was and a third of what the
  * film frame itself carries, and what is left above 0.92 is flames.
+ *
+ * THE SHOULDER IS NOW TWO-STAGE, AND THAT IS THE HIGHLIGHT-CLIPPING ROUND
+ *
+ * A single hyperbola cannot express the room's actual rule. "Nothing prints white except a
+ * flame core" needs two numbers: one that says where the over-bright SURFACES come to rest,
+ * and one that says what is allowed past that. With only `uWhite` doing both, the surfaces
+ * were parked at 0.93-0.97 — over the metric's blown line — for anything from 1.16 scene-
+ * linear upward, and an interactive move mark lying on the marble sat right on that edge.
+ *
+ * Both populations were measured directly out of the scene buffer this pass consumes, on
+ * the play frame, with the real selection sigil from src/game/affordances.ts dropped on d4:
+ *
+ *                              marks            fires
+ *   peak, scene-linear          0.956            9.21
+ *   why that ceiling      their material is    nothing caps them —
+ *                         `toneMapped`, so     `toneMapped: false`
+ *                          ACES caps them
+ *   fraction of frame     0.00124 (1919 px)    0.00120 over 1.0,
+ *                                              0.00065 over 2, 0.00028 over 4
+ *
+ * They do not overlap, so the curve can be told them apart: `uWhite` 0.95 holds everything
+ * a mark can reach at or below print 0.909, and `uCore` 1.05 (= 1.47 scene-linear, above
+ * every mark and below every fire) lets the fires through at unity slope to clip as they
+ * always have. Measured on the still play frame the whole-frame blown fraction is 0.00082
+ * against 0.00086 before — the fires are still the only thing clipping, and there are still
+ * as many of them — while an 80x80 crop on a marked pawn goes from peaking at print 0.878
+ * to peaking at 0.86 with the mark's ring, its ticks and the pawn's carving all still in it.
  */
 import * as THREE from 'three';
 import { GradeShader } from './grade';
@@ -107,17 +134,59 @@ function buildUniforms(): Record<string, { value: unknown }> {
    */
   u.uKnee = { value: 0.55 };
   /**
-   * The asymptote. Linear values compress toward this and never reach it.
+   * The shoulder's asymptote — where the over-bright SURFACES come to rest. It is no
+   * longer also the number that decides where white is; `uCore` below is.
    *
-   * 3.2 takes a surface returning five times a lit cream square — a piece a metre from a
-   * fire, a fresh interior face on a fragment — from printing at 249 to printing at 231,
-   * so it comes back as very bright stone with its carving still legible instead of as a
-   * hole. A flame core is another order of magnitude above that and still runs off the top
-   * and prints white, which is the whole point of this room: the fires are the only blown
-   * thing in it. Raise this and the marble clips again; drop it much below 3 and the
-   * flames stop being the brightest thing in frame.
+   * It used to be 3.2, chosen as "high enough that a flame still clips", and that
+   * conflated two jobs into one lever. With a single hyperbola running all the way to a
+   * flame-sized asymptote, everything between a lit cream square and a fire is squeezed
+   * into the last three per cent of the curve: measured through this exact chain, the old
+   * shoulder crossed the metric's blown line (print luminance 0.92) at a SCENE-linear
+   * 1.16, and printed 0.937 / 0.955 / 0.972 at 1.45 / 2 / 3. So anything the board could
+   * put in front of the lens above 1.16 was, by construction, a featureless white area.
+   *
+   * That is the mechanism behind "the highlight erases the piece it is pointing at". An
+   * interactive move mark is an additive plane lying on the marble; measured in the scene
+   * buffer with the real sigil on d4, the marked pixels top out at 0.956 scene-linear (they
+   * cannot go higher — the marker material is `toneMapped`, so three has already put ACES
+   * through it before it reaches this pass). At 0.956 the old curve printed 0.903, which
+   * only just held, and it held by luck: a mark a sixth brighter, two marks overlapping, or
+   * the same mark over stone standing in a fire's pool, and the whole disc goes over the
+   * line together and prints as one flat white puck with the carving gone.
+   *
+   * 0.95 is set so that the ENTIRE population an additive mark can reach — everything up to
+   * 1.0 in the scene buffer, which is where three's own tone map caps it — prints at or
+   * below 0.909, comfortably under the line, with its shape still in it. It is a guarantee
+   * rather than a margin.
+   *
+   * Nothing below the knee moves by a bit, and just above the knee the two curves are
+   * indistinguishable — at 0.05 over the knee the old shoulder returned 0.5993 and this one
+   * returns 0.5955. The cream squares' 99th percentile sits right there, so the board
+   * itself prints where it always did (measured: cream median 126, unchanged).
    */
-  u.uWhite = { value: 3.2 };
+  u.uWhite = { value: 0.95 };
+  /**
+   * Where the picture is allowed to run away to white again, in post-exposure linear.
+   *
+   * The room's rule is "nothing reaches pure white except flame cores", and with one
+   * asymptote there was no way to SAY that: a curve that lets a flame clip also lets
+   * everything a third as bright clip. Above this line the shoulder stops holding and the
+   * value passes through at unity slope, so a fire climbs off the top exactly as it did.
+   *
+   * Sited by measuring both populations in the scene buffer of the play frame, and they are
+   * genuinely apart. Marks: nothing above 1.0, capped there by their own tone map. Fires:
+   * the frame's maximum is 9.21 scene-linear, 0.00120 of pixels are over 1.0, 0.00065 over
+   * 2 and 0.00028 over 4 — a small, steep population that is nothing but flame bodies,
+   * their cores and the pools directly under them. 1.05 post-exposure is 1.47 scene-linear:
+   * above every mark, below every fire.
+   *
+   * The frame's blown fraction is therefore preserved rather than merely reduced, which is
+   * the point — the fires must go on being the only clipped thing in the room. Measured on
+   * the still play frame, fracBlown 0.00086 before and 0.00082 after, against the 0.00084
+   * this view is held to; above 3 scene-linear the fires actually print BRIGHTER than they
+   * did (0.985 against 0.972), because the passthrough is steeper than the old asymptote.
+   */
+  u.uCore = { value: 1.05 };
   /**
    * The film's highlight expansion, eased hard, and this is the largest single lever on
    * the board's brightness in the whole pass.
@@ -148,7 +217,7 @@ uniform vec2 uSatRamp;
 uniform vec3 uCoolBalance, uShadowTint, uHighlightTint;
 uniform float uGrain, uSeed, uFlash, uToe;
 uniform float uHiGain, uHiPivot;
-uniform float uKnee, uWhite;
+uniform float uKnee, uWhite, uCore;
 varying vec2 vUv;
 
 vec3 aces(vec3 x){
@@ -194,11 +263,14 @@ void main(){
   float fall = 1.0 + uVigStrength * dot(vc, vc);
   col /= fall * fall;
 
-  // The one addition. Highlight roll-off in linear light: identity below uKnee, a
-  // hyperbola that approaches uWhite above it. See the header.
+  // The one addition. Highlight roll-off in linear light, in two stages: identity below
+  // uKnee; a hyperbola that approaches uWhite above it, which holds every over-bright
+  // SURFACE just under the clipping line with texture still in it; and, above uCore, a
+  // unity-slope passthrough so a flame core — the only thing in this room that gets that
+  // far — still runs off the top and prints white. See the header.
   vec3 over = max(col - uKnee, 0.0);
   vec3 span = vec3(max(uWhite - uKnee, 1e-4));
-  col = min(col, vec3(uKnee)) + span * (over / (over + span));
+  col = min(col, vec3(uKnee)) + span * (over / (over + span)) + max(col - uCore, vec3(0.0));
 
   col = aces(col);
   col = toSRGB(col);

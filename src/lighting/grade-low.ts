@@ -41,13 +41,27 @@
  *   It is not that the low tier is graded differently — it is that the same grade is being
  *   handed a picture it was never measured on.
  *
- *   `uKnee`/`uWhite` are the answer, and they are applied in LINEAR light before the tone
- *   map, which is the only place in the chain where the information to do it still exists.
- *   Nothing below the knee moves by so much as a bit, so the room, the marble, the armies
- *   and the whole shadow half of the curve are exactly the high tier's. Above it the curve
- *   compresses toward `uWhite`, so a rook standing a metre from a fire comes back as very
- *   bright stone with carving still legible in it, while a flame core — which is an order
- *   of magnitude higher again — still runs off the top and prints white, as it should.
+ *   `uKnee`/`uWhite`/`uCore` are the answer, and they are applied in LINEAR light before the
+ *   tone map, which is the only place in the chain where the information to do it still
+ *   exists. Nothing below the knee moves by so much as a bit, so the room, the marble, the
+ *   armies and the whole shadow half of the curve are exactly the high tier's. Above it the
+ *   curve compresses toward `uWhite`, so a rook standing a metre from a fire comes back as
+ *   very bright stone with carving still legible in it; above `uCore` it passes straight
+ *   through, so a flame core still runs off the top and prints white, as it should.
+ *
+ *   AND, THIS ROUND, THE SAME CAMERA PRINTING TWO DIFFERENT WAYS ON THE TWO TIERS. The
+ *   numbers above were sited when PLAY_SHOT was at [0, 15, -21]. It is now 30 m up at about
+ *   80 degrees; grade-play.ts re-measured the shoulder and the highlight expansion for that
+ *   camera and this file did not follow, so the tier a person actually plays on was a full
+ *   stop hotter at the top than the tier the play view is judged on. Rendered side by side
+ *   at 1920x804 the low tier crossed the blown line at a scene-linear of 0.488 against the
+ *   play grade's 1.162 — the lit cream squares printed as white — giving whole-frame
+ *   fracBlown 0.00168 against 0.00086 and a pawn's own 80x80 crop 1.34% blown at median
+ *   0.808 against 0.588 with nothing drawn on its square at all. Drop an interactive move
+ *   mark on that square and the whole disc goes over together: 14.95% blown at median
+ *   0.851, a flat white puck. Every number in this file's shoulder is now grade-play.ts's,
+ *   scaled by 0.788/0.716 so the two tiers agree in SCENE-linear and differ only by the
+ *   exposure lift the thinned rig was measured to need. See the notes on each.
  */
 import * as THREE from 'three';
 import { AtmosphereShader } from './atmosphere';
@@ -70,11 +84,35 @@ function buildUniforms(): Record<string, { value: unknown }> {
   >;
   for (const k of ATMO_KEYS) u[k] = atmo[k];
   /**
-   * Where the highlight roll-off starts, in linear light after exposure. ACES already
-   * turns 0.9 into 0.72 and it is a long way below anything that prints white, so the
-   * entire visible tone curve of the room sits under this and is untouched.
+   * Where the highlight roll-off starts, in linear light after exposure.
+   *
+   * THIS TIER RENDERS THE PLAY CAMERA AND NOTHING ELSE, and until this round it was still
+   * graded for a camera that no longer exists. 0.90 was sited against PLAY_SHOT at
+   * [0, 15, -21] — a 33-degree view where only the near rank was over the line. PLAY_SHOT
+   * is now 30 m up at about 80 degrees with the marble filling the middle of the frame, and
+   * grade-play.ts re-sited the same knee at 0.55 for exactly that reason. This tier never
+   * followed, so the two tiers of the SAME camera were carrying tone curves a stop apart —
+   * which is the one thing the quality-tier brief says must not happen.
+   *
+   * What that cost, measured on the play frame at 1920x804 with the two tiers rendered
+   * side by side: the low tier crossed the metric's blown line (print luminance 0.92) at a
+   * scene-linear of 0.488 against the play grade's 1.162, so the lit cream squares — which
+   * live between 0.3 and 0.9 — printed AS WHITE. Whole-frame fracBlown 0.00168 against
+   * 0.00086, an 80x80 crop on a pawn 1.34% blown before anything was even drawn on its
+   * square, and the pawn's own crop median 0.808 against 0.588.
+   *
+   * Put an interactive move mark on that square and the disc goes over the line with it:
+   * the same crop measured 14.95% blown at median 0.851 — a flat white puck with the
+   * carving gone — while the identical unmarked pawn nearby sat at median 0.365. That is
+   * the reported "the highlight erases the thing it is highlighting", and it was never the
+   * mark: the mark is a small additive plane that tops out at 1.14 scene-linear, and it is
+   * this curve that decided 1.14 prints white.
+   *
+   * 0.605 is grade-play.ts's 0.55 expressed at this tier's exposure (0.55 * 0.788/0.716),
+   * so the two tiers now hold the same SCENE-linear knee and differ only by the 10%
+   * exposure lift below, which is what the tier brief asks for.
    */
-  u.uKnee = { value: 0.90 };
+  u.uKnee = { value: 0.605 };
   /**
    * Exposure, and it is the one grade value that is deliberately NOT the high tier's.
    *
@@ -95,12 +133,39 @@ function buildUniforms(): Record<string, { value: unknown }> {
    */
   u.uExposure = { value: 0.788 };
   /**
-   * The asymptote. Linear values compress toward this and never reach it, so `uWhite`
-   * sets how much headroom the top of the picture has: at 5.2 a surface would have to be
-   * receiving six times the light of a fully lit cream square to print at 255, which in
-   * this room only a flame body does.
+   * The shoulder's asymptote — where the over-bright SURFACES come to rest.
+   *
+   * It was 5.2, on the same reasoning `uWhite` carried in grade-play.ts before this round:
+   * one number doing two jobs, set high enough that a flame still clips, which necessarily
+   * parks everything a third as bright against white as well. See the note on the two-stage
+   * shoulder in grade-play.ts — this is the same curve, and the numbers here are that
+   * file's multiplied by 0.788/0.716 so the two tiers agree in SCENE-linear.
    */
-  u.uWhite = { value: 5.2 };
+  u.uWhite = { value: 1.046 };
+  /**
+   * Where the picture runs away to white again: above this, unity slope, so the fires
+   * clip. 1.156 post-exposure is 1.47 scene-linear — above every additive mark the
+   * interactive layer can draw (they are `toneMapped`, so ACES caps them at 1.0 before
+   * they reach this pass; measured peak on this tier 1.14) and below every fire (frame
+   * peak 8.2 scene-linear, with 0.00091 of pixels over 1.0 and 0.00027 over 4).
+   */
+  u.uCore = { value: 1.156 };
+  /**
+   * The film's highlight expansion, at the play camera's setting instead of the film's.
+   *
+   * This is the single biggest lever on how hot the board prints, and it was the one thing
+   * grade-play.ts changed that this file never picked up: cloned straight from the film
+   * grade it stood at 0.28, multiplying everything in the 0.25-0.62 output band — which is
+   * where the lit marble of a near-top-down view sits — by up to 1.28 in the last lines of
+   * the shader, immediately before the clamp. On its own it moved this tier's blown line
+   * from a scene-linear of 0.488 to 1.022; with the shoulder above it lands at 1.229.
+   *
+   * The expansion exists to widen a histogram against the reference FRAME's top end, which
+   * is a property of the film stock and not of this scene, and the play camera does not
+   * have that deficit. Reduced rather than removed, for the reason grade-play.ts gives:
+   * the band also carries the lit masonry, and at zero the room flattens.
+   */
+  u.uHiGain = { value: 0.10 };
   return u;
 }
 
@@ -131,7 +196,7 @@ uniform vec2 uSatRamp;
 uniform vec3 uCoolBalance, uShadowTint, uHighlightTint;
 uniform float uGrain, uSeed, uFlash, uToe;
 uniform float uHiGain, uHiPivot;
-uniform float uKnee, uWhite;
+uniform float uKnee, uWhite, uCore;
 varying vec2 vUv;
 
 vec3 aces(vec3 x){
@@ -188,12 +253,16 @@ void main(){
   float fall = 1.0 + uVigStrength * dot(vc, vc);
   col /= fall * fall;
 
-  // Highlight roll-off, in linear light. Below uKnee this is the identity — bit for bit,
+  // Highlight roll-off, in linear light, two-stage and identical in shape to the one in
+  // grade-play.ts — this tier renders the same camera. Below uKnee it is the identity —
   // min() and max() and nothing else — so the room's whole tone response is the high
-  // tier's. Above it the curve bends toward uWhite and never reaches it.
+  // tier's. Between uKnee and uCore it bends toward uWhite and never reaches it, which is
+  // what holds an over-bright surface (stone in a fire's pool, a fracture face, a move
+  // mark lying on the marble) under the clipping line with its shape still in it. Above
+  // uCore it passes at unity slope, so the fires still run off the top and print white.
   vec3 over = max(col - uKnee, 0.0);
   vec3 span = vec3(max(uWhite - uKnee, 1e-4));
-  col = min(col, vec3(uKnee)) + span * (over / (over + span));
+  col = min(col, vec3(uKnee)) + span * (over / (over + span)) + max(col - uCore, vec3(0.0));
 
   col = aces(col);
   col = toSRGB(col);

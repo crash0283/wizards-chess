@@ -407,8 +407,14 @@ export const COORD_FRAG = /* glsl */ `
     bool gEnd = gaw.y > gaw.x;                    // the ends of the board carry the files
     float gR = gEnd ? uGlyphREnd : uGlyphRSide;
     float gAlong = gEnd ? w.x : w.y;
-    float gIdx = clamp(floor(gAlong / uGlyphSq + 4.0), 0.0, 7.0);
-    float gCtrA = (gIdx - 3.5) * uGlyphSq;
+    // Files run the OPPOSITE way to ranks in world space: squareCentre maps
+    // x = (3.5 - file) * SQUARE while z = (rank - 3.5) * SQUARE. This derived both from
+    // the same expression, so once squareCentre's file sign was corrected the carved
+    // letters stayed mirrored — the far kerb read H G F E D C B A left to right, with A
+    // sitting over the h-file. Ranks are unaffected and keep the original mapping.
+    float gRaw = gEnd ? (4.0 - w.x / uGlyphSq) : (w.y / uGlyphSq + 4.0);
+    float gIdx = clamp(floor(gRaw), 0.0, 7.0);
+    float gCtrA = gEnd ? (3.5 - gIdx) * uGlyphSq : (gIdx - 3.5) * uGlyphSq;
     vec2 gCtr = gEnd ? vec2(gCtrA, sign(w.y) * gR) : vec2(sign(w.x) * gR, gCtrA);
     int gId = int(gIdx) + (gEnd ? 0 : 8);
     vec2 gp = vec2(-(w.x - gCtr.x), w.y - gCtr.y) / uGlyphCap;
