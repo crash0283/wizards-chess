@@ -28,10 +28,17 @@
  *
  * The north screen carries a clear bay in its shafts where the great portal stands
  * behind it. The web runs across that bay unbroken — see `buildSideScreen`.
+ *
+ * Each screen is built twice, for the same reason the near piers are: the lean that
+ * closes a cinematic frame stands squarely between the play camera, 30 m up, and White's
+ * back rank. Pass `guard` and the heads stop at that camera's sight line instead of
+ * crossing it. See `playview.ts`.
  */
 import * as THREE from 'three';
 import { makeFbm, hashString } from '../core/rng';
 import { CarvedMesh, sweepShaft, sweepWeb, ringMoulding, type Station, type Tone } from './carved';
+import { clearSight } from './playview';
+import type { ToneOpts } from './piers';
 
 /** Long kerb of the board is at 11.54; the screens stand immediately outside it. */
 export const SIDE_Z = 13.30;
@@ -104,24 +111,29 @@ function smooth(a: number, b: number, x: number): number {
  * gathering in the hollows between them, a little grime wicked up off the floor, and
  * the long fall into unresolved dark above the springing.
  */
-export function makeCarvedTone(tag: string, seed: number): Tone {
+export function makeCarvedTone(tag: string, seed: number, opts: ToneOpts = {}): Tone {
   const s = (hashString(tag) ^ seed) >>> 0;
   const broad = makeFbm(s, 3, 2.03, 0.5);
   const fine = makeFbm((s ^ 0x9e3779b9) >>> 0, 3, 2.17, 0.55);
+  // See ToneOpts in piers.ts. Both defaults are the film values; the play build turns the
+  // fall into darkness off and eases the hollow, because it looks DOWN on the band of
+  // shaft that both of those curves exist to hide.
+  const fade = opts.fade ?? true;
+  const foldCut = opts.foldCut ?? 0.80;
 
   return (x, y, z, fold) => {
     let v = 1 + 0.22 * broad(x * 0.075, y * 0.055, z * 0.075) + 0.14 * fine(x * 0.62, y * 0.30, z * 0.62);
 
     // soot and shadow in the hollow between two shafts — this is where the deep blacks
     // in the outer thirds come from, and it is coarse structure rather than fine noise
-    v *= 1 - 0.80 * fold * fold;
+    v *= 1 - foldCut * fold * fold;
 
     // grime off the floor, and a dry pale bloom out of the plinth
     v *= 1 - 0.22 * smooth(2.4, 0.0, y);
     const bloom = 0.13 * smooth(3.2, 0.7, y) * smooth(0.1, 0.6, fine(x * 0.8, y * 0.9, z * 0.8) + 0.5);
 
     // the room loses its ceiling
-    v *= 1 - 0.985 * smooth(DARK_START, DARK_FULL, y);
+    if (fade) v *= 1 - 0.985 * smooth(DARK_START, DARK_FULL, y);
 
     const r = Math.max(0.008, v * 1.010 + bloom * 0.92);
     const g = Math.max(0.008, v * 1.000 + bloom * 0.96);
@@ -130,10 +142,36 @@ export function makeCarvedTone(tag: string, seed: number): Tone {
   };
 }
 
-/** The path of one shaft of a leaning side screen. */
-function sidePath(x: number, z0: number, inward: number, r: number, bendSteps: number): Station[] {
+/**
+ * Radius allowance the WEB is guarded with, so that under the play clamp it still sits
+ * behind every shaft by the same margin it does unclamped.
+ *
+ * A proud major shaft's axis stands at `SIDE_Z - 0.16` and the web at `SIDE_Z + WEB_BACK`,
+ * so the web is 0.68 m outboard of that axis and the axis itself is guarded with
+ * `R_MAJOR`. Guard the web with the sum and the whole screen shifts as one piece.
+ */
+const WEB_GUARD_PAD = R_MAJOR + 0.16 + WEB_BACK;
+
+/**
+ * The path of one shaft of a leaning side screen.
+ *
+ * `guard` is the play build: the lean stops where the head would cross the play camera's
+ * sight line to the board — see playview.ts. `guardPad` is the radius that has to clear
+ * that line; it defaults to the station's own radius, which is what a shaft wants, and is
+ * given explicitly for the web, which is a zero-radius path standing behind the shafts.
+ */
+function sidePath(
+  x: number, z0: number, inward: number, r: number, bendSteps: number,
+  guard = false, guardPad?: number,
+): Station[] {
   const st: Station[] = [];
-  const at = (y: number, rr: number, dz = 0) => st.push({ x, y, z: z0 + inward * dz, r: rr });
+  const sign = (-inward) as 1 | -1;
+  const at = (y: number, rr: number, dz = 0) => {
+    const z = z0 + inward * dz;
+    // The web is swept along x from a section built at x = 0, so it is guarded there —
+    // the most conservative point on its own span, and the only one it can be judged at.
+    st.push({ x, y, z: guard ? clearSight(sign, x, y, z, guardPad ?? rr) : z, r: rr });
+  };
 
   // moulded foot: a spreading base, a roll, and the neck above it
   at(0.00, r * 1.66);
@@ -168,7 +206,7 @@ export interface ScreenBuild {
  * `bay` opens a clear span in x — used on the portal wall.
  */
 export function buildSideScreen(
-  sign: 1 | -1, hi: boolean, tone: Tone, bay: boolean,
+  sign: 1 | -1, hi: boolean, tone: Tone, bay: boolean, guard = false,
 ): ScreenBuild {
   const m = new CarvedMesh();
   const z0 = sign * SIDE_Z;
@@ -198,7 +236,7 @@ export function buildSideScreen(
       const r = major ? R_MAJOR : R_MINOR;
       // heavier shafts stand a little proud of the screen
       const zz = z0 + inward * (major ? 0.16 : 0);
-      sweepShaft(m, sidePath(x, zz, inward, r, bendSteps), 0, inward, radial, arc, tone);
+      sweepShaft(m, sidePath(x, zz, inward, r, bendSteps, guard), 0, inward, radial, arc, tone);
     }
   }
 
@@ -228,7 +266,7 @@ export function buildSideScreen(
   // thin bright slots between dark leaning shafts, which is edge energy exactly where the
   // frame had none. Below the springing it stays solid, because there the thing behind it
   // is the bare foot of the wall and the eye would find the corner of the room.
-  const webPath = sidePath(0, z0 - inward * WEB_BACK, inward, 0, bendSteps)
+  const webPath = sidePath(0, z0 - inward * WEB_BACK, inward, 0, bendSteps, guard, WEB_GUARD_PAD)
     .map((s) => ({ x: 0, y: s.y, z: s.z }));
   const webTone = (x: number, y: number, z: number): [number, number, number] => {
     const [r, g, bb] = tone(x, y, z, 1);

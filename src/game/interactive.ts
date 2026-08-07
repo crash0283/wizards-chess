@@ -79,7 +79,7 @@ import { createAffordances, type Affordances, type Mark } from './affordances';
 import { createThinker, type Thought } from './thinker';
 
 /** The human plays White. The engine answers as Black. */
-const PLAYER: Side = 'white';
+export const PLAYER: Side = 'white';
 
 /** Node budget for a reply. Off-thread, so this is latency the player never feels. */
 const REPLY_NODES = 60_000;
@@ -132,6 +132,17 @@ export interface BoardModel {
   ): void;
   /** Swap whatever stands on a square for a freshly carved piece of `type`. */
   promoteOn(file: number, rank: number, type: PieceType, side: Side): void;
+  /**
+   * A man came off the board. `letter` is the FEN letter WITH case, so 'p' is a black pawn.
+   *
+   * The readout's tray is fed from here rather than from counting what is missing off the
+   * FEN, because counting cannot survive a promotion: a side that promotes a pawn has
+   * seven pawns and two queens, and a tally taken off the board reads that as a captured
+   * pawn that was never taken. The move itself always knows exactly what it took —
+   * including the pawn behind an en-passant capture, which is not even on the destination
+   * square — so the tray is built from the moves and is simply right.
+   */
+  noteCapture(letter: string): void;
   syncState(): void;
   kingSquareOf(side: Side): Mark | null;
 }
@@ -389,6 +400,10 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     const rook = rookFrom ? model.pieceAt(rookFrom.file, rookFrom.rank) : undefined;
 
     // --- bookkeeping, now ---
+    // The tray is scored the instant the move is made, not when the blade lands half a
+    // second of animation later, so it can never disagree with the material balance
+    // beside it — that comes off the engine, which is already settled here.
+    if (m.captured) model.noteCapture(m.captured);
     if (capSq) model.forget(capSq.file, capSq.rank);
     model.relocate(from, to);
     if (rookFrom && rookTo) model.relocate(rookFrom, rookTo);

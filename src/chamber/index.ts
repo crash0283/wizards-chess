@@ -41,6 +41,13 @@
  *  - The screens occlude most of the wall masonry from most cameras, which is why the
  *    room got cheaper to draw when they went in rather than dearer.
  *  - `scene.fog` belongs to the lighting piece. Nothing here touches it.
+ *
+ * And one thing the room now does twice. The piers and the screens lean seven metres out
+ * over the board, which is the whole composition from a low camera and is ruinous from the
+ * play camera 30 m above it — from there they hang directly over White's back rank. So
+ * both are built a second time with their heads stopped at that camera's sight line, and
+ * the cull below swaps to those whenever the lens is above `PLAY_CAM_MIN_Y`, which no film
+ * shot ever is. `playview.ts` has the geometry and the argument.
  */
 import * as THREE from 'three';
 import type { Chamber } from '../core/api';
@@ -61,6 +68,7 @@ import {
   buildSideScreen, buildBackRow, makeCarvedTone, SIDE_Z, PORTAL_X,
 } from './screen';
 import { buildNearPiers, makeNearTone, NEAR_Z } from './piers';
+import { PLAY_CAM_MIN_Y } from './playview';
 import { makeGrainNormal, type Tone } from './carved';
 import { hashString, makeFbm } from '../core/rng';
 import type { Weather } from './weather';
@@ -156,6 +164,22 @@ export function createChamber(world: World): Chamber {
   const materials: THREE.Material[] = [];
   const surfaces: THREE.Object3D[] = [];
 
+  /**
+   * Film stone and its play-view twin, swapped by camera height at draw time.
+   *
+   * The near piers and the side screens lean seven metres out over the board so the film
+   * frames are enclosed by them. The play camera sits 30 m up and looks THROUGH that lean
+   * at White's back rank, where it reads as black bars over the pieces. So each of those
+   * meshes is built twice — once as composed, once with the lean stopped at the play
+   * camera's sight line and the fall-into-darkness lifted — and exactly one of the pair is
+   * ever visible. See `playview.ts` for the geometry and for why the test is the camera's
+   * height rather than `world.capturing`.
+   *
+   * Nothing else in the room is touched: the walls, the floor, the scree, the far heap and
+   * the vault are all either vertical or below the sight line already.
+   */
+  const swaps: { film: THREE.Object3D; play: THREE.Object3D }[] = [];
+
   // --- surface -------------------------------------------------------------------------
   const atlas = buildStoneAtlas(world);
 
@@ -212,6 +236,18 @@ export function createChamber(world: World): Chamber {
   });
   materials.push(carvedStone);
 
+  /** The screens' stone for the play twins only — see `nearStonePlay` below. */
+  const carvedStonePlay = new THREE.MeshStandardMaterial({
+    color: 0xa89b86,
+    roughness: 0.86,
+    metalness: 0.0,
+    vertexColors: true,
+    normalMap: grain,
+    normalScale: new THREE.Vector2(0.58, 0.58),
+    envMapIntensity: 3.4,
+  });
+  materials.push(carvedStonePlay);
+
   // The near piers get their own stone, and it is not a stylistic choice.
   //
   // Measured: doubling their per-vertex tone moved the left third of the frame by 0.004
@@ -249,6 +285,32 @@ export function createChamber(world: World): Chamber {
     envMapIntensity: 1.3,
   });
   materials.push(nearStone);
+
+  /**
+   * The same two stones, for the play twins only.
+   *
+   * The dark albedos above are the right answer for the film frames and the note over
+   * `nearStone` is the evidence: pushing them pale there bought 0.0003 of edge energy and
+   * cost the frame half its true blacks. None of that argument survives the move to a
+   * camera 30 m up. There the near field is not a silhouette against a lit board, it is
+   * the bottom corners of the picture, seen from above with nothing behind it — and the
+   * one thing that DOES reach it from there is the environment gradient, which carries its
+   * energy overhead and lands on exactly the up-turned faces of a leaning shaft. So these
+   * answer it about three times as hard, on a stone a shade off the wall masonry's, and
+   * the near field reads as the room closing in rather than as a hole in the frame.
+   *
+   * Nothing renders with these unless the camera is above `PLAY_CAM_MIN_Y`.
+   */
+  const nearStonePlay = new THREE.MeshStandardMaterial({
+    color: 0xb5ab99,
+    roughness: 0.80,
+    metalness: 0.0,
+    vertexColors: true,
+    normalMap: nearGrain,
+    normalScale: new THREE.Vector2(0.85, 0.85),
+    envMapIntensity: 4.2,
+  });
+  materials.push(nearStonePlay);
 
   // --- unit geometries -------------------------------------------------------------------
   const blockRng = world.rng.fork('chamber-blocks');
@@ -482,6 +544,11 @@ export function createChamber(world: World): Chamber {
   // otherwise be looking at the back of it. The threshold is set well inside the screen
   // so no amount of handheld drift can pop it.
   const carvedTone = makeCarvedTone('chamber-carved', world.seed);
+  // Same noise, same stone, same tag — only the two curves that exist to hide the top of
+  // a cinematic frame are off, because from 30 m up that band IS the frame.
+  const carvedTonePlay = makeCarvedTone('chamber-carved', world.seed, {
+    fade: false, foldCut: 0.26,
+  });
   const screenPanels: { sign: 1 | -1; bay: boolean }[] = [
     { sign: -1, bay: true },   // the portal is on this wall: leave its bay clear
     { sign: 1, bay: false },
@@ -507,6 +574,23 @@ export function createChamber(world: World): Chamber {
     bm.receiveShadow = true;
     bm.castShadow = false;
     sg.add(bm);
+
+    // The play twins. Same shafts, same rhythm, same bay; the heads stop at the sight
+    // line instead of crossing it. The back row does not lean at all and never occludes
+    // anything — it is rebuilt only so its tone matches the screen standing in front of it.
+    for (const [name, film, geo] of [
+      ['shafts', fm, buildSideScreen(s.sign, hi, carvedTonePlay, s.bay, true).geometry],
+      ['back', bm, buildBackRow(s.sign, hi, carvedTonePlay, s.bay).geometry],
+    ] as const) {
+      geometries.push(geo);
+      const pm = new THREE.Mesh(geo, carvedStonePlay);
+      pm.name = `${sg.name}-${name}-play`;
+      pm.receiveShadow = true;
+      pm.castShadow = false;
+      pm.visible = false;
+      sg.add(pm);
+      swaps.push({ film, play: pm });
+    }
 
     // Scree banked against the foot of the screen. It closes the strip of bare floor
     // between the board's kerb and the shafts — the last place the eye could find an
@@ -584,6 +668,7 @@ export function createChamber(world: World): Chamber {
   // stand in front of them, hard outside the kerb, and they are cut by the top and the
   // bottom of frame at once. See `piers.ts` for why that matters more than any of it.
   const nearTone = makeNearTone('chamber-near', world.seed);
+  const nearTonePlay = makeNearTone('chamber-near', world.seed, { fade: false, foldCut: 0.30 });
   for (const sign of [-1, 1] as const) {
     const pg = new THREE.Group();
     pg.name = `chamber-piers-${sign < 0 ? 'north' : 'south'}`;
@@ -597,6 +682,19 @@ export function createChamber(world: World): Chamber {
     surfaces.push(pm);
     group.add(pg);
     screenTris += built.triangles;
+
+    // The play twin of this row — the one piece of stone that actually stood in front of
+    // the pieces. Its head is clamped to the sight line, so it still reaches in over the
+    // kerb and closes the frame, but it stops exactly where the board begins.
+    const playBuilt = buildNearPiers(sign, hi, nearTonePlay, true);
+    geometries.push(playBuilt.geometry);
+    const ppm = new THREE.Mesh(playBuilt.geometry, nearStonePlay);
+    ppm.name = `${pg.name}-shafts-play`;
+    ppm.receiveShadow = true;
+    ppm.castShadow = false;
+    ppm.visible = false;
+    pg.add(ppm);
+    swaps.push({ film: pm, play: ppm });
     // `knight-looking-up` sits five centimetres off the south row's axis, so this cull
     // is not a nicety — without it that shot is inside a pier.
     panels.push({ groups: [pg], nx: 0, nz: -sign, d: NEAR_Z - 1.0 });
@@ -624,6 +722,14 @@ export function createChamber(world: World): Chamber {
     for (const p of panels) {
       const inside = p.nx * camPos.x + p.nz * camPos.z + p.d > 0;
       for (const g of p.groups) g.visible = inside;
+    }
+    // ...and, from the play camera and nowhere else, the near field's play twin instead of
+    // its film build. `visible` is hierarchical, so the panel test above still owns whether
+    // either of them draws at all. The highest camera in SHOTS is at 10.6 m.
+    const play = camPos.y > PLAY_CAM_MIN_Y;
+    for (const s of swaps) {
+      s.film.visible = !play;
+      s.play.visible = play;
     }
   };
 

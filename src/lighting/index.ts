@@ -28,7 +28,9 @@ import { createEnvironment } from './environment';
 import { createFlames } from './flames';
 import { GradeShader } from './grade';
 import { LowGradeShader } from './grade-low';
+import { PlayGradeShader } from './grade-play';
 import { FIRE } from './palette';
+import { isPlayView } from './view';
 
 interface FlareSlot {
   light: THREE.PointLight;
@@ -43,11 +45,40 @@ export function createLighting(
   _deps: { chamber: Chamber; board: Board },
 ): Lighting {
   const high = world.quality === 'high';
+  /**
+   * Is this run being lit for PLAY_SHOT rather than for one of the six film shots? See
+   * view.ts — it is decided by which shot main.ts is about to aim, so the six judged
+   * frames are excluded by construction and not by luck.
+   */
+  const play = isPlayView(world);
 
   const group = new THREE.Group();
   group.name = 'lighting';
 
   // --- the cold room ------------------------------------------------------------------
+  /**
+   * The rig itself is NOT re-hung for the play camera, and that is a measured decision
+   * rather than a reluctance to touch it.
+   *
+   * The obvious theory was that a top-down camera mirrors the environment's bright zenith
+   * (COLD.envTop, at environmentIntensity 0.72) off the polished marble over the board's
+   * whole area at once, where `wide-establishing`'s 24-degree view mirrors the dark
+   * horizon band instead — "lit as a self-luminous plane". It is a good theory and it is
+   * wrong. Halving the top stop of the prefiltered environment for this camera and
+   * re-capturing the play frame moved the board not at all: sampling every square of the
+   * four empty ranks, the navy squares came back at rgb 24,33,53 with a median of 32 and a
+   * 95th percentile of 46 BOTH TIMES, to the byte, and the cream squares likewise. The
+   * marble's `envMapIntensity` is 0.20 against a rough surface, so the IBL is worth under
+   * two counts on the board; what it does change is the chroma of everything else in the
+   * room, which is not what was asked for. The measurement is recorded here so the next
+   * round does not spend a capture on it again.
+   *
+   * The board's brightness comes from the aisle strip and the sheen — diffuse and grazing
+   * specular from real lights — and those are shared with the film shots and are where
+   * five rounds of matching the reference frames actually live. So the play camera's
+   * problem is fixed downstream, in the tone response, where it can be fixed without
+   * touching a single watt the film shots depend on. See grade-play.ts.
+   */
   const env = createEnvironment(world);
   group.add(env.group);
   env.apply(world.scene);
@@ -91,6 +122,47 @@ export function createLighting(
   }
   /** 0..1, feeds a brief global exposure lift in the grade. */
   let flashLevel = 0;
+
+  /**
+   * The ceiling on that lift, and it is the one number that decides whether a board full
+   * of captures stays readable.
+   *
+   * `uFlash` multiplies the WHOLE frame's exposure. At 0.6 — the film shots' value, set so
+   * a capture reads as a real event from 23 m out at a grazing angle — the play camera's
+   * board goes up by two thirds of a stop across its entire surface, and the play camera
+   * is already looking straight down the specular axis of that board. That is a white
+   * plane. The flare LIGHTS are untouched, so an impact still throws real light on real
+   * geometry and the dust burst still blows; what comes down is only the global lift laid
+   * over everything else in the picture on top of them.
+   */
+  const flashCeiling = play ? 0.16 : high ? 0.6 : 0.26;
+
+  /**
+   * Real seconds elapsed, tracked here rather than taken from `dt`, because a flare's
+   * decay is the one duration in this piece that a PERSON waits out.
+   *
+   * `world.time` accumulates a dt clamped at 0.05 s, so on a slow frame it runs far behind
+   * the wall clock and a 0.55-second flare sits on the room for the best part of a minute.
+   * Capture after capture that is a permanent white bloom over the middle of the board —
+   * the exact complaint. game/interactive.ts already scales the decay it ASKS for to
+   * compensate, but this piece must not depend on a caller doing that: a flare that
+   * outlives its welcome is a lighting bug wherever the number came from.
+   *
+   * Under capture `world.realTime` is exactly `world.time` and nothing here is used —
+   * `ageDt` is literally `dt`, the same variable the loop always added, so the film path's
+   * arithmetic is unchanged to the bit.
+   *
+   * MEASURED, driving the real interactive page and firing ten impacts 1.5 REAL seconds
+   * apart — the tempo of a fast game — while reading the flare lights' intensity back out
+   * of the scene graph. On this box scene time ran at 3.6% of the wall clock (33.9 s of
+   * real time bought 1.0 s of scene time), which is the pathological ratio the whole
+   * problem depends on: aged in scene seconds a 0.55 s flare needs FIFTEEN real seconds to
+   * expire, so the next capture always lands first and the light never goes out. Aged in
+   * real seconds it read 253 at the strike, 2.1 one second after the last impact, and 0.0
+   * one second after that — and it was still 0.0 fifteen seconds later. The sum across all
+   * slots never once exceeded one flare's worth.
+   */
+  let lastRealTime = 0;
 
   // --- post chain ---------------------------------------------------------------------
   const size = world.renderer.getSize(new THREE.Vector2());
@@ -210,7 +282,12 @@ export function createLighting(
   }
   composer.addPass(bloom);
 
-  const gradePass = new ShaderPass(high ? GradeShader : LowGradeShader);
+  // The film grade, the play grade, or the low tier's. `GradeShader` is what the six
+  // reference critics judge and it is reached by exactly the same expression it always
+  // was for every one of them; `play` can only be true for PLAY_SHOT. See grade-play.ts.
+  const gradePass = new ShaderPass(
+    high ? (play ? PlayGradeShader : GradeShader) : LowGradeShader,
+  );
   gradePass.material.depthTest = false;
   gradePass.material.depthWrite = false;
   gradePass.renderToScreen = true;
@@ -253,13 +330,24 @@ export function createLighting(
   world.onUpdate((t, dt) => {
     flames.tick(t);
 
+    // How much a flare ages this frame. Under capture: `dt`, the same value the loop has
+    // always added — not a recomputed one, because `realTime - lastRealTime` is only
+    // ALGEBRAICALLY equal to dt and differs from it in the last bits of a float, which is
+    // enough to move a pixel. Interactive: real seconds, clamped so a stalled tab or a
+    // shader compile cannot expire a flare in a single frame.
+    const realDt = Math.min(0.25, Math.max(0, world.realTime - lastRealTime));
+    lastRealTime = world.realTime;
+    const ageDt = world.capturing ? dt : realDt;
+
     let flash = 0;
     for (const s of flareSlots) {
       if (!s.active) continue;
-      s.age += dt;
+      s.age += ageDt;
       const k = 1 - s.age / s.decay;
       if (k <= 0) {
         s.active = false;
+        s.age = 0;
+        s.intensity = 0;
         s.light.intensity = 0;
         continue;
       }
@@ -274,7 +362,7 @@ export function createLighting(
     // turned the two closest pieces into a hole in the picture. The flare LIGHTS are
     // untouched, so an impact still throws real light on real geometry; what comes down is
     // only the global lift laid over the whole frame on top of them.
-    flashLevel = Math.min(high ? 0.6 : 0.26, flash * 0.22);
+    flashLevel = Math.min(flashCeiling, flash * 0.22);
   });
 
   const api: Lighting & { composer: EffectComposer } = {
@@ -354,10 +442,45 @@ export function createLighting(
       best.light.position.copy(pos);
       best.light.distance = 12 + intensity * 14;
       best.age = 0;
-      best.decay = Math.max(0.05, decay);
+      /**
+       * The lifetime, and interactively it is CLAMPED however long a caller asks for.
+       *
+       * The slots are aged in real seconds now (see the updater), so this number is a
+       * duration a person actually experiences. 0.9 s is about as long as a stone bursting
+       * can keep throwing light before it stops reading as an event and starts reading as
+       * a lamp someone left on over the board. Under capture the requested value is passed
+       * through exactly as it always was — `Math.max(0.05, decay)`, character for
+       * character — because the film shots' flares are part of frames that have to come
+       * back bit-identical.
+       */
+      best.decay = world.capturing
+        ? Math.max(0.05, decay)
+        : Math.min(0.9, Math.max(0.05, decay));
       best.intensity = intensity;
       best.active = true;
       best.light.intensity = intensity * 220;
+
+      /**
+       * And interactively, exactly ONE flare burns at a time.
+       *
+       * The three slots exist so a film shot can overlap several impacts inside one
+       * capture. In play they are an accumulator: each is a 250-intensity point light
+       * hanging over the middle of the board, and captures arrive minutes apart in scene
+       * time but seconds apart in a player's, so slot two lights before slot one has
+       * finished and slot three before slot two — three times the light on the one surface
+       * the player is trying to read, which is what "the board centre becomes a permanent
+       * white bloom" is made of. Clearing the others here makes the pile-up impossible by
+       * construction rather than by hoping the decay outruns the next capture.
+       */
+      if (!world.capturing) {
+        for (const s of flareSlots) {
+          if (s === best) continue;
+          s.active = false;
+          s.age = 0;
+          s.intensity = 0;
+          s.light.intensity = 0;
+        }
+      }
     },
 
     dispose() {

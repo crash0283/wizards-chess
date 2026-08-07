@@ -34,7 +34,9 @@ import {
   type DemoMove,
 } from '../chess';
 import { buildTimeline, lastCaptureIndex, type TimedEvent, type Timeline } from './timeline';
-import { createInteractive, type BoardModel, type Interactive } from './interactive';
+import { createInteractive, PLAYER, type BoardModel, type Interactive } from './interactive';
+import { PAWN_VALUE } from './glyphs';
+import { createReadout, type Readout, type ReadoutSnapshot, type Tally } from './readout';
 
 /** FEN letter -> our piece type. */
 const TYPE_OF: Record<string, PieceType> = {
@@ -42,6 +44,37 @@ const TYPE_OF: Record<string, PieceType> = {
 };
 
 const key = (file: number, rank: number) => `${file},${rank}`;
+
+const emptyTally = (): Tally =>
+  ({ pawn: 0, knight: 0, bishop: 0, rook: 0, queen: 0, king: 0 });
+
+/** How many of each a side starts with — the baseline a mid-game FEN is read against. */
+const INITIAL: Tally = { pawn: 8, knight: 2, bishop: 2, rook: 2, queen: 1, king: 1 };
+
+const OTHER_SIDE: Record<Side, Side> = { white: 'black', black: 'white' };
+
+/**
+ * Material in whole pawns, White's point of view — the +3 a chess player expects to read.
+ *
+ * Deliberately NOT `Engine.materialBalance()`, which is centipawns on the search's own
+ * scale (a knight is 320, a bishop 330) and would put "+3.2" beside a won knight. The
+ * engine's number is still the better judge of who is actually ahead when the piece count
+ * is level, so the readout carries both: this one on the badge, that one for the tie.
+ *
+ * Read off the placement field so promotions are simply counted as what they now are.
+ */
+function conventionalEdge(fen: string): number {
+  const placement = fen.slice(0, fen.indexOf(' ') < 0 ? fen.length : fen.indexOf(' '));
+  let v = 0;
+  for (let i = 0; i < placement.length; i++) {
+    const ch = placement[i];
+    const type = TYPE_OF[ch.toLowerCase()];
+    if (!type) continue;
+    const worth = PAWN_VALUE[type];
+    v += ch === ch.toUpperCase() ? worth : -worth;
+  }
+  return v;
+}
 
 export function createGame(world: World, deps: GameDeps): Game {
   const engine = new Engine(START_FEN);
@@ -57,6 +90,76 @@ export function createGame(world: World, deps: GameDeps): Game {
     moveNumber: 1,
     thinking: false,
   };
+
+  // --- the readout's books ----------------------------------------------------------------
+  //
+  // None of this is touched under capture. Every write goes through `note()` or is guarded
+  // by the same flag, so the film path allocates nothing extra and branches once.
+
+  /** What each side HAS TAKEN. `taken.white` is a tally of black men. */
+  const taken: Record<Side, Tally> = { white: emptyTally(), black: emptyTally() };
+  /** The scripted path's own score sheet: it drives `state`, not the engine, so
+   *  `Engine.history()` is empty during a replay and cannot be the record. */
+  const scriptedLog: string[] = [];
+  /** Absolute ply index of the first move in `Engine.history()`. Non-zero only when the
+   *  game was set up from a mid-game FEN, where the score sheet must not restart at 1. */
+  let historyBase = 0;
+  /** Bumped by anything the readout would want to redraw for. Cheaper than diffing. */
+  let revision = 0;
+
+  function note(type: PieceType, victimSide: Side) {
+    if (world.capturing) return;
+    taken[OTHER_SIDE[victimSide]][type]++;
+    revision++;
+  }
+
+  function resetBooks() {
+    if (world.capturing) return;
+    taken.white = emptyTally();
+    taken.black = emptyTally();
+    scriptedLog.length = 0;
+    revision++;
+  }
+
+  /** Where the score sheet's numbering starts, read off the position just loaded. */
+  function markHistoryBase() {
+    historyBase = (engine.moveNumber - 1) * 2 + (engine.side === 'black' ? 1 : 0);
+  }
+
+  /**
+   * Seed the trays from a position nobody watched arrive — `?fen=`, or a staged shot.
+   *
+   * This is the inference the move-by-move path exists to avoid, and it is kept honest
+   * about its limits: it subtracts surplus officers from the missing pawns, so a side with
+   * two queens is read as having promoted rather than as having been given one, which is
+   * right in every ordinary game. It can still be fooled (promote to a knight after both
+   * knights have already been taken and it will show a pawn that is still alive), and that
+   * is precisely why live play does not use it.
+   */
+  function seedBooks(fen: string) {
+    if (world.capturing) return;
+    resetBooks();
+    const live: Record<Side, Tally> = { white: emptyTally(), black: emptyTally() };
+    const placement = fen.split(' ')[0];
+    for (let i = 0; i < placement.length; i++) {
+      const ch = placement[i];
+      const type = TYPE_OF[ch.toLowerCase()];
+      if (!type) continue;
+      live[ch === ch.toUpperCase() ? 'white' : 'black'][type]++;
+    }
+    for (const side of ['white', 'black'] as Side[]) {
+      let promoted = 0;
+      for (const type of ['queen', 'rook', 'bishop', 'knight'] as PieceType[]) {
+        promoted += Math.max(0, live[side][type] - INITIAL[type]);
+      }
+      const tray = taken[OTHER_SIDE[side]];
+      for (const type of ['queen', 'rook', 'bishop', 'knight'] as PieceType[]) {
+        tray[type] = Math.max(0, INITIAL[type] - live[side][type]);
+      }
+      tray.pawn = Math.max(0, INITIAL.pawn - live[side].pawn - promoted);
+    }
+    revision++;
+  }
 
   // --- scripted replay ------------------------------------------------------------------
   let demo: DemoGame | null = null;
@@ -181,6 +284,7 @@ export function createGame(world: World, deps: GameDeps): Game {
   function settleMove(m: DemoMove) {
     if (m.capture && !resolved.has(m.ply)) {
       resolved.add(m.ply);
+      note(m.capture.piece, m.capture.side);
       destroyOn(m.capture.file, m.capture.rank, m.fromFile, m.fromRank);
     }
     relocate({ file: m.fromFile, rank: m.fromRank }, { file: m.toFile, rank: m.toRank });
@@ -224,6 +328,7 @@ export function createGame(world: World, deps: GameDeps): Game {
       case 'contact': {
         if (m.capture && !resolved.has(m.ply)) {
           resolved.add(m.ply);
+          note(m.capture.piece, m.capture.side);
           destroyOn(m.capture.file, m.capture.rank, m.fromFile, m.fromRank);
         }
         break;
@@ -232,6 +337,7 @@ export function createGame(world: World, deps: GameDeps): Game {
         const p = pieceAt(m.fromFile, m.fromRank);
         if (p) p.walkTo(m.toFile, m.toRank, 0.45);
         settleMove(m);
+        if (!world.capturing) { scriptedLog.push(m.san); revision++; }
         state.lastMove = m.san;
         state.moveNumber = m.moveNumber;
         state.fen = m.fenAfter;
@@ -266,8 +372,10 @@ export function createGame(world: World, deps: GameDeps): Game {
       if (m.ply >= upToPly) break;
       if (m.capture) {
         resolved.add(m.ply);
+        note(m.capture.piece, m.capture.side);
         destroyOn(m.capture.file, m.capture.rank, m.fromFile, m.fromRank, 0.85);
       }
+      if (!world.capturing) scriptedLog.push(m.san);
       const p = pieceAt(m.fromFile, m.fromRank);
       relocate({ file: m.fromFile, rank: m.fromRank }, { file: m.toFile, rank: m.toRank });
       p?.setSquare(m.toFile, m.toRank);
@@ -293,10 +401,11 @@ export function createGame(world: World, deps: GameDeps): Game {
     }
   }
 
-  function stage(shotId: string) {
+  function stageShot(shotId: string) {
     demo = buildDemoGame('wreckage');
     resolved.clear();
     fired = 0;
+    resetBooks();
 
     switch (shotId) {
       case 'piece-mid-strike':
@@ -347,6 +456,7 @@ export function createGame(world: World, deps: GameDeps): Game {
   // --- shared state bookkeeping -------------------------------------------------------------
 
   function syncState() {
+    revision++;
     state.fen = engine.fen;
     state.turn = engine.side;
     state.inCheck = engine.inCheck();
@@ -376,6 +486,58 @@ export function createGame(world: World, deps: GameDeps): Game {
 
   let interactive: Interactive | null = null;
 
+  // --- the readout -------------------------------------------------------------------------
+  //
+  // A DOM overlay, built only when we are not capturing. See readout.ts for why it is DOM
+  // and not carved into the scene like the affordance markers are.
+
+  let readout: Readout | null = null;
+  /** Last state the readout was drawn for. It redraws on change and not otherwise. */
+  let drawnKey = '';
+
+  function drawReasonNow(): ReadoutSnapshot['drawReason'] {
+    if (state.result === 'stalemate') return 'stalemate';
+    if (state.result !== 'draw') return null;
+    if (engine.isThreefold()) return 'threefold';
+    if (engine.isFiftyMove()) return 'fifty-move';
+    if (engine.isInsufficientMaterial()) return 'insufficient-material';
+    return null;
+  }
+
+  function snapshot(): ReadoutSnapshot {
+    const scripted = timeline !== null;
+    const over = state.result !== 'playing';
+    const winner: Side | null =
+      state.result === 'checkmate-white' ? 'black'
+      : state.result === 'checkmate-black' ? 'white'
+      : null;
+    return {
+      turn: state.turn,
+      thinking: state.thinking,
+      inCheck: state.inCheck,
+      result: state.result,
+      winner,
+      // Only ask the engine why it is a draw when it says it is one — every one of those
+      // predicates walks the board or the repetition history.
+      drawReason: over ? drawReasonNow() : null,
+      moveNumber: state.moveNumber,
+      edge: conventionalEdge(state.fen),
+      cp: engine.materialBalance(),
+      taken,
+      history: scripted ? scriptedLog : engine.history(),
+      firstPly: scripted ? 0 : historyBase,
+      player: interactive ? PLAYER : null,
+    };
+  }
+
+  function drawReadout() {
+    if (!readout) return;
+    const k = `${revision}|${state.thinking ? 1 : 0}`;
+    if (k === drawnKey) return;
+    drawnKey = k;
+    readout.render(snapshot());
+  }
+
   const model: BoardModel = {
     engine,
     state,
@@ -393,6 +555,11 @@ export function createGame(world: World, deps: GameDeps): Game {
     forget: (file, rank) => { bySquare.delete(key(file, rank)); },
     destroyPiece,
     promoteOn,
+    noteCapture(letter) {
+      const type = TYPE_OF[letter.toLowerCase()];
+      if (!type) return;
+      note(type, letter === letter.toUpperCase() ? 'white' : 'black');
+    },
     syncState,
     kingSquareOf,
   };
@@ -400,10 +567,32 @@ export function createGame(world: World, deps: GameDeps): Game {
   return {
     start() {
       populate(START_FEN);
-      if (!world.capturing) interactive = createInteractive(world, deps, model);
+      resetBooks();
+      markHistoryBase();
+      if (!world.capturing) {
+        interactive = createInteractive(world, deps, model);
+        // The markers can fail to build and play carries on without them (see
+        // interactive.ts); the readout gets the same treatment for the same reason. A
+        // scoreboard is worth a lot and is worth nothing next to the game running.
+        try {
+          readout = createReadout();
+        } catch (err) {
+          console.warn('readout unavailable, playing without it:', err);
+          readout = null;
+        }
+        // Draw it now rather than on the first frame. This scene can take seconds to put
+        // its first frame up, and an empty scoreboard is the first thing a player would
+        // otherwise see for all of it.
+        drawReadout();
+      }
     },
 
-    stage,
+    stage(shotId) {
+      stageShot(shotId);
+      markHistoryBase();
+      revision++;
+      drawReadout();
+    },
 
     update(t) {
       // Scripted: fire every event whose time has passed, in order. Pure function of t.
@@ -412,11 +601,18 @@ export function createGame(world: World, deps: GameDeps): Game {
           fire(timeline.events[fired]);
           fired++;
         }
+        // Under capture `readout` is null and this is a single null check. A live page
+        // behind `?shot=` is a scripted replay somebody is watching, and it gets the
+        // score sheet too.
+        drawReadout();
         return;
       }
       // Interactive. `world.realTime` is the clock a person is actually waiting on;
       // `t` is the clamped scene clock everything visual runs on.
       interactive?.update(t, world.realTime);
+      // After the controller, not before: a click applied this frame should be on the
+      // board and in the readout in the same frame, not one behind it.
+      drawReadout();
     },
 
     state: () => state,
@@ -425,6 +621,10 @@ export function createGame(world: World, deps: GameDeps): Game {
       engine.reset(fen);
       populate(fen);
       timeline = null;
+      // Nobody watched this position arrive, so the trays have to be inferred from what
+      // is missing off the board — see seedBooks() for what that can and cannot know.
+      seedBooks(fen);
+      markHistoryBase();
       syncState();
       interactive?.refresh();
     },

@@ -31,10 +31,19 @@
  * They are culled by the same plane test the walls and screens use — `knight-looking-up`
  * sits five centimetres off the south row's axis and would otherwise be standing inside
  * one.
+ *
+ * A ROW IS BUILT TWICE. Everything above is composed for a camera on the floor. The play
+ * camera is 30 m up, and from there a head hanging seven metres over the board sits
+ * directly on top of White's back rank — it was a fence of black bars over the pieces the
+ * player is trying to pick. `guard` builds the same row with the lean stopped at that
+ * camera's sight line: identical from the foot to the springing, and above it the clusters
+ * that stand over a file pull back while the ones out at the frame edges keep the full
+ * bend. Only one of the two is ever visible; see `playview.ts` and the cull in `index.ts`.
  */
 import * as THREE from 'three';
 import { makeFbm, hashString } from '../core/rng';
 import { CarvedMesh, sweepShaft, type Station, type Tone } from './carved';
+import { clearSight } from './playview';
 
 /**
  * Where the piers stand. The board's long kerb is at 11.54 and the widest part of a
@@ -111,10 +120,29 @@ function lean(y: number): number {
  * silhouette. The one thing kept from that pass is the deep cut in the hollows, which is
  * what separates one pier from the next and is where the frame's true blacks come from.
  */
-export function makeNearTone(tag: string, seed: number): Tone {
+export interface ToneOpts {
+  /**
+   * Let the stone go black as it rises. TRUE for every film frame — the room losing its
+   * ceiling is half the composition. FALSE for the play build, where there is no top of
+   * frame to lose: the play camera looks DOWN onto exactly the band of shaft that this
+   * curve crushes, so leaving it on hands the player a black border instead of a room.
+   */
+  fade?: boolean;
+  /**
+   * How hard the hollow beside a shaft is cut. The default is aimed at a camera standing
+   * on the floor, where the flank of a shaft really is buried behind its neighbour. Seen
+   * from thirty metres up, the same flank is the part turned toward the lens, and cutting
+   * it to a fiftieth is what turns a row of piers into a row of black bars.
+   */
+  foldCut?: number;
+}
+
+export function makeNearTone(tag: string, seed: number, opts: ToneOpts = {}): Tone {
   const s = (hashString(tag) ^ seed) >>> 0;
   const broad = makeFbm(s, 3, 2.03, 0.5);
   const fine = makeFbm((s ^ 0x27d4eb2f) >>> 0, 3, 2.19, 0.55);
+  const fade = opts.fade ?? true;
+  const foldCut = opts.foldCut ?? 0.985;
 
   return (x, y, z, fold) => {
     let v = 0.98 * (1
@@ -128,13 +156,13 @@ export function makeNearTone(tag: string, seed: number): Tone {
     // these stopped being black. A squared falloff gives a fat bright crown and a soft
     // shoulder; this gives a narrow crown and a hard turn into the slot, which is both
     // what a round shaft in a dark room actually does and where the edge energy is.
-    v *= 1 - 0.985 * Math.pow(fold, 1.35);
+    v *= 1 - foldCut * Math.pow(fold, 1.35);
 
     // grime off the floor; nothing blooms this close to the fires
     v *= 1 - 0.30 * smooth(2.2, 0.0, y);
 
     // and the room loses its ceiling
-    v *= 1 - 0.988 * smooth(DARK_START, DARK_FULL, y);
+    if (fade) v *= 1 - 0.988 * smooth(DARK_START, DARK_FULL, y);
 
     const r = Math.max(0.006, v * 1.010);
     const g = Math.max(0.006, v * 1.000);
@@ -157,9 +185,16 @@ export function makeNearTone(tag: string, seed: number): Tone {
  */
 function shaftPath(
   x: number, z0: number, inward: number, r: number, bendSteps: number, drums: boolean,
+  guard: boolean,
 ): Station[] {
   const st: Station[] = [];
-  const at = (y: number, rr: number) => st.push({ x, y, z: z0 + inward * lean(y), r: rr });
+  const sign = (-inward) as 1 | -1;
+  const at = (y: number, rr: number) => {
+    const z = z0 + inward * lean(y);
+    // The play build stops leaning where the head would cross the play camera's sight
+    // line to the board. Below that the two builds are the same stone — see playview.ts.
+    st.push({ x, y, z: guard ? clearSight(sign, x, y, z, rr) : z, r: rr });
+  };
 
   at(0.00, r * 1.66);
   at(0.24, r * 1.58);
@@ -205,7 +240,9 @@ export interface PierBuild {
  * One row of near piers. `sign` is which side of the board they stand on; `inward` is
  * therefore -sign, the direction they lean.
  */
-export function buildNearPiers(sign: 1 | -1, hi: boolean, tone: Tone): PierBuild {
+export function buildNearPiers(
+  sign: 1 | -1, hi: boolean, tone: Tone, guard = false,
+): PierBuild {
   const m = new CarvedMesh();
   const z0 = sign * NEAR_Z;
   const inward = -sign;
@@ -224,7 +261,10 @@ export function buildNearPiers(sign: 1 | -1, hi: boolean, tone: Tone): PierBuild
     for (const [dx, r] of SECTION) {
       // The core stands a little proud of its flanks, so the cluster has a section.
       const zz = z0 + inward * (dx === 0 ? 0.20 : 0);
-      sweepShaft(m, shaftPath(cx + dx, zz, inward, r, bendSteps, hi), 0, inward, radial, arc, tone);
+      sweepShaft(
+        m, shaftPath(cx + dx, zz, inward, r, bendSteps, hi, guard),
+        0, inward, radial, arc, tone,
+      );
     }
     // The three are banded together by the annulet cut into each shaft's own profile
     // rather than by a ring round the cluster: a ring wide enough to pass three shafts

@@ -44,6 +44,12 @@ export interface Body {
   touching: number;
   age: number;
   /**
+   * Which wreck this body belongs to, so the pile it stamps can be taken back when the
+   * wreck dissolves. Set in interactive play only; `undefined` under capture, where it
+   * makes `stamp` behave exactly as it did before it existed.
+   */
+  owner?: string;
+  /**
    * A body may not go to sleep before this age, whatever the contact solver thinks. The
    * sleep tests are tuned to stop a fragment creeping across the marble for the rest of
    * the game, and against a live burst they were firing within about 0.4 s of the blade
@@ -65,8 +71,28 @@ export interface Ground {
   heightAt(x: number, z: number): number;
   /** Surface normal of the rubble pile, for debris that lands on debris. */
   normalAt(x: number, z: number, out: THREE.Vector3): THREE.Vector3;
-  /** Record a body that has come to rest. */
-  stamp(x: number, z: number, radius: number, top: number): void;
+  /**
+   * Record a body that has come to rest.
+   *
+   * `owner` is only ever passed in INTERACTIVE play, where debris has a lifetime and the
+   * pile it built has to go away with it (see `forget`). Under capture nothing is ever
+   * forgotten, so nothing passes an owner and no record is kept — the height field is
+   * written exactly as it always was.
+   */
+  stamp(x: number, z: number, radius: number, top: number, owner?: string): void;
+  /**
+   * Drop every stamp made by `owner` and rebuild the field from what is left.
+   *
+   * The height field is a running maximum, so it cannot be un-stamped in place: one
+   * fragment's mound may be sitting under three others'. Replaying the surviving records
+   * is exact, because each record's contribution depends only on itself and the
+   * combination is a max — order-independent. INTERACTIVE ONLY.
+   *
+   * Without this a long game silently accumulates invisible shelves: the wreckage
+   * dissolves but the pile it stamped does not, and by move thirty fresh fragments come
+   * to rest a quarter of a metre above the marble on nothing at all.
+   */
+  forget(owner: string): void;
 }
 
 /**
@@ -94,6 +120,35 @@ export function createGround(topY: number): Ground {
     return topY + h[idx(ix, iz)];
   };
 
+  /** Interactive only: the stamps that can still be taken back. See `forget`. */
+  interface Stamp { x: number; z: number; radius: number; top: number; owner: string }
+  const stamps: Stamp[] = [];
+
+  const write = (x: number, z: number, radius: number, top: number) => {
+    // Only real blocks hold anything up, and a heap does not ratchet: each body records
+    // rather less than its own height, and the field is capped. Stamping the full top
+    // of everything lets one pile lift the next body, and the next, until debris is
+    // hovering half a metre off the marble.
+    if (radius < 0.07) return;
+    top = Math.min(top, topY + PILE_CAP);
+    const r = Math.max(CELL, radius * 0.78);
+    const i0 = cellOf(x - r), i1 = cellOf(x + r);
+    const j0 = cellOf(z - r), j1 = cellOf(z + r);
+    for (let iz = j0; iz <= j1; iz++) {
+      if (iz < 0 || iz >= N) continue;
+      for (let ix = i0; ix <= i1; ix++) {
+        if (ix < 0 || ix >= N) continue;
+        const cx = (ix - half + 0.5) * CELL, cz = (iz - half + 0.5) * CELL;
+        const d = Math.hypot(cx - x, cz - z);
+        if (d > r) continue;
+        // Domed, so a pile grows a shape rather than a plateau.
+        const k = Math.sqrt(Math.max(0, 1 - (d / r) * (d / r)));
+        const want = (top - topY) * 0.45 * (0.30 + 0.70 * k);
+        if (want > h[idx(ix, iz)]) h[idx(ix, iz)] = want;
+      }
+    }
+  };
+
   return {
     heightAt,
     normalAt(x, z, out) {
@@ -104,29 +159,20 @@ export function createGround(topY: number): Ground {
       // fragments shoot sideways off the pile.
       return out.set(-dx * 0.5, 2 * e, -dz * 0.5).normalize().lerp(UP, 0.35).normalize();
     },
-    stamp(x, z, radius, top) {
-      // Only real blocks hold anything up, and a heap does not ratchet: each body records
-      // rather less than its own height, and the field is capped. Stamping the full top
-      // of everything lets one pile lift the next body, and the next, until debris is
-      // hovering half a metre off the marble.
-      if (radius < 0.07) return;
-      top = Math.min(top, topY + PILE_CAP);
-      const r = Math.max(CELL, radius * 0.78);
-      const i0 = cellOf(x - r), i1 = cellOf(x + r);
-      const j0 = cellOf(z - r), j1 = cellOf(z + r);
-      for (let iz = j0; iz <= j1; iz++) {
-        if (iz < 0 || iz >= N) continue;
-        for (let ix = i0; ix <= i1; ix++) {
-          if (ix < 0 || ix >= N) continue;
-          const cx = (ix - half + 0.5) * CELL, cz = (iz - half + 0.5) * CELL;
-          const d = Math.hypot(cx - x, cz - z);
-          if (d > r) continue;
-          // Domed, so a pile grows a shape rather than a plateau.
-          const k = Math.sqrt(Math.max(0, 1 - (d / r) * (d / r)));
-          const want = (top - topY) * 0.45 * (0.30 + 0.70 * k);
-          if (want > h[idx(ix, iz)]) h[idx(ix, iz)] = want;
-        }
+    stamp(x, z, radius, top, owner) {
+      if (owner !== undefined) stamps.push({ x, z, radius, top, owner });
+      write(x, z, radius, top);
+    },
+    forget(owner) {
+      let hit = false;
+      for (let i = stamps.length - 1; i >= 0; i--) {
+        if (stamps[i].owner !== owner) continue;
+        stamps.splice(i, 1);
+        hit = true;
       }
+      if (!hit) return;
+      h.fill(0);
+      for (const s of stamps) write(s.x, s.z, s.radius, s.top);
     },
   };
 }
@@ -153,6 +199,7 @@ export function makeBody(opts: {
   phase: number;
   minAge?: number;
   maxAge?: number;
+  owner?: string;
 }): Body {
   const stone = opts.kind === 'stone';
   const mass = stone
@@ -183,6 +230,7 @@ export function makeBody(opts: {
     contact: 0,
     touching: 0,
     age: 0,
+    owner: opts.owner,
     minAge: opts.minAge ?? 0,
     maxAge: opts.maxAge ?? 3.0,
   };
@@ -335,7 +383,7 @@ function sleep(b: Body, ground: Ground): void {
     top = Math.max(top, _p.y);
   }
   if (Number.isFinite(lowest)) b.pos.y -= lowest;
-  ground.stamp(b.pos.x, b.pos.z, b.radius, b.pos.y + top);
+  ground.stamp(b.pos.x, b.pos.z, b.radius, b.pos.y + top, b.owner);
   apply(b);
 }
 

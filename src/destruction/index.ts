@@ -32,6 +32,7 @@ import { createPlume } from './dust';
 import { fracture, type Fragment } from './fracture';
 import { buildShred, createFabricMaterials } from './fabric';
 import { appendGeometry, emptySoup, soupBounds, triCount } from './soup';
+import { createReclaim, type ReclaimEntry } from './reclaim';
 
 /** Top of the marble. Debris rests on the board, not on the chamber floor. */
 const BOARD_TOP = 0.018;
@@ -56,6 +57,22 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
   group.add(plume.object);
   const fabric = createFabricMaterials();
 
+  /**
+   * DOES THE WRECKAGE HAVE A LIFETIME.
+   *
+   * Under capture, no: the whole module is written around wreckage that stays exactly
+   * where it stops, `aftermath-rubble` judges the settled heap, and `king-surrender`
+   * needs a board strewn with the debris of the entire game — a critic has already
+   * failed a round for that board being clean. So the film path keeps every fragment
+   * for ever and does not gain a single branch it did not have before.
+   *
+   * Interactively, yes. See `reclaim.ts` for what happens and why.
+   */
+  const ephemeral = !world.capturing;
+  const reclaim = ephemeral
+    ? createReclaim({ ground, plume, boardTop: BOARD_TOP })
+    : null;
+
   const bodies: Body[] = [];
   const owned: THREE.BufferGeometry[] = [];
 
@@ -65,6 +82,12 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
       if (b.sleeping) continue;
       stepBody(b, dt, ground);
       apply(b);
+    }
+    if (reclaim) {
+      reclaim.update(t, (b) => {
+        const i = bodies.indexOf(b);
+        if (i >= 0) bodies.splice(i, 1);
+      });
     }
     plume.update(t + PRE_ROLL);
   });
@@ -128,6 +151,8 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
     // gravel. The live burst throws at full strength.
     const spread = staged ? 0.55 : 1;
     const fresh: Body[] = [];
+    /** Interactive only: what the chamber will take back, and the geometry it frees. */
+    const entries: ReclaimEntry[] = [];
     const vrng = rng.fork('launch');
     for (const f of frags) {
       const object = staged ? new THREE.Object3D() : makeMesh(f, material);
@@ -169,11 +194,20 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
         // Staged wreckage is meant to bake to rest instantly; a live burst is the shot.
         minAge: staged ? 0 : 0.55,
         maxAge: staged ? 3.0 : 2.3,
+        // Interactive only: tags the height-field stamps this body makes so they can be
+        // taken back with it. `undefined` under capture — see Ground.stamp.
+        owner: ephemeral ? target.id : undefined,
       });
       fresh.push(body);
       if (!staged) {
         group.add(object);
-        owned.push(f.geometry);
+        // Where the geometry is owned from here matters. Under capture this module holds
+        // every fragment until teardown, so it goes on the long-lived list. Interactively
+        // `reclaim` owns it and disposes it the moment the fragment goes — keeping a
+        // second reference in `owned` would free the GPU buffer but pin the vertex arrays
+        // in memory for the rest of the game, which is most of what we are trying to stop.
+        if (ephemeral) entries.push({ body, mesh: object, geometry: f.geometry });
+        else owned.push(f.geometry);
       }
     }
 
@@ -210,10 +244,17 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
         phase: frng.float(0, 6.283),
         minAge: staged ? 0 : 1.05,
         maxAge: staged ? 3.0 : 3.2,
+        owner: ephemeral ? target.id : undefined,
       }));
       if (!staged) {
         group.add(object);
-        owned.push(shred.geometry);
+        if (ephemeral) {
+          entries.push({
+            body: fresh[fresh.length - 1],
+            mesh: object,
+            geometry: shred.geometry,
+          });
+        } else owned.push(shred.geometry);
       } else {
         stagedGeo.push({ geometry: shred.geometry, body: fresh[fresh.length - 1], cloth: true });
       }
@@ -259,6 +300,19 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
     });
     // The frame's updaters have already run, so push the new puffs into the buffers now.
     plume.update(world.time + PRE_ROLL);
+
+    // Interactive only. Hand the wreck to the chamber, which will take it back in a few
+    // seconds so the next capture lands on a board you can still read.
+    if (reclaim && entries.length) {
+      reclaim.add({
+        id: target.id,
+        t: world.time,
+        origin: new THREE.Vector3(base.x, base.y + BOARD_TOP, base.z),
+        radius,
+        rng,
+        entries,
+      });
+    }
   }
 
   /** Fragment geometry waiting to be merged into a static wreck. */
@@ -350,6 +404,7 @@ export function createDestruction(world: World, _deps: { pieces: PieceFactory })
     shatter,
     settled: () => bodies.every((b) => b.sleeping),
     dispose() {
+      reclaim?.dispose();
       for (const g of owned) g.dispose();
       owned.length = 0;
       bodies.length = 0;

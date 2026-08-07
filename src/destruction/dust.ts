@@ -87,6 +87,17 @@ export interface Plume {
     rng: Rng;
     t: number;
   }): void;
+  /**
+   * The soft ground-hugging breath of dust a wreck gives off as the chamber takes it back.
+   * INTERACTIVE ONLY — nothing under capture ever calls this, because under capture
+   * nothing is ever taken back.
+   */
+  settle(opts: {
+    origin: THREE.Vector3;
+    radius: number;
+    rng: Rng;
+    t: number;
+  }): void;
   update(t: number): void;
   dispose(): void;
 }
@@ -276,6 +287,33 @@ function buildAtlas(seed: number): THREE.DataTexture {
 
 export function createPlume(world: World): Plume {
   const high = world.quality === 'high';
+  /**
+   * HOW LONG THE CLOUD STANDS.
+   *
+   * Under capture the plume is the subject of two judged frames and its tail is part of
+   * the look: it holds its shape for four seconds and takes three more to leave. Those
+   * two numbers are the ones the shots were graded against and they do not move.
+   *
+   * In interactive play the same tail is a nuisance. The play camera looks straight down
+   * at the board and a cloud that hangs for seven seconds sits over the squares you are
+   * trying to read — and, with a capture every couple of moves, three of them overlap.
+   * So the burst still detonates at full strength and reads exactly the same for the
+   * first second, and then the room simply takes it: gone by about three seconds.
+   *
+   * `ephemeral` is `!world.capturing`, and it is the only switch in this module.
+   */
+  const ephemeral = !world.capturing;
+  /** Age at which the room starts clearing the cloud. */
+  const CLEAR_FROM = ephemeral ? 1.15 : 4.2;
+  /** Seconds it takes from there to nothing. */
+  const CLEAR_OVER = ephemeral ? 1.75 : 3.0;
+  /**
+   * Age past which a puff can never contribute another pixel, so its slot can be reused.
+   * Only consulted when `ephemeral`: under capture the puff list is left exactly as it
+   * was, because `burst` trims it from the FRONT and dropping a dead puff early would
+   * change which live one falls off the end.
+   */
+  const REAP_AT = CLEAR_FROM + CLEAR_OVER;
   /**
    * A FEW LARGE LOBES. This was 320, and 320 quads a third of a metre across is what
    * "thousands of tiny cotton-wool puffs" looks like from the outside — every one of them
@@ -511,9 +549,77 @@ export function createPlume(world: World): Plume {
     while (puffs.length > MAX) puffs.shift();
   }
 
+  /**
+   * A wreck going back into the floor. Low, wide, slow and thin — the opposite of a
+   * burst: no column, no head, nothing above knee height. It is the visual reason the
+   * rubble is allowed to vanish, so it wants to be soft and brief, not a second event.
+   */
+  function settle(opts: Parameters<Plume['settle']>[0]) {
+    ensureMesh();
+    const { rng, origin } = opts;
+    const scale = Math.min(1.3, Math.max(0.6, opts.radius / 0.7));
+    const n = high ? 26 : 12;
+    for (let i = 0; i < n; i++) {
+      const th = rng.float(0, Math.PI * 2);
+      const sp = rng.float(0.35, 1.05) * scale;
+      puffs.push({
+        active: true,
+        born: opts.t,
+        delay: rng.float(0, 0.55),
+        ox: origin.x + Math.cos(th) * rng.float(0, 0.35) * scale,
+        oy: origin.y + rng.float(0.02, 0.16),
+        oz: origin.z + Math.sin(th) * rng.float(0, 0.35) * scale,
+        vx: Math.cos(th) * sp,
+        vy: rng.float(0.10, 0.42),
+        vz: Math.sin(th) * sp,
+        ax: origin.x, az: origin.z,
+        drag: rng.float(2.4, 4.0),
+        // Barely any lift: this dust spreads across the marble, it does not rise off it.
+        buoy: rng.float(0.06, 0.20),
+        roll: rng.float(0.02, 0.18),
+        s0: rng.float(0.22, 0.46) * scale,
+        grow: rng.float(0.55, 1.15),
+        // Thin. Twenty-six of these at a fifth of a burst's opacity is a breath of dust
+        // over the square, not a cloud — you should notice the rubble has gone, not the
+        // dust that took it.
+        alpha: rng.float(0.13, 0.24),
+        fade: rng.float(0.55, 1.05),
+        // Ground dust shades as buried core and would come out nearly black; it is lifted
+        // here so it reads as the pale limestone powder it is.
+        bright: rng.float(1.30, 1.75),
+        rot: rng.gauss() * 0.5,
+        spin: rng.gauss() * 0.08,
+        tex: rng.int(0, 4),
+        wob: 0.11,
+        aspx: 1.22, aspy: 0.82,
+        ph1: rng.float(0, 6.283), ph2: rng.float(0, 6.283), ph3: rng.float(0, 6.283),
+        baseY: origin.y,
+        reach: 0.75 * scale,
+        // Read the vertical ramp against a low ceiling — a puff 25 cm up is the top of
+        // THIS cloud, and should be lit like a crown rather than like the foot of a
+        // four-metre column.
+        top: 0.42,
+      });
+    }
+    while (puffs.length > MAX) puffs.shift();
+  }
+
   function update(t: number) {
     if (!mesh || !geo) return;
     world.camera.getWorldPosition(camPos);
+
+    // Interactive only: drop puffs that can never draw again, so a long game does not
+    // walk a growing dead list every frame. Under capture the list is left alone — see
+    // REAP_AT.
+    if (ephemeral) {
+      let w = 0;
+      for (let i = 0; i < puffs.length; i++) {
+        const p = puffs[i];
+        if (t - p.born - p.delay >= REAP_AT) continue;
+        puffs[w++] = p;
+      }
+      puffs.length = w;
+    }
 
     let live = 0;
     order.length = 0;
@@ -549,8 +655,13 @@ export function createPlume(world: World): Plume {
 
       if (y < p.baseY + 0.05) y = p.baseY + 0.05 + (p.baseY + 0.05 - y) * 0.25;
 
-      const alpha = p.alpha * (1 - Math.exp(-a * 16)) * Math.exp(-a * p.fade)
-        * (1 - Math.min(1, Math.max(0, (a - 4.2) / 3.0)));
+      // The room clearing the cloud. Under capture this is the linear ramp it has always
+      // been, from 4.2 s over 3.0 s; interactively it is the same shape, earlier and
+      // smoothed at both ends so the cloud thins away rather than being switched off.
+      const clear = ephemeral
+        ? 1 - smooth(CLEAR_FROM, CLEAR_FROM + CLEAR_OVER, a)
+        : 1 - Math.min(1, Math.max(0, (a - CLEAR_FROM) / CLEAR_OVER));
+      const alpha = p.alpha * (1 - Math.exp(-a * 16)) * Math.exp(-a * p.fade) * clear;
       if (alpha < 0.012) continue;
 
       const idx = live++;
@@ -655,6 +766,7 @@ export function createPlume(world: World): Plume {
   return {
     object,
     burst,
+    settle,
     update,
     dispose() {
       geo?.dispose();
