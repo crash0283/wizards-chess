@@ -436,36 +436,20 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     return t1 < enter ? null : enter;
   }
 
-  /**
-   * Which square the player just clicked.
-   *
-   * The board PLANE at y=0 is the answer, and it is deliberately not an occlusion test.
-   * That distinction decides whether this game is playable at all, so it is worth the
-   * paragraph: the play camera looks down the board at 34°, and a king is 4.55 m of stone.
-   * A piece that tall throws 4.55/tan(34°) ≈ 6.7 m of itself across the floor behind it —
-   * nearly three squares. Picking "the nearest solid thing under the cursor" is therefore
-   * not the friendly answer but the hostile one: the ray from this camera to the CENTRE of
-   * e2 passes 0.18 m from the axis of the white king on e1 at 2.33 m up, which is inside
-   * any silhouette that king could plausibly have. An honest mesh pick refuses to let you
-   * move your own king's pawn. A chess player clicks where the SQUARE is; every board they
-   * have ever used has answered that question, and so does this one.
-   *
-   * The column test below is the exception that costs nothing: when the ray misses the
-   * board entirely, it is very often because the player aimed at the upper body of a piece
-   * on a far rank, whose crown projects past the back edge. That click used to do nothing.
-   * Now it finds the piece it visibly landed on.
-   */
-  function boardSquare(): Mark | null {
-    if (ray.ray.intersectPlane(plane, hitPoint)) {
-      // squareAt(), never a hand-rolled inverse. This line hard-coded the file axis's old
-      // sign and survived the fix to squareCentre(), so for a while the board rendered
-      // one way and the hit test read the other: clicking the rendered a2 selected h2 and
-      // painted its markers on the far side of the board. The column-pick fallback below
-      // already went through squareCentre(), so this one function disagreed with itself.
-      const { file, rank } = squareAt(hitPoint.x, hitPoint.z);
-      if (file >= 0 && file <= 7 && rank >= 0 && rank <= 7) return { file, rank };
-    }
+  /** Where the ray meets the board plane, as a square, or null if it misses the 8x8. */
+  function planeSquare(): Mark | null {
+    if (!ray.ray.intersectPlane(plane, hitPoint)) return null;
+    // squareAt(), never a hand-rolled inverse. This line hard-coded the file axis's old
+    // sign and survived the fix to squareCentre(), so for a while the board rendered one
+    // way and the hit test read the other: clicking the rendered a2 selected h2 and
+    // painted its markers on the far side of the board. The column pick below already
+    // went through squareCentre(), so this one function disagreed with itself.
+    const { file, rank } = squareAt(hitPoint.x, hitPoint.z);
+    return file >= 0 && file <= 7 && rank >= 0 && rank <= 7 ? { file, rank } : null;
+  }
 
+  /** The nearest standing man the ray actually passes through, or null. */
+  function columnSquare(): Mark | null {
     let best: Mark | null = null;
     let bestT = Infinity;
     for (const { file, rank, piece } of model.occupied()) {
@@ -478,6 +462,80 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       }
     }
     return best;
+  }
+
+  /**
+   * Which square the player just clicked.
+   *
+   * ── why this is no longer "the plane, always" ────────────────────────────────────────
+   *
+   * It used to be, and the reasoning was sound for the camera it was written under: a man
+   * 4.55 m tall throws h/tan(declination) of himself across the floor behind him, so at
+   * the old 34° view a king covered nearly three squares and an honest occlusion pick
+   * refused to let you touch your own king's pawn. "A chess player clicks where the SQUARE
+   * is" was the right answer to that.
+   *
+   * It is the wrong answer to an OBLIQUE one. The play view now looks down the board at
+   * about 62°, which is the whole point of the change — from straight overhead every man
+   * is a crown and a shadow and you cannot tell a bishop from a rook. At 62° they have
+   * profiles again, and a profile is a thing standing UP: the visible body of a pawn is
+   * displaced 2.55/tan(62°) = 1.36 m up-screen from the square it stands on, which is
+   * better than half a square. Plane-only picking there means aiming at a man and
+   * selecting the empty square behind him. The mode that was hostile at 34° is the correct
+   * one at 62°, and vice versa.
+   *
+   * ── and why the plane still wins for a destination ───────────────────────────────────
+   *
+   * Both rules are right about different halves of the same click, and which half is which
+   * is legible from what is DRAWN. A destination is a sigil lying flat on the marble and a
+   * man's feet stand on his own square, so both of those are the PLANE. A body overhanging
+   * the empty board behind it is the only thing the plane cannot answer for, so that — and
+   * only that — is the column:
+   *
+   *   1. a live selection and the plane landing on one of its legal destinations -> plane
+   *   2. the plane landing on a square that has a man standing on it             -> plane
+   *   3. otherwise, the nearest man the ray passes through                       -> column
+   *   4. otherwise                                                              -> plane
+   *
+   * ── why rule 2 is there, which is the whole lesson of this change ────────────────────
+   *
+   * The first version of this had rules 1, 3, 4 and no rule 2 — column before plane — and
+   * `tools/handcheck.mjs` caught it inside one run: clicking the rendered a2 and then a4
+   * moved nothing at all, because the a2 pawn could not be selected.
+   *
+   * The cause is worth writing down, because it is invisible from the code. The pick column
+   * is deliberately generous — radius 0.846 m, a bit under two fifths of a square, so that
+   * nobody has to aim at a knight's ear — and it is capped at the piece's exact height. The
+   * parallel ray aimed at the CENTRE of a2 passes over a1, which holds a 3.05 m rook, and
+   * across that rook's 1.7 m of footprint the ray descends from 6.20 m to 3.02 m. It ends
+   * 2.7 cm under the cap. So the ray grazed the far top corner of the rook's cylinder, the
+   * rook is nearer the camera than the pawn, and it won on distance — a man was made
+   * unselectable by a piece standing in FRONT of him that the player never aimed at.
+   *
+   * Rule 2 removes the whole class. A man's own square is always answerable through the
+   * plane, so no arrangement of geometry can make a piece unclickable; the column now only
+   * ever ADDS an answer where the plane had none. That is also why rule 2 sits above rule 3
+   * rather than below it: the failure it prevents is unrecoverable, and the cost is only
+   * that clicking the topmost sliver of a very tall man — a king's crown overhangs the
+   * square behind him by 2.42 m against a 2.35 m pitch — picks the man standing there
+   * instead. One more click fixes that; nothing fixes a pawn you cannot pick up.
+   *
+   * Note what rule 3 cannot break either: a ray that lands on a square NEARER the camera
+   * than some man has already dropped below y = 0 by the time it reaches him, and the
+   * column is clipped to 0 <= y <= height, so clicking in front of a piece can never be
+   * captured by it.
+   */
+  function boardSquare(): Mark | null {
+    const onPlane = planeSquare();
+
+    if (onPlane) {
+      const to = sqOf(onPlane);
+      if (selected && movesFrom(selected).some((m) => m.to === to)) return onPlane;
+      const standing = model.pieceAt(onPlane.file, onPlane.rank);
+      if (standing && !standing.destroyed) return onPlane;
+    }
+
+    return columnSquare() ?? onPlane;
   }
 
   // --- legality -----------------------------------------------------------------------

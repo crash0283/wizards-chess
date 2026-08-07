@@ -60,16 +60,23 @@ export function createCameraRig(world: World): CameraRig {
   }
 
   /**
-   * The play view, and only when a human is actually behind it.
+   * The play view, switched on WHICH SHOT IS AIMED and on nothing else.
    *
-   * Switched on the shot ID rather than on a global, because both halves of that matter:
-   * `world.capturing` false is not enough — a live page opened with `?shot=` and no `?t=`
-   * is somebody sitting behind a FILM camera, whose framing is a frozen contract — and the
-   * shot ID alone is not enough either, since the capture harness must never see anything
-   * but the perspective rig it has always seen.
+   * This used to also require `!world.capturing`, and that clause was a hole rather than a
+   * safety belt. `tools/capture.mjs --shot=play` is the only way the play view can be
+   * rendered to a file and measured at all, and with the clause in place that render came
+   * back through the PERSPECTIVE frustum — so every number ever taken off the "play frame"
+   * described a picture no player has ever seen. Two rounds of highlight work were tuned
+   * against it.
+   *
+   * The film shots need no protection from this test: their ids are not `play`, so they
+   * reach exactly the code they always did. Gating on the shot id says what is meant —
+   * the six judged frames are photographed, `play` is played — and it is the same test
+   * `lighting/view.ts` already uses to pick the play grade, which is why the two can no
+   * longer disagree about which camera is in front of the room.
    */
   function wantsOrtho(shotId: string): boolean {
-    return shotId === PLAY_SHOT.id && !world.capturing;
+    return shotId === PLAY_SHOT.id;
   }
 
   /**

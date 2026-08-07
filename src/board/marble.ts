@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { SQUARE } from '../core/constants';
 import { makeFbm, type Rng } from '../core/rng';
 import type { World } from '../core/world';
+import { isPlayView } from '../lighting/view';
 import { NOISE_GLSL, REFLECT_GLSL, WEAR_GLSL } from './glsl';
 import { BED_Y, CHAMFER, JOINT, JOINT_W, TOP_Y } from './layout';
 
@@ -279,6 +280,9 @@ uniform float uSquareTint;
 uniform float uCrack;
 uniform float uDusting;
 uniform float uSpecular;
+#ifdef BOARD_PLAY
+uniform vec3 uPlayTrim;
+#endif
 
 ${NOISE_GLSL}
 ${WEAR_GLSL}
@@ -659,6 +663,11 @@ const FRAG_OUT = /* glsl */ `
     vec3 refl = boardReflection(vReflUV, nWorld, gRough, gReflMask, gReflJitter);
     gl_FragColor.rgb += refl * fres * uReflStrength;
     gl_FragColor.rgb *= gFigure;
+#ifdef BOARD_PLAY
+    // The play camera's board trim. Behind a #define, so the six film programs do not
+    // contain this line — not a multiply by one, absent. See PLAY_TRIM.
+    gl_FragColor.rgb *= uPlayTrim;
+#endif
   }
 `;
 
@@ -933,6 +942,57 @@ export function createMarble(
     uniforms.uReflStrength.value = s.reflect;
   }
 
+  /**
+   * The play camera's board trim, and the reason it exists rather than a grade change.
+   *
+   * The player has said three times that the middle of the board is too bright, and three
+   * rounds of work aimed at the highlight SHOULDER in lighting/grade-play.ts never touched
+   * it. That was not bad luck, it was measuring the wrong thing twice over. Whole-frame
+   * statistics say the play frame is fine — fracBlown 0.00041, nothing clipping anywhere —
+   * because the board is a fifth of the picture and the rest is a dark room, so a board far
+   * too bright for what it is barely moves the average. And the shoulder those rounds moved
+   * sits at 0.55 in post-exposure linear while the cream squares, inverted back through the
+   * grade from a real capture, sit at 0.105. The board has never been within half a decade
+   * of the knee. Nothing above it could ever have changed the board.
+   *
+   * Measured properly (tools/boardstats.mjs, ranks 3-6 so no piece contaminates the stone),
+   * the cream squares printed at median luminance 0.4714, rgb (103,123,143), against a room
+   * whose median is 0.106. Four and a half times the surround, and BLUE in a firelit hall:
+   * the marble is returning the cold fill and the zenith, not the fires. That is what reads
+   * as glare. It got worse, not better, when the camera came down to 62 degrees, because
+   * specular climbs toward grazing — 0.336 at the old near-vertical view, 0.471 here.
+   *
+   * So the correction belongs to the stone as this camera sees it, and it is two numbers:
+   *
+   *   0.68 overall     cream 0.4714 -> 0.3647, navy 0.1504 -> 0.1096.
+   *   (1.18, 1.00, 0.86)  the balance. Not chosen by eye: the film's own light squares,
+   *                    probed square by square off the reference frame for the `dark` spec
+   *                    below, sit at (162,168,189), a red-to-blue ratio of 0.857. Ours ran
+   *                    0.720. After the trim it is 0.880 — within three per cent of the
+   *                    frame this whole project is measured against.
+   *
+   * What it deliberately does NOT do is flatten the marble. A shoulder sited on the board's
+   * own output was tried first and rejected by measurement: it held the median where this
+   * does but collapsed the spread between the cream's median and its 99th percentile from
+   * 0.254 to 0.044, which is the veining gone. A straight scale keeps it at 0.253 — the
+   * stone comes down and stays stone.
+   *
+   * FILM SAFETY is structural, not a promise. `BOARD_PLAY` is only defined when the play
+   * camera is the one being rendered, so the six judged programs are compiled without the
+   * line rather than with a multiply by one, and `customProgramCacheKey` carries the flag
+   * so three cannot hand a play program to a film shot or the reverse.
+   */
+  const PLAY_TRIM = [0.60 * 1.18, 0.60 * 1.0, 0.60 * 0.86] as const;
+
+  /**
+   * Imported from the lighting piece on purpose rather than re-derived here. It is the same
+   * question — "is the play camera the one in front of the room?" — and it is already
+   * answered in exactly one place, which is what stops the board's trim and the play grade
+   * from ever disagreeing about which picture they are grading.
+   */
+  const play = isPlayView(world);
+  if (play) uniforms.uPlayTrim = { value: new THREE.Vector3(...PLAY_TRIM) };
+
   const material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     roughness: 1.0,
@@ -940,11 +1000,12 @@ export function createMarble(
     dithering: true,
   });
   material.name = `board-marble-${kind}`;
-  if (shared.low) {
-    // Set from world.quality and nothing else. The high tier never sees either define, so
-    // its program is the one it always compiled.
-    material.defines = { BOARD_LOW: '', BOARD_MERGED: '' };
-  }
+  // Set from world.quality and the live camera, and nothing else. A film shot sees neither
+  // flag, so its program is the one it always compiled.
+  const defines: Record<string, string> = {};
+  if (shared.low) { defines.BOARD_LOW = ''; defines.BOARD_MERGED = ''; }
+  if (play) defines.BOARD_PLAY = '';
+  if (Object.keys(defines).length) material.defines = defines;
   // The environment's specular lobe is added on top of the albedo, so at the grazing
   // angle this shot is judged from it lands on light and dark squares ALIKE. Proved by
   // rendering the dark marble with a pure red albedo: the squares still came back with
@@ -958,7 +1019,7 @@ export function createMarble(
   material.envMapIntensity = 0.20;
   (material as any).userData.marbleUniforms = uniforms;
   material.onBeforeCompile = marbleOnBeforeCompile;
-  material.customProgramCacheKey = () => `board-marble-${world.quality}`;
+  material.customProgramCacheKey = () => `board-marble-${world.quality}-${play ? 'play' : 'film'}`;
 
   return {
     material,

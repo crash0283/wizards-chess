@@ -75,28 +75,70 @@ function toTexture(g: CanvasRenderingContext2D): THREE.Texture {
   return t;
 }
 
-/** Selection: a heavy scorched ring with radial chisel ticks, like a socket cut for it. */
+/**
+ * Selection: a scorched border round the SLAB, with the corners driven hard.
+ *
+ * This was a ring round the piece's feet, and from the play camera it was invisible —
+ * not dim, not subtle, not there. The reason is arithmetic and it rules the whole shape
+ * out. A square's half-width is 1.175 m; the plinths the men stand on run 0.80 m radius
+ * for a pawn, 1.06-1.12 for the court, and 1.36 for a KNIGHT, which is to say a knight's
+ * plinth is wider than the square it stands on. The old ring sat at 0.83 m, so it was
+ * under the plinth of every piece in the game except a pawn, and under the pawn's by two
+ * centimetres. Verified by reading the live scene graph: with a man selected the ring was
+ * present, placed correctly and burning at opacity 0.408 — and covered by the stone it was
+ * drawn around.
+ *
+ * No circle can fix that, because no circle can be both outside a 1.36 m plinth and inside
+ * a 1.175 m half-square. The CORNERS can: the corner of a slab is 1.66 m from its centre,
+ * so it stands 0.30 m clear of even a knight, and it is the one part of a square a round
+ * plinth is geometrically incapable of hiding. So the mark becomes what it always should
+ * have been for a board — the square's own outline, scorched into it, with heavy brackets
+ * at the four corners doing the work when a wide man is standing in the middle of it.
+ *
+ * It also says the right thing. A ring round a man's feet marks a MAN; the game's question
+ * is which SQUARE is live, and this is a square.
+ */
 function selectionSigil(): THREE.Texture {
   const g = canvas(256);
-  const c = 128;
+  // 10 px in from the slab edge, so at plate scale SQUARE the border sits ~9 cm inside the
+  // joint and the brackets reach to within 12 cm of the corner.
+  const lo = 10;
+  const hi = 246;
   g.strokeStyle = '#fff';
-  g.lineCap = 'round';
   g.shadowColor = '#fff';
-  g.shadowBlur = 10;
-  g.lineWidth = 7;
-  g.beginPath(); g.arc(c, c, 96, 0, Math.PI * 2); g.stroke();
-  g.lineWidth = 2.5;
-  g.globalAlpha = 0.55;
-  g.beginPath(); g.arc(c, c, 78, 0, Math.PI * 2); g.stroke();
+  g.shadowBlur = 8;
+
+  // The full outline, kept light: it is what reads on an empty square or past a slim pawn.
+  g.lineCap = 'butt';
+  g.lineWidth = 4;
+  g.globalAlpha = 0.5;
+  g.strokeRect(lo, lo, hi - lo, hi - lo);
+
+  // The corner brackets, which are the part that survives a knight.
   g.globalAlpha = 1;
-  g.lineWidth = 6;
-  for (let i = 0; i < 16; i++) {
-    const a = (i / 16) * Math.PI * 2;
-    const r0 = i % 4 === 0 ? 100 : 104;
-    const r1 = i % 4 === 0 ? 122 : 114;
+  g.lineWidth = 9;
+  g.lineCap = 'round';
+  const arm = 74;
+  for (const [cx, cy, sx, sy] of [
+    [lo, lo, 1, 1], [hi, lo, -1, 1], [lo, hi, 1, -1], [hi, hi, -1, -1],
+  ] as const) {
     g.beginPath();
-    g.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0);
-    g.lineTo(c + Math.cos(a) * r1, c + Math.sin(a) * r1);
+    g.moveTo(cx + sx * arm, cy);
+    g.lineTo(cx, cy);
+    g.lineTo(cx, cy + sy * arm);
+    g.stroke();
+  }
+
+  // A chisel tick just inside each bracket — the socket-cut-for-it detail the ring had.
+  g.lineWidth = 5;
+  g.globalAlpha = 0.8;
+  const t = 26;
+  for (const [cx, cy, sx, sy] of [
+    [lo, lo, 1, 1], [hi, lo, -1, 1], [lo, hi, 1, -1], [hi, hi, -1, -1],
+  ] as const) {
+    g.beginPath();
+    g.moveTo(cx + sx * t, cy + sy * t);
+    g.lineTo(cx + sx * (t + 20), cy + sy * (t + 20));
     g.stroke();
   }
   return toTexture(g);
@@ -118,28 +160,50 @@ function moveSigil(): THREE.Texture {
   return toTexture(g);
 }
 
-/** A capture: a ring of teeth, open at the middle so the victim still reads through it. */
+/**
+ * A capture: the same square, marked violently.
+ *
+ * Square rather than circular for exactly the reason the selection sigil is — a capture
+ * marker is drawn on an OCCUPIED square, under an enemy who is standing on his plinth, so
+ * a ring at his feet is a ring nobody can see. See selectionSigil's note for the numbers.
+ * The middle is left open so the victim still reads through it; what changes against the
+ * selection mark is the language: broken teeth biting inward off each edge instead of a
+ * clean carpenter's bracket, so at a glance the two are never confused.
+ */
 function captureSigil(): THREE.Texture {
   const g = canvas(256);
-  const c = 128;
+  const lo = 8;
+  const hi = 248;
   g.strokeStyle = '#fff';
   g.shadowColor = '#fff';
-  g.shadowBlur = 12;
-  g.lineWidth = 9;
+  g.shadowBlur = 10;
   g.lineCap = 'butt';
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    g.beginPath();
-    g.arc(c, c, 94, a + 0.10, a + 0.60);
-    g.stroke();
+
+  // A broken border: four dashes per edge with the gaps left dark, so it reads as bitten.
+  g.lineWidth = 10;
+  for (const [ax, ay, dx, dy] of [
+    [lo, lo, 1, 0], [lo, hi, 1, 0], [lo, lo, 0, 1], [hi, lo, 0, 1],
+  ] as const) {
+    for (let i = 0; i < 4; i++) {
+      const t0 = lo + ((hi - lo) * (i + 0.12)) / 4;
+      const t1 = lo + ((hi - lo) * (i + 0.78)) / 4;
+      g.beginPath();
+      g.moveTo(ax + dx * (t0 - lo), ay + dy * (t0 - lo));
+      g.lineTo(ax + dx * (t1 - lo), ay + dy * (t1 - lo));
+      g.stroke();
+    }
   }
-  g.lineWidth = 7;
+
+  // Teeth biting inward from the middle of each edge.
   g.lineCap = 'round';
-  for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+  g.lineWidth = 8;
+  for (const [x, y, dx, dy] of [
+    [128, lo, 0, 1], [128, hi, 0, -1], [lo, 128, 1, 0], [hi, 128, -1, 0],
+  ] as const) {
     g.beginPath();
-    g.moveTo(c + Math.cos(a) * 58, c + Math.sin(a) * 58);
-    g.lineTo(c + Math.cos(a) * 80, c + Math.sin(a) * 80);
+    g.moveTo(x - dy * 16, y - dx * 16);
+    g.lineTo(x + dx * 34, y + dy * 34);
+    g.lineTo(x + dy * 16, y + dx * 16);
     g.stroke();
   }
   return toTexture(g);
@@ -219,13 +283,34 @@ export function createAffordances(world: World): Affordances {
       side: THREE.DoubleSide,
     });
 
+  /**
+   * How hard the marks burn — and they burn about half as hard as they used to.
+   *
+   * These are ADDITIVE planes lying on the marble, and the level they were set at was
+   * chosen against a board that no longer exists. Two things moved under them. The board
+   * itself came down: the play camera's stone is trimmed to 0.60 (see board/marble.ts) and
+   * the middle ranks now print around a third rather than around a half. And the marks are
+   * capped by their own tone map at about 0.95 in the scene buffer, which is where they
+   * were sitting — so a selected man was carrying sixteen times the light of the square he
+   * stood on, and the ring came out as a flat white puck with the carving inside it gone.
+   * That is the "the highlight erases the piece it is pointing at" complaint, exactly.
+   *
+   * Halving them is not a loss of legibility, because legibility here is CONTRAST and the
+   * contrast went up when the board came down. What it buys back is the piece: a mark near
+   * 0.45 lands the marked crop under the clipping line with the man's silhouette, his
+   * device and the ring's own chisel ticks all still readable inside it.
+   *
+   * `mate` is deliberately left the hottest of the six. It fires once, the game is over,
+   * and the room is dimming around it — the one moment in this game where something IS
+   * supposed to flare.
+   */
   const mats = {
-    select: flat(textures.select, PALETTE.fireCore, 0.9),
-    move: flat(textures.move, PALETTE.fireMid, 0.75),
-    capture: flat(textures.capture, 0xff5a22, 0.85),
+    select: flat(textures.select, PALETTE.fireCore, 0.5),
+    move: flat(textures.move, PALETTE.fireMid, 0.42),
+    capture: flat(textures.capture, 0xff5a22, 0.5),
     refuse: flat(textures.burst, 0x8e2412, 0.0),
-    check: flat(textures.burst, 0xd8452a, 0.7),
-    mate: flat(textures.burst, 0xff7a2e, 0.85),
+    check: flat(textures.burst, 0xd8452a, 0.44),
+    mate: flat(textures.burst, 0xff7a2e, 0.72),
   };
 
   /** A flat sigil lying on the marble. */
@@ -240,7 +325,9 @@ export function createAffordances(world: World): Affordances {
     return m;
   }
 
-  const selection = plate(mats.select, SQUARE * 0.94);
+  // Full slab. Both square sigils draw their own inset, so the plate IS the square and the
+  // brackets land where the slab's corners are rather than somewhere inside them.
+  const selection = plate(mats.select, SQUARE);
   const check = plate(mats.check, SQUARE * 1.02);
   const mate = plate(mats.mate, SQUARE * 1.55);
   // Drawn AFTER the dimming quad below, so the fire withdrawing from the room does not
@@ -355,7 +442,7 @@ export function createAffordances(world: World): Affordances {
         if (i >= dests.length) break;
         const m = dests[i++];
         m.material = mats.capture;
-        m.scale.setScalar(SQUARE * 0.92);
+        m.scale.setScalar(SQUARE);
         m.visible = true;
         place(m, sq, Y + 0.004);
       }
@@ -424,13 +511,16 @@ export function createAffordances(world: World): Affordances {
       // Everything breathes on the same slow fire so the markers feel lit rather than
       // drawn. Two beats: a 1.1 Hz flicker and a 0.37 Hz swell.
       const breath = 0.72 + 0.28 * Math.sin(time * 2.3) * Math.sin(time * 0.9 + 1.1);
-      mats.select.opacity = 0.55 + 0.45 * breath;
+      // Halved against the trimmed board — see the note on `mats`. The BREATH keeps its
+      // full relative swing, because a mark that pulses is what says "live"; it is only
+      // the level it pulses around that has come down.
+      mats.select.opacity = 0.30 + 0.24 * breath;
       selection.rotation.z = time * 0.22;
-      mats.move.opacity = 0.34 + 0.22 * breath;
-      mats.capture.opacity = 0.5 + 0.4 * breath;
+      mats.move.opacity = 0.19 + 0.12 * breath;
+      mats.capture.opacity = 0.27 + 0.22 * breath;
 
       if (checkSq) {
-        const hot = 0.45 + 0.55 * Math.abs(Math.sin(time * 3.1));
+        const hot = 0.26 + 0.32 * Math.abs(Math.sin(time * 3.1));
         mats.check.opacity = hot;
         check.scale.setScalar(SQUARE * (0.98 + 0.06 * hot));
         check.rotation.z = -time * 0.5;

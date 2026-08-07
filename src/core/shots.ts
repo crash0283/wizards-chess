@@ -146,37 +146,102 @@ export const SHOTS: ShotDef[] = [
  * `wide-establishing` you cannot tell which square is which, the near pieces are enormous,
  * and the bokeh softens exactly the things you are trying to click on.
  *
- * So interactive play gets its own camera: elevated behind White, looking down at about
- * 35 degrees so ranks and files separate cleanly, the whole board inside the frame with
- * margin, and — critically — a DEEP stop. f/11 puts the circle of confusion below a pixel
- * across the entire board, so nothing you are trying to tap is blurred.
+ * It is deliberately NOT in SHOTS: it must never be judged against a reference frame,
+ * because it is not trying to look like the film. It IS capturable — `--shot=play` is how
+ * this view gets measured — and until this round that capture came back through the
+ * perspective frustum, so it measured a picture nobody had ever played on.
  *
- * It is deliberately NOT in SHOTS: it must never be captured or judged, because it is not
- * trying to look like the film.
+ * ── the declination, which is the only interesting number here ───────────────────────
+ *
+ * This has now been set three times, and each move was a correction of the last:
+ *
+ *   35°  cinematic, and unplayable — the ranks stacked on top of one another, so distant
+ *        men overlapped and there was no way to tell which one a click meant.
+ *   71°  separated the ranks, and put the camera straight THROUGH the chamber's
+ *        near-field piers, which lean seven metres out over the board. Black bars across
+ *        White's whole back rank.
+ *   80°  cleared the piers. It also solved the wrong problem completely.
+ *
+ * Captured and LOOKED AT (`refs/renders/play--before81.png`), 80° is a plan drawing. From
+ * eight degrees off vertical a chess piece is a disc: every man on the board presents his
+ * crown and nothing else, and a pawn, a rook and a bishop are three circles of slightly
+ * different diameter. "Every square separates" was true and was never the difficulty —
+ * the player could see thirty-two counters and not one PIECE. Height is what identifies a
+ * chess man, and a camera eight degrees off vertical is a camera that has thrown height
+ * away.
+ *
+ * 62° is where the profiles come back. Screen height of a standing man goes as cos of the
+ * declination, so this is 3.1x what 80° gave — a bishop's mitre, a knight's head and a
+ * rook's crenellations are all silhouette again — while the board's own depth only
+ * compresses by 12% (sin 62° = 0.883 against 0.985), so the eight ranks are still eight
+ * clearly separate bands. The far wall comes into the top of the picture, which the plan
+ * view had no room for at all, and the room finally reads as a room.
+ *
+ * Two things make 62° safe that were not available the last two times this moved:
+ *
+ *   - PICKING. `game/interactive.ts` now picks the nearest man the ray passes THROUGH
+ *     before falling back to the board plane, so a click on a piece's body selects that
+ *     piece rather than the empty square behind it. That is what makes obliquity usable;
+ *     see the long note on `boardSquare`. Plane-only picking is why the earlier oblique
+ *     camera was abandoned, and it is fixed rather than avoided.
+ *   - OCCLUSION. A man behind a taller man still shows his head: the near man must be
+ *     (Δheight)/(Δrank) taller than the pitch allows, which needs a declination under
+ *     atan(2.0/2.35) = 40° to hide a pawn behind a king. At 62° the pawn's crown clears
+ *     the king's by 0.78 m on screen with every other pair further apart than that.
+ *
+ * Both the chamber's near-field pier cutback (`chamber/playview.ts`) and the parallel
+ * frustum (`camera/ortho.ts`) solve themselves from the eye below, so moving it moves
+ * them. The near plane's ceiling cut now runs from 7.0 m over White's back rank to 17.0 m
+ * over Black's — which is CHAMBER.wallHeight exactly, so the far wall arrives at full
+ * height and is not sectioned.
+ *
+ * ── the distance, which is not a free parameter after all ────────────────────────────
+ *
+ * Under a parallel projection how far the eye stands changes the framing by exactly
+ * nothing, and the ceiling cut is fixed by the BEARING and the two anchor points, so it
+ * does not move either. That makes the distance look arbitrary. It is not, because two
+ * things still read it, and one of them is the air.
+ *
+ * `lighting/atmosphere.ts` veils by `1 - exp(-dist^2 * density^2)`, quadratic in the range
+ * from the eye, and the board is a floor lying at the bottom of the haze where the height
+ * falloff has not begun to thin it. At 34 m the veil over the middle of the board came out
+ * at 0.385 and over Black's back rank at 0.52 — against `wide-establishing`, whose eye is
+ * 25.8 m from the board centre and whose veil there is 0.244. The play camera was looking
+ * at the same stone through 1.6x the film's air, and a fitted measurement says that veil
+ * was 35.8% of everything a lit cream square was putting on screen. It is most of what
+ * reads as the middle of the board being washed out, and no amount of work on the STONE
+ * can reach it — trimming the marble to black would still leave it.
+ *
+ * So the eye stands 26 m out: the distance the film camera stands at. The play view is the
+ * same room, seen through the same depth of air, from a different bearing. Measured over
+ * the board that puts the veil at 0.222 near, 0.247 centre and 0.358 far, bracketing the
+ * film's own 0.244 instead of doubling it.
+ *
+ * The other reader is the chamber's pier cutback, which solves its keep-out cone from this
+ * eye. It is insensitive to the change: below the ortho ceiling — the only place a near
+ * pier is still drawn — the clamp is pinned to the protected box's own face at 10.55 m for
+ * any distance, and everything above it is sectioned away before it can be rasterised.
  */
 export const PLAY_SHOT: ShotDef = {
   id: 'play',
   label: 'Play view',
-  // Near-top-down: 26 m up, 9 m behind White, a declination of about 71 degrees. The
-  // earlier 35-degree version was more cinematic but stacked the ranks on top of each
-  // other, so distant pieces overlapped and were hard to pick. Steeper separates every
-  // square cleanly and keeps just enough obliquity that the pieces still read as carved
-  // figures with height rather than as flat tokens.
-  // Steep enough to clear the chamber's near-field piers. Those piers stand hard against
-  // the board's edges and run off the top AND bottom of the cinematic frame by design — a
-  // critic demanded them, and they are right for wide-establishing. At a 71-degree
-  // declination the play camera looked straight THROUGH them and they became black bars
-  // over White's whole back rank. At 80 degrees the camera clears them.
-  eye: [0, 30.0, -5.2],
-  target: [0, 0.4, -0.6],
+  // 62° declination on the board's centre line, 26 m out: eye 24.3 m up, 12.2 m behind
+  // White. See the header — the angle is the whole point of the shot, and the distance is
+  // how much air is in front of it.
+  eye: [0, 24.3, -12.2],
+  // Aimed at the middle of the board a pawn's half-height up, so the axis runs through
+  // the men rather than along the floor.
+  target: [0, 1.4, 0],
   fov: 38,
-  focus: 30,
+  focus: 26,
   // f/11 keeps the circle of confusion under a pixel across the whole board. Playing is
-  // not the place for shallow focus — the cinematic shots carry that.
+  // not the place for shallow focus — the cinematic shots carry that. (Interactively the
+  // gather is bypassed outright; a parallel projection does not write the depth its
+  // reconstruction assumes.)
   fstop: 11,
   t: 0,
   judges: [],
-  proves: 'Every square separates, and what you click is sharp.',
+  proves: 'Every man reads as the piece he is, and what you click is what you get.',
 };
 
 export const SHOT_BY_ID = new Map([...SHOTS, PLAY_SHOT].map((s) => [s.id, s]));
