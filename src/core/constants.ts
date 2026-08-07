@@ -40,9 +40,24 @@ export type Side = 'white' | 'black';
  * Board coordinates -> world position of a square's centre.
  * file 0..7 = a..h, rank 0..7 = 1..8. White's back rank is rank 0 at -Z.
  */
+/**
+ * The file axis runs from +x to -x, and that sign is deliberate.
+ *
+ * Ranks increase with z, so White's back rank sits at -z and the play camera stands
+ * behind it looking toward +z. In a right-handed frame, facing +z puts screen-right at
+ * -x. Chess convention puts a1 in the player's near-LEFT corner, so the a-file must land
+ * at +x.
+ *
+ * With `x = (file - 3.5) * SQUARE` it landed at -x instead, and the whole board rendered
+ * mirrored: a1 in the near-RIGHT corner, the carved kerb inscription reading H G F E D C
+ * B A left to right, and every square named off it reversed against the move list. Square
+ * COLOURS were right throughout — a1 dark, h1 light — because `isLightSquare` is a pure
+ * function of (file + rank) and never saw the world. It was purely handedness, which is
+ * why nothing caught it until a critic projected the files and read their x back.
+ */
 export function squareCentre(file: number, rank: number): { x: number; z: number } {
   return {
-    x: (file - 3.5) * SQUARE,
+    x: (3.5 - file) * SQUARE,
     z: (rank - 3.5) * SQUARE,
   };
 }
@@ -50,7 +65,8 @@ export function squareCentre(file: number, rank: number): { x: number; z: number
 /** Inverse of squareCentre — nearest square to a world point. */
 export function squareAt(x: number, z: number): { file: number; rank: number } {
   return {
-    file: Math.round(x / SQUARE + 3.5),
+    // Must invert squareCentre exactly, including the file axis's sign.
+    file: Math.round(3.5 - x / SQUARE),
     rank: Math.round(z / SQUARE + 3.5),
   };
 }
