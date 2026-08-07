@@ -433,8 +433,32 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       return null;
     }
     const enter = Math.max(t0, 0);
-    return t1 < enter ? null : enter;
+    if (t1 < enter) return null;
+    // The CHORD, not the entry distance. See `columnSquare`.
+    return t1 - enter;
   }
+
+  /**
+   * The least chord that counts as "the player clicked this man", metres.
+   *
+   * Ranking column hits by whichever the ray reaches FIRST is what made a pawn unselectable,
+   * twice, at two different camera angles. The mechanism both times: the pick column is a
+   * generous cylinder capped at the man's exact height, and a ray aimed at a man one rank
+   * further away passes over the near man's head and clips the far top corner of his cap on
+   * the way — by 2.7 cm at 62 degrees for the a1 rook, and again at 50 degrees for the e1
+   * king. The near man is nearer, so he won, and the man actually under the cursor lost.
+   *
+   * Depth of penetration is the honest question. A ray that goes THROUGH a man crosses tens
+   * of centimetres of him; a ray that shaves the corner of his cap crosses a few. So a graze
+   * is discarded outright here, and among what survives the DEEPEST hit wins rather than the
+   * nearest — which is also the right answer when two men genuinely overlap on screen, since
+   * the one you are pointing at is the one you are pointing INTO.
+   *
+   * 0.30 m is a fifth of a plinth's width and roughly an eighth of the through-chord of a
+   * man clicked square on. Every real click clears it by a wide margin; the two failures
+   * that motivated it came in at 0.09 m and 0.16 m.
+   */
+  const PICK_MIN_CHORD = 0.30;
 
   /** Where the ray meets the board plane, as a square, or null if it misses the 8x8. */
   function planeSquare(): Mark | null {
@@ -448,16 +472,16 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
     return file >= 0 && file <= 7 && rank >= 0 && rank <= 7 ? { file, rank } : null;
   }
 
-  /** The nearest standing man the ray actually passes through, or null. */
+  /** The man the ray passes most deeply through, or null if it only grazes. */
   function columnSquare(): Mark | null {
     let best: Mark | null = null;
-    let bestT = Infinity;
+    let bestChord = PICK_MIN_CHORD;
     for (const { file, rank, piece } of model.occupied()) {
       if (piece.destroyed) continue;
       const { x, z } = squareCentre(file, rank);
-      const t = columnEntry(x, z, PICK_RADIUS, Math.max(1.2, piece.height));
-      if (t !== null && t < bestT) {
-        bestT = t;
+      const chord = columnEntry(x, z, PICK_RADIUS, Math.max(1.2, piece.height));
+      if (chord !== null && chord > bestChord) {
+        bestChord = chord;
         best = { file, rank };
       }
     }

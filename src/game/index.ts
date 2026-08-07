@@ -170,8 +170,20 @@ export function createGame(world: World, deps: GameDeps): Game {
 
   // --- board population -----------------------------------------------------------------
 
+  /**
+   * Take the current position off the board.
+   *
+   * This used to hide each man and clear the square map, which left every instance in the
+   * piece factory's live list for the rest of the session. The interactive path stages a
+   * position and then starts a game, so after two calls there were 64 men standing on a
+   * 32-man board — 32 of them invisible, all 32 still being updated every frame, and all 32
+   * still solid to a raycast. `retire` is the counterpart `make` never had.
+   */
   function clearBoard() {
-    for (const p of bySquare.values()) p.group.visible = false;
+    for (const p of bySquare.values()) {
+      p.group.visible = false;
+      deps.pieces.retire(p);
+    }
     bySquare.clear();
   }
 

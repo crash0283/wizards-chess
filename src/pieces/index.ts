@@ -553,6 +553,33 @@ export function createPieceFactory(world: World): PieceFactory {
   return {
     make,
     all: () => live.filter((p) => !p.destroyed),
+
+    /**
+     * Take a man off the board for good — out of `live`, out of the scene, motion dropped.
+     *
+     * `make()` had no counterpart, and the game's `clearBoard()` retired a piece by setting
+     * `group.visible = false` and dropping it from its own square map. That hides a man; it
+     * does not retire him. He stayed in `live` for ever, so `all()` kept handing him to the
+     * main loop and the main loop kept calling `update()` on him every frame.
+     *
+     * Caught by `tools/selectcheck.mjs`, which raycasts the real meshes and reported SIXTY
+     * FOUR men standing on a thirty-two man board: the interactive path stages a position
+     * and then starts a game, so every piece existed twice, once invisible and once not.
+     * It cost a whole second set of per-frame piece updates on the one path where frame
+     * time is what the player feels, and it silently halved every visibility measurement
+     * taken off the board, because a ray through a man passed through his own ghost first.
+     *
+     * Geometry is deliberately NOT disposed here: carvings are pooled and shared between
+     * men (see `poolFor`), so a retired rook's levels usually belong to three other rooks.
+     * `dispose()` still owns the pool.
+     */
+    retire(inst: PieceInstance) {
+      const i = live.indexOf(inst);
+      if (i >= 0) live.splice(i, 1);
+      motions.delete(inst);
+      world.scene.remove(inst.group);
+    },
+
     dispose() {
       for (const g of geos) g.dispose();
       geos.length = 0;

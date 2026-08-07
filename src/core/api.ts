@@ -55,6 +55,8 @@ export interface PieceFactory extends Disposable {
   make(type: PieceType, side: Side, id: string): PieceInstance;
   /** Every live instance, for the main loop. */
   all(): PieceInstance[];
+  /** Take a man off the board permanently: out of `all()`, out of the scene. */
+  retire(inst: PieceInstance): void;
 }
 
 export interface Destruction extends Disposable {

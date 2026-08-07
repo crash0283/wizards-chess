@@ -313,9 +313,21 @@ export function createAffordances(world: World): Affordances {
     mate: flat(textures.burst, 0xff7a2e, 0.72),
   };
 
-  /** A flat sigil lying on the marble. */
-  function plate(mat: THREE.MeshBasicMaterial, size: number): THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> {
+  /**
+   * A flat sigil lying on the marble.
+   *
+   * `role` is a test seam and costs one string. Which square a click actually resolved to is
+   * not observable from outside this module — the game exposes a FEN, and a FEN only changes
+   * once a whole MOVE has been made, so "did clicking that pawn select that pawn" had no
+   * answer short of playing a move per piece. The marks are the answer: the selection plate's
+   * world position IS the square the game decided on. Naming them lets a test read that
+   * without depending on the order things happen to be added to the group in.
+   */
+  function plate(
+    mat: THREE.MeshBasicMaterial, size: number, role: string,
+  ): THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> {
     const m = new THREE.Mesh(quad, mat);
+    m.name = `affordance-${role}`;
     m.rotation.x = -Math.PI / 2;
     m.scale.setScalar(size);
     m.visible = false;
@@ -327,9 +339,9 @@ export function createAffordances(world: World): Affordances {
 
   // Full slab. Both square sigils draw their own inset, so the plate IS the square and the
   // brackets land where the slab's corners are rather than somewhere inside them.
-  const selection = plate(mats.select, SQUARE);
-  const check = plate(mats.check, SQUARE * 1.02);
-  const mate = plate(mats.mate, SQUARE * 1.55);
+  const selection = plate(mats.select, SQUARE, 'selection');
+  const check = plate(mats.check, SQUARE * 1.02, 'check');
+  const mate = plate(mats.mate, SQUARE * 1.55, 'mate');
   // Drawn AFTER the dimming quad below, so the fire withdrawing from the room does not
   // take the mark under the fallen king with it. Still depth-tested, so it stays on the
   // floor rather than floating over the pieces.
@@ -338,11 +350,11 @@ export function createAffordances(world: World): Affordances {
   // Destination pool. 28 covers a queen on an open board (27) with room to spare; the
   // rare overflow simply is not drawn rather than allocating mid-turn.
   const dests: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>[] = [];
-  for (let i = 0; i < 28; i++) dests.push(plate(mats.move, SQUARE * 0.5));
+  for (let i = 0; i < 28; i++) dests.push(plate(mats.move, SQUARE * 0.5, `dest${i}`));
 
   // Refusals: a couple in flight is plenty, they last under half a second.
   const refusals: Marker[] = [];
-  for (let i = 0; i < 3; i++) refusals.push({ mesh: plate(mats.refuse, SQUARE * 0.8), born: -1 });
+  for (let i = 0; i < 3; i++) refusals.push({ mesh: plate(mats.refuse, SQUARE * 0.8, `refuse${i}`), born: -1 });
 
   function place(m: THREE.Object3D, sq: Mark, y = Y) {
     const { x, z } = squareCentre(sq.file, sq.rank);

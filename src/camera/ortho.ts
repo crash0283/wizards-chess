@@ -101,9 +101,44 @@ const MARGIN = 1.05;
  * play surface, and the same eight at the height of the tallest crown that can stand on
  * one, measured along the camera's right and up axes.
  */
-const FIT = (() => {
-  const eye = new THREE.Vector3(...PLAY_SHOT.eye);
-  const fwd = new THREE.Vector3(...PLAY_SHOT.target).sub(eye).normalize();
+export interface OrthoFit {
+  halfX: number;
+  halfY: number;
+  centreY: number;
+  near: number;
+}
+
+/**
+ * Solve the frustum for a given pose. A FUNCTION, not a constant, and that matters.
+ *
+ * This was a module-level IIFE evaluated once at import off `PLAY_SHOT`, which was correct
+ * exactly as long as the play camera never moved. The moment it does — a different default
+ * declination, never mind a player dragging the view around — every number below is a
+ * statement about a pose that is no longer on screen, and the failure is silent because a
+ * frustum that is wrong still renders something.
+ *
+ * ── the near plane is the dangerous one ──────────────────────────────────────────────
+ *
+ * Under a perspective camera the near plane is a formality at 0.1 m. Under a parallel
+ * projection it is a flat slab lying across the whole picture at constant depth, and here
+ * it is doing a job: it sections off the chamber's near-field piers, which lean seven
+ * metres out over the board and would otherwise stand between the play camera and White's
+ * back rank as a picket fence of black bars. See CEILING_Y.
+ *
+ * Frozen, that slab is anchored to one pose, and the anchor was a single point — the middle
+ * of the near board edge. That is fine looking straight down the files and wrong the moment
+ * the bearing turns, because then the nearest part of the board is a CORNER, not an edge
+ * midpoint. Measured on the frozen solve: at the same 62 degrees with 45 degrees of azimuth
+ * the slab drops to 4.93 m, and a king is 4.55 m with promotion tablets at 5.2 — so the
+ * tablets were already being sliced and a king had 38 cm to spare. Lowering the camera does
+ * the same thing from the other direction: at 45 degrees declination the frozen slab sits at
+ * 5.24 m, under the tablets, and at 37.7 it reaches a king's crown.
+ *
+ * So the anchor is now the MINIMUM over all four corners of the protected box, which is a
+ * guarantee at every bearing rather than a coincidence at one.
+ */
+function solveFit(eye: THREE.Vector3, target: THREE.Vector3): OrthoFit {
+  const fwd = target.clone().sub(eye).normalize();
   const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
   const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
 
@@ -113,6 +148,9 @@ const FIT = (() => {
   let halfX = 0;
   let lo = Infinity;
   let hi = -Infinity;
+  // The near plane, taken over every corner rather than at one edge midpoint — whichever
+  // corner the current bearing brings closest is the one that decides the headroom.
+  let near = Infinity;
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       for (const y of [0, crown]) {
@@ -122,23 +160,10 @@ const FIT = (() => {
         lo = Math.min(lo, ty);
         hi = Math.max(hi, ty);
       }
+      v.set(sx * half, CEILING_Y, sz * half).sub(eye);
+      near = Math.min(near, v.dot(fwd));
     }
   }
-  /**
-   * Where to put the near plane, as a distance from the eye along the view axis.
-   *
-   * Solved at the point of the board where the slab hangs LOWEST — the near edge, since
-   * the axis tilts toward Black — so `CEILING_Y` is a floor on the headroom everywhere
-   * rather than an average of it.
-   *
-   * It has to clear one thing that is not this piece's, and does, with room to spare: the
-   * game's checkmate dim is a quad held `max(0.4, near * 4)` in front of the lens and sized
-   * off `fov`, a formula that describes a size but not a scale under a parallel projection.
-   * A near plane of ~22 m puts that quad ~88 m out at ~97 m across, against a 20 m frame —
-   * so the overlay still covers the screen without the game piece knowing anything about
-   * the projection. (It is drawn with `depthTest: false`, so only its size matters.)
-   */
-  const near = new THREE.Vector3(0, CEILING_Y, -half).sub(eye).dot(fwd);
 
   return {
     halfX: halfX * MARGIN,
@@ -149,11 +174,13 @@ const FIT = (() => {
     centreY: (hi + lo) / 2,
     near,
   };
-})();
+}
 
 export interface OrthoView {
   /** True while the parallel projection is installed on the world camera. */
   readonly active: boolean;
+  /** Re-solve the frustum for a pose. Idempotent for an unchanged pose. */
+  setPose(eye: THREE.Vector3, target: THREE.Vector3): void;
   /** Install it. Idempotent. */
   enable(): void;
   /** Restore the perspective projection exactly as it was found. Idempotent. */
@@ -186,6 +213,17 @@ export function createOrthoView(world: World): OrthoView {
   let savedFar = cam.far;
 
   /**
+   * The pose the frustum is currently solved for, and the solve itself.
+   *
+   * Re-solved only when the pose actually moves, not every frame: the solve walks sixteen
+   * corners and the answer is identical for an identical pose, and a frustum that is rebuilt
+   * every frame from floating-point noise is a frustum that breathes.
+   */
+  let fit = solveFit(new THREE.Vector3(...PLAY_SHOT.eye), new THREE.Vector3(...PLAY_SHOT.target));
+  const solvedEye = new THREE.Vector3(...PLAY_SHOT.eye);
+  const solvedTarget = new THREE.Vector3(...PLAY_SHOT.target);
+
+  /**
    * Build the orthographic frustum for the viewport the camera currently believes in.
    *
    * main.ts owns the PERSPECTIVE aspect fit (`fitFov` there widens the vertical fov on a
@@ -205,12 +243,12 @@ export function createOrthoView(world: World): OrthoView {
   function build() {
     const a = Number.isFinite(cam.aspect) && cam.aspect > 0 ? cam.aspect : RENDER.aspect;
     const k = Math.max(0.5, Math.min(2, scale));
-    const halfH = Math.max(FIT.halfY, FIT.halfX / a) * k;
+    const halfH = Math.max(fit.halfY, fit.halfX / a) * k;
     const halfW = halfH * a;
     cam.left = -halfW;
     cam.right = halfW;
-    cam.top = FIT.centreY + halfH;
-    cam.bottom = FIT.centreY - halfH;
+    cam.top = fit.centreY + halfH;
+    cam.bottom = fit.centreY - halfH;
     cam.projectionMatrix.makeOrthographic(
       cam.left,
       cam.right,
@@ -244,11 +282,33 @@ export function createOrthoView(world: World): OrthoView {
       return installed;
     },
 
+    /**
+     * Tell the projection where the camera now is.
+     *
+     * Called by the rig whenever a shot is aimed. Cheap and idempotent for an unchanged
+     * pose — the sixteen-corner solve only runs when the pose has actually moved — so the
+     * rig can call it unconditionally rather than tracking whether it needs to.
+     *
+     * `cam.near` is written here too, not only in `enable()`. That was the other half of
+     * the frozen-pose bug: `enable()` returns early once installed, so the ceiling cut was
+     * written exactly once for the life of the page and could never follow the camera.
+     */
+    setPose(eye: THREE.Vector3, target: THREE.Vector3) {
+      if (eye.equals(solvedEye) && target.equals(solvedTarget)) return;
+      solvedEye.copy(eye);
+      solvedTarget.copy(target);
+      fit = solveFit(eye, target);
+      if (installed) {
+        cam.near = fit.near;
+        build();
+      }
+    },
+
     enable() {
       if (installed) return;
       savedNear = cam.near;
       savedFar = cam.far;
-      cam.near = FIT.near;
+      cam.near = fit.near;
       cam.far = FAR;
       // Duck typing is the interface here: three and every consumer in this app branch on
       // these two booleans, not on the class. Swapping them is what makes the raycaster

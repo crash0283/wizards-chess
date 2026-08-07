@@ -184,10 +184,12 @@ export const SHOTS: ShotDef[] = [
  *     piece rather than the empty square behind it. That is what makes obliquity usable;
  *     see the long note on `boardSquare`. Plane-only picking is why the earlier oblique
  *     camera was abandoned, and it is fixed rather than avoided.
- *   - OCCLUSION. A man behind a taller man still shows his head: the near man must be
- *     (Δheight)/(Δrank) taller than the pitch allows, which needs a declination under
- *     atan(2.0/2.35) = 40° to hide a pawn behind a king. At 62° the pawn's crown clears
- *     the king's by 0.78 m on screen with every other pair further apart than that.
+ *   - OCCLUSION. The worst pair on the board is White's own KING on e1 standing in front of
+ *     White's own PAWN on e2 — the camera is behind White, so White's court rank is the one
+ *     doing the hiding, and a 2.00 m height step is the largest anywhere at one rank of
+ *     separation. Under a parallel projection the pawn's crown clears the king's by
+ *     (H_far - H_near)·cos D + SQUARE·sin D, which is zero at atan(2.00/2.35) = 40.4° and
+ *     positive above it: 0.515 m at 50°, 0.778 m at 55°, 1.136 m at 62°.
  *
  * Both the chamber's near-field pier cutback (`chamber/playview.ts`) and the parallel
  * frustum (`camera/ortho.ts`) solve themselves from the eye below, so moving it moves
@@ -225,10 +227,10 @@ export const SHOTS: ShotDef[] = [
 export const PLAY_SHOT: ShotDef = {
   id: 'play',
   label: 'Play view',
-  // 62° declination on the board's centre line, 26 m out: eye 24.3 m up, 12.2 m behind
+  // 50° declination on the board's centre line, 26 m out: eye 21.3 m up, 16.7 m behind
   // White. See the header — the angle is the whole point of the shot, and the distance is
   // how much air is in front of it.
-  eye: [0, 24.3, -12.2],
+  eye: [0, 21.3, -16.7],
   // Aimed at the middle of the board a pawn's half-height up, so the axis runs through
   // the men rather than along the floor.
   target: [0, 1.4, 0],

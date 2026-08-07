@@ -145,6 +145,11 @@ export function createCameraRig(world: World): CameraRig {
       baseFstop = s.fstop;
       locked = wantsOrtho(s.id);
       if (wantsOrtho(s.id)) {
+        // Hand the projection the pose BEFORE installing it. The frustum extents and the
+        // near plane are both solved from where the camera stands, and `enable()` only ever
+        // runs its body once — so a pose delivered afterwards would never reach the near
+        // plane at all.
+        ortho.setPose(eye, target);
         ortho.enable();
         // f/11 already puts the circle of confusion under a pixel across the board, and a
         // parallel projection does not write the depth the gather's reconstruction assumes.
