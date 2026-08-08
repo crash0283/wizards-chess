@@ -1368,7 +1368,72 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   // --- lifecycle --------------------------------------------------------------------------
 
   const el = world.renderer.domElement;
-  el.addEventListener('pointerdown', onPointerDown);
+
+  /**
+   * Dragging the board swings the view; pressing and releasing without moving is a click.
+   *
+   * The two gestures share a button because that is what a player expects, so they are told
+   * apart by DISTANCE, not by which one was registered first — a press is provisional until
+   * it either travels far enough to be a drag or is released short of that.
+   *
+   * That means selection has to happen on pointerUP rather than pointerDOWN, which is the
+   * only behavioural change here and is the correct one anyway: a click that is really the
+   * start of a drag should not pick anything up. `boardSquare()` reads the ray built at the
+   * moment it runs, so the ray is rebuilt from the release position; for a real click that
+   * is the same pixel it started on.
+   *
+   * 6 px is a comfortable slop for a mouse and tight enough that no deliberate drag is
+   * mistaken for a click. Degrees per pixel are set so a drag across a 1280-wide window
+   * covers the whole azimuth band and rather more than the declination one — the clamps in
+   * the rig stop it either way, so this only decides how much wrist a swing costs.
+   */
+  const DRAG_SLOP = 6;
+  const AZ_PER_PX = 0.055;
+  const DECL_PER_PX = 0.10;
+  let downX = 0;
+  let downY = 0;
+  let dragging = false;
+  let pressed = false;
+
+  function onDown(ev: PointerEvent) {
+    pressed = true;
+    dragging = false;
+    downX = ev.clientX;
+    downY = ev.clientY;
+    el.setPointerCapture?.(ev.pointerId);
+  }
+
+  function onMove(ev: PointerEvent) {
+    if (!pressed) return;
+    const dx = ev.clientX - downX;
+    const dy = ev.clientY - downY;
+    if (!dragging && Math.hypot(dx, dy) < DRAG_SLOP) return;
+    dragging = true;
+    // Relative to the LAST event, not to the press, so the swing tracks the hand rather
+    // than accelerating away from it.
+    deps.camera.orbit(-(ev.clientX - downX) * AZ_PER_PX, (ev.clientY - downY) * DECL_PER_PX);
+    downX = ev.clientX;
+    downY = ev.clientY;
+  }
+
+  function onUp(ev: PointerEvent) {
+    if (!pressed) return;
+    pressed = false;
+    el.releasePointerCapture?.(ev.pointerId);
+    if (!dragging) onPointerDown(ev);
+    dragging = false;
+  }
+
+  /** Double-click anywhere puts the view back where it started. */
+  function onDouble() {
+    deps.camera.recentre();
+  }
+
+  el.addEventListener('pointerdown', onDown);
+  el.addEventListener('pointermove', onMove);
+  el.addEventListener('pointerup', onUp);
+  el.addEventListener('pointercancel', onUp);
+  el.addEventListener('dblclick', onDouble);
 
   // If the engine has the move from the very first frame (a staged position), let it play.
   scheduleReply();
@@ -1427,7 +1492,11 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       pending.length = 0;
       sequences.length = 0;
       abandonThought();
-      el.removeEventListener('pointerdown', onPointerDown);
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+      el.removeEventListener('dblclick', onDouble);
       think.dispose();
       aff.dispose();
       renderer.shadowMap.autoUpdate = shadowWasAuto;

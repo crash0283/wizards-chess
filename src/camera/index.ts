@@ -134,6 +134,62 @@ export function createCameraRig(world: World): CameraRig {
   let pushZ = 0;
 
   /**
+   * The ORBIT, and the envelope it is allowed to move in.
+   *
+   * The play camera's default is 50 degrees of declination looking straight down the files,
+   * which shows the men as standing figures. Some positions want to be looked at more
+   * obliquely than that and some want to be looked down on, so the player can swing it —
+   * but not anywhere, because outside a narrow band this room stops working, and the limits
+   * below are measured rather than chosen:
+   *
+   *   66 deg  the ceiling. Past it the ratio of a man's screen height to the rank pitch
+   *           falls under 0.5 and the view is heading back into the plan drawing that an
+   *           earlier 80-degree camera already proved unplayable. The near pier row and the
+   *           side screens also un-cull at 63.2 and 63.3 degrees respectively, so the top of
+   *           the band is where stone starts reappearing behind White.
+   *   47 deg  the floor. The north wall — the one carrying the portal — culls when the eye
+   *           passes z = -18.10, which at this radius is 45.9 degrees, and White's own king
+   *           standing in front of his own pawn clears him by only 0.25 m of screen there.
+   *           Below 40.4 degrees that clearance goes negative and the pawn is buried.
+   *   +-18 deg of azimuth. The plinths of file-neighbours (a king and a bishop side by side
+   *           are 2.215 m of stone against a 2.350 m file pitch) begin to overlap on screen
+   *           at 19.5 degrees, and the rank and file letters are carved into the marble in
+   *           WORLD space — they are cut to be read from behind White and they rotate with
+   *           the board, so a large azimuth turns the board's own labelling sideways.
+   *
+   * The radius never changes. It is 26 m because that is how far the film camera stands
+   * from the board, and the atmosphere veils quadratically with range — see PLAY_SHOT.
+   */
+  const ORBIT = { minDecl: 47, maxDecl: 66, maxAz: 18 };
+  /**
+   * The rest pose, DERIVED from PLAY_SHOT rather than written down again. The shot is the
+   * one statement of where the play camera lives; a second copy here would be a second
+   * thing to forget when it moves.
+   */
+  const { restDecl, orbitRadius } = (() => {
+    const dx = PLAY_SHOT.eye[0] - PLAY_SHOT.target[0];
+    const dy = PLAY_SHOT.eye[1] - PLAY_SHOT.target[1];
+    const dz = PLAY_SHOT.eye[2] - PLAY_SHOT.target[2];
+    const r = Math.hypot(dx, dy, dz);
+    return { restDecl: (Math.asin(dy / r) * 180) / Math.PI, orbitRadius: r };
+  })();
+  let orbitAz = 0;
+  let orbitDecl = restDecl;
+  /** Which shot the rig is currently holding, so the pose is seeded once and not per frame. */
+  let aimed = '';
+
+  /** Rebuild `eye` from the orbit angles, about the shot's own target. */
+  function aimOrbit() {
+    const a = (orbitAz * Math.PI) / 180;
+    const d = (orbitDecl * Math.PI) / 180;
+    eye.set(
+      target.x + orbitRadius * Math.cos(d) * Math.sin(a),
+      target.y + orbitRadius * Math.sin(d),
+      target.z - orbitRadius * Math.cos(d) * Math.cos(a),
+    );
+  }
+
+  /**
    * 0 at rest, 1 fully pushed in. A raised-cosine either side of the hold.
    *
    * The three durations come from the CALLER, because the fight they are timing is not a
@@ -228,8 +284,18 @@ export function createCameraRig(world: World): CameraRig {
   return {
     applyShot(shotId, _t) {
       const s = getShot(shotId);
-      eye.set(s.eye[0], s.eye[1], s.eye[2]);
-      target.set(s.target[0], s.target[1], s.target[2]);
+      // Seeded on a shot CHANGE, not every frame, and that distinction is what makes an
+      // orbit possible at all. main.ts calls this from inside `frame()`, so re-reading the
+      // frozen eye here unconditionally — which is what it used to do — overwrites any
+      // camera state sixty times a second. The film shots are unaffected either way: their
+      // eye is a constant, so re-seeding it and not re-seeding it are the same thing.
+      if (shotId !== aimed) {
+        aimed = shotId;
+        eye.set(s.eye[0], s.eye[1], s.eye[2]);
+        target.set(s.target[0], s.target[1], s.target[2]);
+        orbitAz = 0;
+        orbitDecl = restDecl;
+      }
       baseFov = s.fov;
       baseFocus = s.focus;
       baseFstop = s.fstop;
@@ -291,6 +357,33 @@ export function createCameraRig(world: World): CameraRig {
      * Ignored outside the play view: the six film shots are frozen framings and this is
      * exactly the kind of thing that must never reach them.
      */
+    /**
+     * Swing the play view. Degrees, relative to where it is now, clamped to the envelope.
+     *
+     * Ignored outside the play view, so a film shot cannot be dragged off its framing. The
+     * pose is handed to the projection immediately rather than at the next `applyShot`,
+     * because the frustum's extents AND its near plane are both solved from where the
+     * camera stands — the near plane is the slab that sections the leaning piers off the
+     * top of the picture, and it has to follow the camera or a lower angle puts it through
+     * the men.
+     */
+    orbit(dAzDeg, dDeclDeg) {
+      if (!locked) return;
+      orbitAz = Math.max(-ORBIT.maxAz, Math.min(ORBIT.maxAz, orbitAz + dAzDeg));
+      orbitDecl = Math.max(ORBIT.minDecl, Math.min(ORBIT.maxDecl, orbitDecl + dDeclDeg));
+      aimOrbit();
+      ortho.setPose(eye, target);
+    },
+
+    /** Put the play view back where it started. */
+    recentre() {
+      if (!locked) return;
+      orbitAz = 0;
+      orbitDecl = restDecl;
+      aimOrbit();
+      ortho.setPose(eye, target);
+    },
+
     closeOn(x, z, fightSeconds) {
       if (!locked) return;
       pushX = x;

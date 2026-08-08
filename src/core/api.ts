@@ -80,6 +80,13 @@ export interface CameraRig {
    * for the six film shots, whose framings are frozen.
    */
   closeOn(x: number, z: number, fightSeconds: number): void;
+  /**
+   * PLAY ONLY: swing the view by a relative amount in degrees, clamped to a measured
+   * envelope. Ignored for the six film shots, whose framings are frozen.
+   */
+  orbit(dAzDeg: number, dDeclDeg: number): void;
+  /** PLAY ONLY: return the view to its default bearing. */
+  recentre(): void;
   update(t: number, dt: number): void;
 }
 
