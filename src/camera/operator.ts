@@ -71,6 +71,22 @@ export interface OperatorPose {
   focusScale: number;
   /** Multiplier on the shot's fov. Anamorphic lenses breathe when they refocus. */
   fovScale: number;
+  /**
+   * The FLINCH alone — the whip, its late overshooting settle, and the punch along the
+   * lens axis — with the drift, the sway, the correction and the tremor all left out.
+   *
+   * Split out because the play view wants exactly half of this rig. A locked-off camera is
+   * what a player needs to aim at 90-pixel targets; a camera that does not move at all when
+   * a blade lands is what makes a capture read as two models intersecting. These four
+   * fields are the difference, and they are zero except in the second or so after `kick`.
+   *
+   * They are ALSO already summed into `yaw`/`pitch`/`roll`/`dz` above, so the film path
+   * reads exactly the numbers it always read and cannot be affected by their existing here.
+   */
+  flinchYaw: number;
+  flinchPitch: number;
+  flinchRoll: number;
+  flinchDz: number;
 }
 
 export interface Operator {
@@ -251,6 +267,11 @@ export function createOperator(seed: number): Operator {
       // Both are fractions of the focus distance: a slow breath, and the puller's error.
       focusScale: 1 + nFocus(t) * 0.004 + focusErr.x,
       fovScale: 1 + focusErr.x * 0.05,
+      // The blow, on its own. See OperatorPose.
+      flinchYaw: whipYaw.x + setYaw.x,
+      flinchPitch: whipPitch.x + setPitch.x,
+      flinchRoll: whipRoll.x + setRoll.x,
+      flinchDz: -punch.x,
     };
   }
 

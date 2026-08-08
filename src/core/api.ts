@@ -74,6 +74,12 @@ export interface CameraRig {
   free(spec: string): void;
   /** Add impulse to the handheld rig (an impact happened). */
   shake(amount: number): void;
+  /**
+   * PLAY ONLY: tighten and recentre the frame on a world point for one capture, then
+   * release. A frustum move, not a camera move — see the note in camera/index.ts. Ignored
+   * for the six film shots, whose framings are frozen.
+   */
+  closeOn(x: number, z: number, fightSeconds: number): void;
   update(t: number, dt: number): void;
 }
 

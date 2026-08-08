@@ -47,6 +47,8 @@ export function createCameraRig(world: World): CameraRig {
   const fwd = new THREE.Vector3();
   const right = new THREE.Vector3();
   const up = new THREE.Vector3();
+  /** Scratch for the push-in's aim point. */
+  const subject = new THREE.Vector3();
   const WORLD_UP = new THREE.Vector3(0, 1, 0);
   const pos = new THREE.Vector3();
 
@@ -94,9 +96,84 @@ export function createCameraRig(world: World): CameraRig {
    * simply does not.
    */
   const STILL = { dx: 0, dy: 0, dz: 0, yaw: 0, pitch: 0, roll: 0, fovScale: 1, focusScale: 1 };
+  /** Reused so a locked frame allocates nothing. */
+  const held = { ...STILL };
+
+  /**
+   * The capture push-in, and why it is a FRUSTUM move rather than a camera move.
+   *
+   * "See them fight" is the part of the play view a locked overhead frame cannot give: two
+   * men meet on one square, four metres of board across, inside a picture nineteen metres
+   * wide. The obvious answer — fly the camera down to them — is the one answer this room
+   * cannot take. The play build depends on where the camera stands in four separate places:
+   * the parallel frustum's ceiling cut (which sections the leaning near-field piers off the
+   * top of frame), the chamber's pier cutback, the height threshold that swaps the whole
+   * near field to its play build, and the wall culls. Measured, a dive toward the board
+   * drops that ceiling slab through the 5.2 m promotion tablets and then through a 4.55 m
+   * king, and below 18 m of camera height the piers come back as black bars across White's
+   * own back rank.
+   *
+   * Under a parallel projection none of that is necessary, because the frame's EXTENT and
+   * the camera's POSITION are independent. Tightening the frustum onto the two men and
+   * recentring it gives the whole push-in — they get bigger, they fill more of the screen —
+   * while the eye never moves a millimetre, so every one of those four solves is untouched
+   * by construction rather than by care.
+   *
+   * It self-terminates on elapsed time and holds no reference to the game. A lost promise,
+   * an interrupted move or a reset cannot strand the frame pushed in.
+   */
+  /** How tight, as a multiplier on the solved frame extent. 0.5 is ortho's own floor. */
+  const PUSH_K = 0.58;
+  /** Ramp out, as a share of the fight's own length. */
+  const PUSH_OUT = 0.7;
+  let pushT0 = -1;
+  let pushIn = 0.7;
+  let pushHold = 0.7;
+  let pushOut = 0.7;
+  let pushX = 0;
+  let pushZ = 0;
+
+  /**
+   * 0 at rest, 1 fully pushed in. A raised-cosine either side of the hold.
+   *
+   * The three durations come from the CALLER, because the fight they are timing is not a
+   * fixed length. game/interactive.ts stretches every phase of a capture to a minimum
+   * number of measured FRAMES — a beat shorter than a frame is a beat nobody sees — so on a
+   * slow renderer the poise, the strike and the follow-through all run far past their
+   * nominal seconds. A camera move hard-coded at 2.3 s would be over before the blade
+   * landed on exactly the machines that need it most. Measured here: on this software
+   * renderer a shatter can drop the loop to about one frame a second, and at 1280x720 to
+   * roughly one frame in a minute.
+   */
+  function pushAmount(now: number): number {
+    if (pushT0 < 0) return 0;
+    const age = now - pushT0;
+    const total = pushIn + pushHold + pushOut;
+    if (age < 0 || age >= total) { pushT0 = -1; return 0; }
+    if (age < pushIn) return 0.5 - 0.5 * Math.cos((age / pushIn) * Math.PI);
+    if (age < pushIn + pushHold) return 1;
+    const k = (age - pushIn - pushHold) / pushOut;
+    return 0.5 + 0.5 * Math.cos(k * Math.PI);
+  }
 
   function compose(t: number, dt: number) {
-    const pose = locked ? STILL : operator.update(t, dt, baseFov);
+    // The operator's springs are stepped EVERY frame whether or not the play view uses the
+    // result — they are a physical system, and a system integrated only on the frames
+    // somebody looks at is a system with a different answer.
+    const full = operator.update(t, dt, baseFov);
+    let pose: typeof full | typeof held = full;
+
+    if (locked) {
+      // Locked off, with one exception: the flinch. The drift, the sway and the correction
+      // are what move a 90-pixel target under a player's cursor and they stay out. The blow
+      // does not — a camera that does not react when a blade lands is what makes a capture
+      // read as two models intersecting rather than as an impact.
+      held.yaw = full.flinchYaw;
+      held.pitch = full.flinchPitch;
+      held.roll = full.flinchRoll;
+      held.dz = full.flinchDz;
+      pose = held;
+    }
 
     fwd.copy(target).sub(eye);
     const dist = Math.max(0.05, fwd.length());
@@ -127,6 +204,19 @@ export function createCameraRig(world: World): CameraRig {
     // than degrees of cone. `fov` itself is still kept current above, because the game's
     // full-frame overlay sizes itself off it.
     ortho.setScale(pose.fovScale);
+
+    // The push-in, in image-plane metres. Solved AFTER the basis above, so it tracks the
+    // rig's own right/up rather than a world axis — and on `world.realTime`, because it is
+    // an interactive gesture and `t` is the clamped scene clock (a frame that takes a
+    // second advances `t` by at most 0.05, which would stretch a 2.3 s move to a minute).
+    const amount = locked ? pushAmount(world.realTime) : 0;
+    if (amount > 0) {
+      subject.set(pushX, 0.9, pushZ).sub(eye);
+      ortho.setFocus(subject.dot(right), subject.dot(up), 1 + (PUSH_K - 1) * amount, amount);
+    } else {
+      ortho.setFocus(0, 0, 1, 0);
+    }
+
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld();
 
@@ -185,6 +275,33 @@ export function createCameraRig(world: World): CameraRig {
      */
     shake(amount) {
       operator.kick(amount);
+    },
+
+    /**
+     * A capture is about to happen on this square: push the frame onto it.
+     *
+     * Called at the end of the attacker's APPROACH, not at the click — an approach runs
+     * anywhere from 0.65 to 9.4 seconds depending on how far the man has to walk, and a
+     * push-in that started at the click would be over before the blow landed.
+     *
+     * Deliberately takes a bare world point and no game objects. The rig cannot ask the
+     * game anything, and the game cannot leave the rig holding a reference to a man who is
+     * about to be shattered.
+     *
+     * Ignored outside the play view: the six film shots are frozen framings and this is
+     * exactly the kind of thing that must never reach them.
+     */
+    closeOn(x, z, fightSeconds) {
+      if (!locked) return;
+      pushX = x;
+      pushZ = z;
+      // Arrive with the blow: in over the poise and the windup, held through contact and
+      // the follow-through, out over the step onto the cleared square.
+      const fight = Math.max(0.3, Math.min(12, fightSeconds));
+      pushIn = fight * 0.45;
+      pushHold = fight * 0.55;
+      pushOut = fight * PUSH_OUT;
+      pushT0 = world.realTime;
     },
 
     update(t, dt) {

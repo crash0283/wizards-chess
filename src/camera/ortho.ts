@@ -190,6 +190,25 @@ export interface OrthoView {
    * `fovScale` does under a perspective lens. 1 = the solved fit.
    */
   setScale(scale: number): void;
+  /**
+   * Push the frame IN on a point, without moving the camera.
+   *
+   * `dx`/`dy` are image-plane metres to recentre by; `k` multiplies the frame extent, so
+   * k below 1 is tighter. (0, 0, 1) is the solved fit and is the resting state.
+   *
+   * A parallel projection is the one place a push-in is free of consequences: it is a
+   * change to the frustum's extent, not to where the camera stands, so the near-plane
+   * ceiling cut, the chamber's pier cutback and every threshold the play build depends on
+   * are all untouched by construction. Moving the pose to get the same picture would
+   * re-solve all of them, and at the tightest part of that move it would drop the 7 m
+   * ceiling slab through the promotion tablets and a king's crown.
+   *
+   * `sx`/`sy` are the subject's position on the image plane in metres — where the frame
+   * should end up centred when `amount` reaches 1. `k` is the frame multiplier and
+   * `amount` (0..1) is how far into the gesture we are, so the caller supplies a fixed
+   * target and an envelope rather than pre-multiplying and losing the distinction.
+   */
+  setFocus(sx: number, sy: number, k: number, amount: number): void;
   dispose(): void;
 }
 
@@ -209,6 +228,10 @@ export function createOrthoView(world: World): OrthoView {
 
   let installed = false;
   let scale = 1;
+  /** The capture push-in: image-plane offset and frame multiplier. See `setFocus`. */
+  let focusX = 0;
+  let focusY = 0;
+  let focusK = 1;
   let savedNear = cam.near;
   let savedFar = cam.far;
 
@@ -242,13 +265,13 @@ export function createOrthoView(world: World): OrthoView {
    */
   function build() {
     const a = Number.isFinite(cam.aspect) && cam.aspect > 0 ? cam.aspect : RENDER.aspect;
-    const k = Math.max(0.5, Math.min(2, scale));
+    const k = Math.max(0.5, Math.min(2, scale * focusK));
     const halfH = Math.max(fit.halfY, fit.halfX / a) * k;
     const halfW = halfH * a;
-    cam.left = -halfW;
-    cam.right = halfW;
-    cam.top = fit.centreY + halfH;
-    cam.bottom = fit.centreY - halfH;
+    cam.left = -halfW + focusX;
+    cam.right = halfW + focusX;
+    cam.top = fit.centreY + halfH + focusY;
+    cam.bottom = fit.centreY - halfH + focusY;
     cam.projectionMatrix.makeOrthographic(
       cam.left,
       cam.right,
@@ -341,6 +364,17 @@ export function createOrthoView(world: World): OrthoView {
 
     setScale(s: number) {
       scale = Number.isFinite(s) && s > 0 ? s : 1;
+    },
+
+    setFocus(sx: number, sy: number, k: number, amount: number) {
+      const a = Number.isFinite(amount) ? Math.max(0, Math.min(1, amount)) : 0;
+      focusX = (Number.isFinite(sx) ? sx : 0) * a;
+      // The frame is not centred on the lens axis — `fit.centreY` shifts it so the board
+      // sits in the middle of the picture — so recentring on a subject has to travel from
+      // THERE, not from zero. Done here rather than in the rig because centreY is this
+      // module's own solve and the rig has no business knowing it.
+      focusY = ((Number.isFinite(sy) ? sy : 0) - fit.centreY) * a;
+      focusK = Number.isFinite(k) && k > 0 ? k : 1;
     },
 
     dispose() {

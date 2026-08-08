@@ -665,6 +665,30 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       model.destroyPiece(victim, capSq.file, capSq.rank, plan.station.file, plan.station.rank);
     });
 
+    // Push the frame onto the two men, timed to arrive with the blow.
+    //
+    // Scheduled at `approach` and not at zero, because an approach is 0.65 to 9.4 seconds
+    // of walking depending on how far the man has come, and a push-in started at the click
+    // would have finished before anything happened. Here it is a step in the same sequence
+    // as the strike, so it inherits runSequence's guarantees: one step per frame, rebased
+    // rather than fired late, and dropped entirely if the epoch has moved on.
+    //
+    // Aimed at the MIDPOINT of the striking station and the victim, so both are in frame
+    // rather than one of them centred and the other at the edge. The camera never moves —
+    // this only tightens the frustum. See CameraRig.closeOn.
+    const stationC = squareCentre(plan.station.file, plan.station.rank);
+    const victimC = squareCentre(capSq.file, capSq.rank);
+    // The fight's own length, through `phase` — the same stretched seconds the strike and
+    // the shatter are scheduled on, so the camera move cannot finish before the blow.
+    const fight = phase(POISE) + phase(CONTACT) + phase(FOLLOW);
+    steps.push({
+      at: approach,
+      run: () => {
+        if (epoch !== mine) return;
+        deps.camera.closeOn((stationC.x + victimC.x) / 2, (stationC.z + victimC.z) / 2, fight);
+      },
+    });
+
     const strikeAt = approach + phase(POISE);
     steps.push({
       at: strikeAt,
