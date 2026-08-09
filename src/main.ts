@@ -115,6 +115,23 @@ async function boot() {
     lighting.render();
     signalReady();
   } else {
+    /**
+     * Compile every program in the scene BEFORE the first frame, not during the first move.
+     *
+     * The capture branch below has always flushed lazily compiled shaders with two throwaway
+     * renders before it grabs a frame; the interactive branch had no equivalent, so a
+     * program's first compile and link landed on whatever frame first drew the thing that
+     * needed it. In practice that is the frame a blade lands — the torn fabric of a
+     * shattered man and the dust plume are both drawn for the first time there — on top of
+     * a Voronoi fracture and sixty-odd fresh geometries entering the scene.
+     *
+     * three walks the graph and compiles what it finds, so anything already resident is
+     * paid for here, during load, where a hundred milliseconds costs nothing and nobody is
+     * watching an animation. It cannot cover a material that does not exist yet, which is
+     * why dust.ts now builds its mesh in its constructor rather than on first burst.
+     */
+    renderer.compile(world.scene, world.camera);
+
     let last = 0;
     let elapsed = 0;
     let startMs = 0;

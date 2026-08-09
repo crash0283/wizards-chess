@@ -1145,6 +1145,28 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
   let frameSamples = 0;
   /** Length of the current unbroken run of frames under FRAME_TARGET. */
   let fastRun = 0;
+  /**
+   * Length of the current unbroken run of frames OVER FRAME_SLOW, and the symmetric
+   * counterpart to `fastRun` that the drop rule was missing.
+   *
+   * Climbing a rung has always demanded evidence — 45 consecutive fast frames, or 180 to
+   * reclaim a rung this machine has already failed at. Dropping demanded none: one slow
+   * average was enough, and it also recorded a permanent ceiling. So a single stall from a
+   * one-off cost — the first shatter compiling two shaders and fracturing a man in one
+   * frame — cost the picture a resolution rung for the rest of the session on hardware that
+   * is not remotely slow, and the drop itself popped the resolution while the shatter was
+   * on screen. A drop is now as evidence-based as a climb.
+   */
+  let slowRun = 0;
+  /**
+   * The most any one frame may contribute to the ladder's average, seconds.
+   *
+   * Twice FRAME_SLOW: comfortably "this frame was bad" without letting a 300 ms or 3 s
+   * frame speak for the machine. See where it is applied.
+   */
+  const LADDER_DT_CAP = FRAME_SLOW * 2;
+  /** Consecutive slow frames before a rung is given up. */
+  const SLOW_RUN = 20;
   /** Highest rung this machine has not yet proved it cannot hold. */
   let ceilingIdx = SCALE_LADDER.length - 1;
   let lastRealT = -1;
@@ -1255,11 +1277,20 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       // but it absolutely must not be able to masquerade as speed, so the fast run dies
       // here and the average is left exactly as it was.
       fastRun = 0;
+      slowRun = 0;
       return;
     }
     frameSamples++;
-    frameEma = frameSamples === 1 ? dt : frameEma * 0.75 + dt * 0.25;
+    // A single monstrous frame must not be able to decide anything on its own. At the 0.25
+    // weight below, one 300 ms frame moves the average past FRAME_SLOW by itself — and one
+    // 300 ms frame is exactly what the first capture of a session used to produce. So the
+    // sample is capped for the LADDER's purposes: a stall still counts as a slow frame, at
+    // the weight of a slow frame, rather than as evidence about the machine's speed. The
+    // uncapped value is nobody else's business; nothing outside this reads frameEma.
+    const sample = Math.min(dt, LADDER_DT_CAP);
+    frameEma = frameSamples === 1 ? sample : frameEma * 0.75 + sample * 0.25;
     fastRun = dt < FRAME_TARGET ? fastRun + 1 : 0;
+    slowRun = dt > FRAME_SLOW ? slowRun + 1 : 0;
     if (realT < WARMUP) { decisionAt = realT; fastRun = 0; return; }
     if (scaleChanges >= MAX_SCALE_CHANGES) return;
     const since = realT - decisionAt;
@@ -1280,7 +1311,7 @@ export function createInteractive(world: World, deps: GameDeps, model: BoardMode
       fastRun = 0;
     };
 
-    if (frameEma > FRAME_SLOW && since > 0.75) {
+    if (frameEma > FRAME_SLOW && slowRun >= SLOW_RUN && since > 0.75) {
       // This rung is beyond this machine, whether or not there is a lower one to take.
       // Recording that is the point: it is what stops the ladder walking back up into it.
       if (scaleIdx > 0 && scaleFor(scaleIdx - 1, cw) < scaleFor(scaleIdx, cw)) {

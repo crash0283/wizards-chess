@@ -763,6 +763,24 @@ export function createPlume(world: World): Plume {
     iTex.needsUpdate = true;
   }
 
+  /**
+   * Build the atlas, the geometry and the material NOW, during load, rather than on the
+   * frame a blade lands.
+   *
+   * `ensureMesh` was called lazily from `burst()`, which meant the first capture of a
+   * session paid for all of it inside the single frame the player is most closely watching:
+   * a 384x384 procedural atlas evaluated on the CPU — 147,456 texels, each running several
+   * three-octave fbm calls — plus the first compile and link of the plume's ShaderMaterial.
+   * That is tens of milliseconds at best, it lands on the strike, and it lands on top of the
+   * fracture and two other first-use compiles happening in the same frame.
+   *
+   * There is no cost to holding it resident: `geo.instanceCount` is 0 until something
+   * bursts, so the mesh draws nothing. main.ts's capture branch has always flushed lazily
+   * compiled shaders with two throwaway renders before grabbing a frame; this is the
+   * interactive path finally getting the same courtesy.
+   */
+  ensureMesh();
+
   return {
     object,
     burst,
