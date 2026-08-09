@@ -1,3 +1,6 @@
+import { SQUARE } from '../core/constants';
+import { walkSeconds } from '../pieces';
+
 /**
  * How a move is DANCED, as opposed to what it does to the board.
  *
@@ -224,14 +227,44 @@ const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi 
 
 const dist = (a: Point, b: Point) => Math.hypot(b.file - a.file, b.rank - a.rank);
 
+/**
+ * The floor every price in this file has to respect: what the ANIMATION will actually take.
+ *
+ * ── two duration laws for one walk ───────────────────────────────────────────────────
+ *
+ * This file priced a walk in seconds per SQUARE and clamped the result; `Motion` prices the
+ * same walk in metres per SECOND and treats the seconds it is handed as a floor, taking
+ * `walkSeconds(metres)` whenever that is longer. Both are reasonable and they disagree, and
+ * because nothing connected them the scheduler was laying out a timeline the piece was not
+ * on. Every beat after the first leg — the next leg's start, the poise, the strike, the
+ * shatter, the step onto the cleared square, the promotion swap, and the window that tells
+ * the renderer something is moving — fired against a clock the stone was not keeping.
+ *
+ * The clamp is what makes it bite rather than merely differ. `CHARGE_MAX` caps an approach
+ * at 1.55 s, so a longer charge does not take longer, it goes FASTER — and past the cap the
+ * two laws diverge without limit. Motion refuses to sprint, so the piece simply arrives
+ * late, and the strike has already been ordered: `Motion.strike` then takes its documented
+ * safety-valve branch and compresses the whole unwalked remainder underneath the wind-up,
+ * which is a hard velocity step in the middle of the approach. That step is the thing a
+ * player sees, and it is entirely frame-rate independent — it is identical at 60 fps and at
+ * 144, which is why it reads as "the animation is not smooth" on hardware that is fast.
+ *
+ * `src/pieces/index.ts` says this in as many words where it re-exports `walkSeconds`:
+ * anything scheduling a beat against a walk wants to price it with the same function. This
+ * is that. The per-square laws below are kept as a STYLE — they set the pacing of a short
+ * move, where they are the larger number — and the floor only binds once a walk is long
+ * enough that the stone's own speed limit takes over.
+ */
+const animated = (units: number) => walkSeconds(units * SQUARE);
+
 /** Seconds for an attacker to close `units` squares on its victim. */
 export function chargeSeconds(units: number): number {
-  return clamp(units * CHARGE_PER_UNIT, CHARGE_MIN, CHARGE_MAX);
+  return Math.max(clamp(units * CHARGE_PER_UNIT, CHARGE_MIN, CHARGE_MAX), animated(units));
 }
 
 /** Seconds for a quiet move of `units` squares — the script's own numbers. */
 export function quietSeconds(units: number): number {
-  return Math.max(QUIET_MIN, units * QUIET_PER_UNIT);
+  return Math.max(QUIET_MIN, units * QUIET_PER_UNIT, animated(units));
 }
 
 // ── the plan ─────────────────────────────────────────────────────────────────────────
@@ -450,7 +483,16 @@ function timeLegs(start: Point, pts: Point[], total: number): { legs: Leg[]; uni
     // swinging from a full square out.
     if (segs[i] < NEGLIGIBLE && i < pts.length - 1) continue;
     const share = units > 1e-6 ? segs[i] / units : 1 / pts.length;
-    legs.push({ file: pts[i].file, rank: pts[i].rank, seconds: Math.max(0.30, total * share) });
+    // Each leg is floored on its OWN length as well as on its share of the route's price.
+    // Sharing a total that is already correct is not enough: a route whose legs are very
+    // uneven — a knight's L, an approach that swings wide — gives a long leg a share that
+    // is shorter than the stone can cross it in, and that leg then overruns the next beat
+    // on its own. See `animated`.
+    legs.push({
+      file: pts[i].file,
+      rank: pts[i].rank,
+      seconds: Math.max(0.30, total * share, animated(segs[i])),
+    });
   }
   return { legs, units };
 }
@@ -502,7 +544,11 @@ export function planMove(req: PlanRequest): MovePlan {
   const stepUnits = dist(station, { file: to.file, rank: to.rank });
   const finish: Leg[] = stepUnits < NEGLIGIBLE
     ? []
-    : [{ file: to.file, rank: to.rank, seconds: Math.max(STEP_MIN, stepUnits * STEP_PER_UNIT) }];
+    : [{
+      file: to.file,
+      rank: to.rank,
+      seconds: Math.max(STEP_MIN, stepUnits * STEP_PER_UNIT, animated(stepUnits)),
+    }];
 
   const strikeAt = secondsOf(approach) + POISE;
   return {
